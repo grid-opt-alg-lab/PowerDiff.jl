@@ -1,0 +1,28 @@
+name = "PowerModelsDiff"
+uuid = "4fa8226c-b122-4e48-8217-6f318ba8ef74"
+authors = ["samtalki <saimouer@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+Gurobi = "2e9cd046-0924-5485-92f1-d5272153d98b"
+HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
+Ipopt = "b6b21f68-93f8-5de0-b562-5493be1d77c9"
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+PowerModels = "c36e90e8-916a-50a6-bd94-075b64ef4655"
+PowerModelsDistribution = "d7431456-977f-11e9-2de3-97ff7677985e"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+
+[compat]
+ForwardDiff = "0.10.38"
+Gurobi = "1.7.2"
+HiGHS = "1.15.0"
+Ipopt = "1.7.3"
+JuMP = "1.24.0"
+LinearAlgebra = "1.11.0"
+PowerModels = "0.21.3"
+PowerModelsDistribution = "0.16.0"
+Random = "1.11.0"
+Statistics = "1.11.1"
