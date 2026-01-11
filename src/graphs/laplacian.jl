@@ -41,7 +41,7 @@ This assumes that there exists edges such that all nodes are connected to all ot
 """
 function full_incidence_matrix(net::Dict)
     num_bus = length(net["bus"])
-    A_branch = calc_basic_incidence_matrix(net)
+    A_branch = PM.calc_basic_incidence_matrix(net)
     return sparse_vcat(A_branch,I(num_bus))
 end
 
@@ -61,7 +61,7 @@ function calc_incidence_matrix(net::Dict;
 
     num_bus = length(net["bus"])
     num_branch = length(net["branch"])
-    A_branch = calc_basic_incidence_matrix(net)
+    A_branch = PM.calc_basic_incidence_matrix(net)
     
     if full_nodes && !full_edges
         return sparse_vcat(A_branch,I(num_bus))
@@ -117,7 +117,7 @@ function vectorize_laplacian_weights(Y::AbstractMatrix{ComplexF64})
 end
 
 
-# vectorize_laplacian_weights(net::Dict{String,Any}) = vectorize_laplacian_weights(calc_basic_admittance_matrix(net))
+# vectorize_laplacian_weights(net::Dict{String,Any}) = vectorize_laplacian_weights(PM.calc_basic_admittance_matrix(net))
 """
 Construct vectorized laplacian weights from a PowerModels data dictionary.
 """
@@ -129,7 +129,7 @@ function vectorize_laplacian_weights(
 
     num_bus = length(net["bus"])
     num_branch = length(net["branch"])
-    Y_mat = calc_basic_admittance_matrix(net)
+    Y_mat = PM.calc_basic_admittance_matrix(net)
 
     # Construct the incidence matrix using the full_nodes/full_edges flags
     A = calc_incidence_matrix(net,full_nodes=full_nodes,full_edges=full_edges)
@@ -206,7 +206,7 @@ function calc_branch_current(net::Dict)
     num_branch = length(net["branch"])
     G,B = vectorize_laplacian_weights(net,full_nodes=true,full_edges=false)
     A = calc_incidence_matrix(net,full_nodes=true,full_edges=false)
-    x = calc_basic_bus_voltage(net)
+    x = PM.calc_basic_bus_voltage(net)
     L = spdiagm(A*x)*(G + B*im) # current flows, includes self edges
     return L[1:num_branch] # remove self edges
 end

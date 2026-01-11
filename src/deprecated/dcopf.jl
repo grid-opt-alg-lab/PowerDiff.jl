@@ -1,5 +1,5 @@
 #### Power network  struct
-TAU = 1e-3
+TAU = 1e-2 # 1e-3
 
 mutable struct PowerNetwork
     fq
@@ -27,9 +27,11 @@ end
 
 """
     PowerNetwork(fq, fl, pmax, gmax, A, B, F; τ=TAU)
+
 Create a power network with quadratic and linear prices `fq` and `fl`, line capacities
 `pmax`, generation capacities `gmax`, incidence matrix `A`, node-generator matrix `B`,
 and PFDF matrix `F`. 
+
 Optionally, quadratically penalize power flows with weight `(1/2) τ^2`.
 """
 PowerNetwork(fq, fl, pmax, gmax, A, B, F; τ=TAU) =
@@ -39,32 +41,41 @@ PowerNetwork(fq, fl, pmax, gmax, A, B, F; τ=TAU) =
 Given a PowerModels network, return a PowerNetwork object.
 """
 function PowerNetwork(net::Dict;τ=TAU)
-    @assert net["basic_network"] == true "Network must be a basic network"
+
+    if !haskey(net, "basic_network") || (haskey(net,"basic_network") && net["basic_network"] == false) 
+        # work as if it is not basic network
+
+    elseif haskey(net,"basic_network") && net["basic_network"] == true 
+        # work as if it is a basic network --- unchanged
+        # Parse network data
+        gen, load, branch = net["gen"], net["load"], net["branch"]
+
+        # Dimensions
+        k = length(net["gen"])
+        n = length(net["bus"])
+        m = length(net["branch"])
+
+        # Get matrices
+        F = PowerModels.calc_basic_ptdf_matrix(net)
+        A = calc_basic_incidence_matrix(net)' # NOTE THE TRANSPOSE
+        B = _make_B(gen, n, k)
+
+        # Get limits
+        pmax = [branch[i]["rate_a"] for i in string.(1:m)] # maximum line flow
+        gmax = [gen[i]["pmax"] for i in string.(1:k)] # maximum generation
+
+        # Get costs
+        fq = [gen[i]["cost"][1] for i in string.(1:k)]
+        fl = [gen[i]["cost"][2] for i in string.(1:k)]
+
+        # Get demand
+        d = _make_d(load, n)
+
+    else 
+        error("Cannot determine if the network is basic or not. Please provide a valid PowerModels network dictionary.")
+    end
     
-    # Parse network data
-    gen, load, branch = net["gen"], net["load"], net["branch"]
-
-    # Dimensions
-    k = length(net["gen"])
-    n = length(net["bus"])
-    m = length(net["branch"])
-
-    # Get matrices
-    F = PowerModels.calc_basic_ptdf_matrix(net)
-    A = calc_basic_incidence_matrix(net)' # NOTE THE TRANSPOSE
-    B = _make_B(gen, n, k)
-
-    # Get limits
-    pmax = [branch[i]["rate_a"] for i in string.(1:m)] # maximum line flow
-    gmax = [gen[i]["pmax"] for i in string.(1:k)] # maximum generation
-
-    # Get costs
-    fq = [gen[i]["cost"][1] for i in string.(1:k)]
-    fl = [gen[i]["cost"][2] for i in string.(1:k)]
-
-    # Get demand
-    d = _make_d(load, n)
-
+    
     return PowerNetwork(
         fq,
         fl,
@@ -80,6 +91,7 @@ end
 
 """
     PowerManagementProblem(fq, fl, d, pmax, gmax, A, B, F; τ=TAU, ch=0, dis=0, S=0, η_c=1.0, η_d=1.0)
+
 Set up a static DC OPF problem with the following parameters: 
 - `fq`: quadratic generator costs
 - `fl`: linear generator costs
@@ -101,7 +113,8 @@ function PowerManagementProblem(fq, fl, d, pmax, gmax, A, B, F; τ=TAU, ch=0, di
 
     #setup the JuMP model
     problem = Model(Ipopt.Optimizer)
-    # set_optimizer_attribute(problem, "OutputFlag", 0)
+    set_optimizer_attribute(problem, "tol", 1e-8)
+    set_silent(problem)
 
     #define the variables
     @variable(problem,p[i=1:m])
@@ -183,8 +196,10 @@ end
 
 """
     kkt_dims(n, m, l)
+
 Compute the dimensions of the input / output of the KKT operator for
 a network with `n` nodes and `m` edges and `l` generator per node
+
 """
 kkt_dims(n, m, l) = 4m + 3l + 1
 
@@ -217,6 +232,7 @@ kkt(x, net::PowerNetwork, d) =
 
 """
 flatten_variables(P::PowerManagementProblem)
+
 Concatenates primal and dual variables from `P` into a single vector.
 """
 function flatten_variables(P::PowerManagementProblem)
@@ -238,6 +254,7 @@ end
 
 """
     unflatten_variables(x, n, m, k)
+
 Extracts primal and dual variables from `x`.
 """
 function unflatten_variables(x, n, m, k)
@@ -297,5 +314,3 @@ function _make_B(gen, n, k)
 	
 	return B
 end
-@samtalki
-Comment

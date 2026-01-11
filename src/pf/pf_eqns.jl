@@ -44,7 +44,7 @@ function PowerFlowEquations(net::Dict{String,<:Any})
     G,B = calc_vectorized_admittance_matrix(net)
     
     # Get the self edges
-    Y_self = [sum(r) for r in eachrow(calc_basic_admittance_matrix(net))]
+    Y_self = [sum(r) for r in eachrow(PM.calc_basic_admittance_matrix(net))]
     G_self = real.(Y_self)
     B_self = imag.(Y_self)
 
