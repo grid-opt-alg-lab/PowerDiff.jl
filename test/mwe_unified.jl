@@ -9,7 +9,7 @@ using PowerModelsDiff
 using PowerModels
 
 # Load a test network
-case_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower", "case5.m")
+case_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower", "case14.m")
 data = PowerModels.parse_file(case_path)
 net_data = PowerModels.make_basic_network(data)
 
@@ -34,22 +34,22 @@ println("Flows: f = ", round.(pf_state.f, digits=4))
 # New symbol-based API: request exactly what you need
 println("\n--- Symbol-Based Sensitivity API ---")
 
-dθ_dd = calc_sensitivity(pf_state, :θ, :d)
-println("dθ/dd shape: ", size(dθ_dd), "  [1,1] = ", round(dθ_dd[1,1], digits=6))
+dva_dd = calc_sensitivity(pf_state, :va, :d)
+println("dva/dd shape: ", size(dva_dd), "  [1,1] = ", round(dva_dd[1,1], digits=6))
 
 df_dd = calc_sensitivity(pf_state, :f, :d)
 println("df/dd shape: ", size(df_dd), "  [1,1] = ", round(df_dd[1,1], digits=6))
 
-dθ_dz = calc_sensitivity(pf_state, :θ, :z)
-println("dθ/dz shape: ", size(dθ_dz), "  [1,1] = ", round(dθ_dz[1,1], digits=6))
+dva_dz = calc_sensitivity(pf_state, :va, :z)
+println("dva/dz shape: ", size(dva_dz), "  [1,1] = ", round(dva_dz[1,1], digits=6))
 
 df_dz = calc_sensitivity(pf_state, :f, :z)
 println("df/dz shape: ", size(df_dz), "  [1,1] = ", round(df_dz[1,1], digits=6))
 
 # Aliases work too
-dθ_dd_alias = calc_sensitivity(pf_state, :va, :pd)  # :va → :θ, :pd → :d
-println("\nAlias test: calc_sensitivity(pf_state, :va, :pd) == calc_sensitivity(pf_state, :θ, :d): ",
-        dθ_dd_alias ≈ dθ_dd)
+dva_dd_alias = calc_sensitivity(pf_state, :va, :pd)  # :pd → :d
+println("\nAlias test: calc_sensitivity(pf_state, :va, :pd) == calc_sensitivity(pf_state, :va, :d): ",
+        dva_dd_alias ≈ dva_dd)
 
 # Invalid combinations throw ArgumentError
 print("\nInvalid combination test: calc_sensitivity(pf_state, :lmp, :d) → ")
@@ -75,8 +75,8 @@ println("Generation: g = ", round.(sol.g, digits=4))
 
 # OPF has more operands available (including :lmp and :pg)
 println("\n--- OPF Demand Sensitivities ---")
-dθ_dd_opf = calc_sensitivity(prob, :θ, :d)
-println("dθ/dd shape: ", size(dθ_dd_opf))
+dva_dd_opf = calc_sensitivity(prob, :va, :d)
+println("dva/dd shape: ", size(dva_dd_opf))
 
 dpg_dd = calc_sensitivity(prob, :pg, :d)
 println("dpg/dd shape: ", size(dpg_dd))
@@ -95,8 +95,8 @@ dlmp_dcl = calc_sensitivity(prob, :lmp, :cl)
 println("dlmp/dcl shape: ", size(dlmp_dcl))
 
 println("\n--- OPF Switching Sensitivities ---")
-dθ_dz_opf = calc_sensitivity(prob, :θ, :z)
-println("dθ/dz shape: ", size(dθ_dz_opf))
+dva_dz_opf = calc_sensitivity(prob, :va, :z)
+println("dva/dz shape: ", size(dva_dz_opf))
 
 dlmp_dz = calc_sensitivity(prob, :lmp, :z)
 println("dlmp/dz shape: ", size(dlmp_dz))
