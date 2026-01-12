@@ -1,8 +1,9 @@
 # =============================================================================
-# Minimum Working Example: Unified PowerModelsDiff Architecture
+# Minimum Working Example: Symbol-Based Sensitivity API
 # =============================================================================
 #
-# This script demonstrates the unified type hierarchy and sensitivity API.
+# Demonstrates the new symbol-based sensitivity API:
+#   calc_sensitivity(state, :operand, :parameter) → Matrix
 
 using PowerModelsDiff
 using PowerModels
@@ -16,7 +17,7 @@ net_data = PowerModels.make_basic_network(data)
 # DC Power Flow Example (non-OPF)
 # =============================================================================
 println("=" ^ 60)
-println("=== DC Power Flow Sensitivities ===")
+println("=== DC Power Flow: Symbol-Based Sensitivities ===")
 println("=" ^ 60)
 
 # Create DC network and demand
@@ -27,26 +28,43 @@ println("Network: n=$(net.n) buses, m=$(net.m) branches, k=$(net.k) generators")
 
 # Solve DC power flow (NOT OPF - just theta = L^+ * p)
 pf_state = DCPowerFlowState(net, d)
-println("Phase angles: theta = ", round.(pf_state.θ, digits=4))
+println("Phase angles: θ = ", round.(pf_state.θ, digits=4))
 println("Flows: f = ", round.(pf_state.f, digits=4))
 
-# Switching sensitivity for power flow
-sens_switching_pf = calc_sensitivity(pf_state, SWITCHING)
-println("\nPF Switching sensitivity dtheta/dz (n x m):")
-println("  Shape: ", size(sens_switching_pf.dθ_dz))
-println("  [1,1] = ", round(sens_switching_pf.dθ_dz[1,1], digits=6))
+# New symbol-based API: request exactly what you need
+println("\n--- Symbol-Based Sensitivity API ---")
 
-# Demand sensitivity for power flow
-sens_demand_pf = calc_sensitivity(pf_state, DEMAND)
-println("\nPF Demand sensitivity dtheta/dd (n x n):")
-println("  Shape: ", size(sens_demand_pf.dθ_dd))
-println("  [1,1] = ", round(sens_demand_pf.dθ_dd[1,1], digits=6))
+dθ_dd = calc_sensitivity(pf_state, :θ, :d)
+println("dθ/dd shape: ", size(dθ_dd), "  [1,1] = ", round(dθ_dd[1,1], digits=6))
+
+df_dd = calc_sensitivity(pf_state, :f, :d)
+println("df/dd shape: ", size(df_dd), "  [1,1] = ", round(df_dd[1,1], digits=6))
+
+dθ_dz = calc_sensitivity(pf_state, :θ, :z)
+println("dθ/dz shape: ", size(dθ_dz), "  [1,1] = ", round(dθ_dz[1,1], digits=6))
+
+df_dz = calc_sensitivity(pf_state, :f, :z)
+println("df/dz shape: ", size(df_dz), "  [1,1] = ", round(df_dz[1,1], digits=6))
+
+# Aliases work too
+dθ_dd_alias = calc_sensitivity(pf_state, :va, :pd)  # :va → :θ, :pd → :d
+println("\nAlias test: calc_sensitivity(pf_state, :va, :pd) == calc_sensitivity(pf_state, :θ, :d): ",
+        dθ_dd_alias ≈ dθ_dd)
+
+# Invalid combinations throw ArgumentError
+print("\nInvalid combination test: calc_sensitivity(pf_state, :lmp, :d) → ")
+try
+    calc_sensitivity(pf_state, :lmp, :d)
+    println("ERROR: should have thrown!")
+catch e
+    println("ArgumentError (as expected)")
+end
 
 # =============================================================================
 # DC OPF Example
 # =============================================================================
 println("\n" * "=" ^ 60)
-println("=== DC OPF Sensitivities ===")
+println("=== DC OPF: Symbol-Based Sensitivities ===")
 println("=" ^ 60)
 
 # Solve OPF
@@ -55,28 +73,39 @@ sol = solve!(prob)
 println("OPF solved: objective = ", round(sol.objective, digits=2))
 println("Generation: g = ", round.(sol.g, digits=4))
 
-# Unified sensitivity API
-sens_demand = calc_sensitivity(prob, DEMAND)
-sens_cost = calc_sensitivity(prob, COST)
-sens_switching_opf = calc_sensitivity(prob, SWITCHING)
+# OPF has more operands available (including :lmp and :pg)
+println("\n--- OPF Demand Sensitivities ---")
+dθ_dd_opf = calc_sensitivity(prob, :θ, :d)
+println("dθ/dd shape: ", size(dθ_dd_opf))
 
-println("\nOPF Demand sensitivity dtheta/dd:")
-println("  Shape: ", size(sens_demand.dθ_dd))
-println("  [1,1] = ", round(sens_demand.dθ_dd[1,1], digits=6))
+dpg_dd = calc_sensitivity(prob, :pg, :d)
+println("dpg/dd shape: ", size(dpg_dd))
 
-println("\nOPF Cost sensitivity dg/dcq:")
-println("  Shape: ", size(sens_cost.dg_dcq))
-println("  [1,1] = ", round(sens_cost.dg_dcq[1,1], digits=6))
+df_dd_opf = calc_sensitivity(prob, :f, :d)
+println("df/dd shape: ", size(df_dd_opf))
 
-println("\nOPF Switching sensitivity dtheta/dz:")
-println("  Shape: ", size(sens_switching_opf.dθ_dz))
-println("  [1,1] = ", round(sens_switching_opf.dθ_dz[1,1], digits=6))
+dlmp_dd = calc_sensitivity(prob, :lmp, :d)
+println("dlmp/dd shape: ", size(dlmp_dd))
+
+println("\n--- OPF Cost Sensitivities ---")
+dpg_dcq = calc_sensitivity(prob, :pg, :cq)
+println("dpg/dcq shape: ", size(dpg_dcq), "  [1,1] = ", round(dpg_dcq[1,1], digits=6))
+
+dlmp_dcl = calc_sensitivity(prob, :lmp, :cl)
+println("dlmp/dcl shape: ", size(dlmp_dcl))
+
+println("\n--- OPF Switching Sensitivities ---")
+dθ_dz_opf = calc_sensitivity(prob, :θ, :z)
+println("dθ/dz shape: ", size(dθ_dz_opf))
+
+dlmp_dz = calc_sensitivity(prob, :lmp, :z)
+println("dlmp/dz shape: ", size(dlmp_dz))
 
 # =============================================================================
 # AC Power Flow Example
 # =============================================================================
 println("\n" * "=" ^ 60)
-println("=== AC Power Flow Sensitivities ===")
+println("=== AC Power Flow: Symbol-Based Sensitivities ===")
 println("=" ^ 60)
 
 # Solve AC power flow
@@ -89,46 +118,26 @@ state = ACPowerFlowState(net_data)
 println("AC Network: n=$(ac_net.n) buses, m=$(ac_net.m) branches")
 println("Voltage magnitudes: |v| = ", round.(abs.(state.v), digits=4))
 
-# Voltage-power sensitivities
-sens_power = calc_sensitivity(state, POWER)
-
-println("\nAC voltage-power sensitivity d|v|/dp:")
-println("  Shape: ", size(sens_power.∂vm_∂p))
+# AC sensitivities
+println("\n--- AC Voltage-Power Sensitivities ---")
+dvm_dp = calc_sensitivity(state, :vm, :p)
+println("d|v|/dp shape: ", size(dvm_dp))
 if state.n >= 3
-    println("  [2,3] = ", round(sens_power.∂vm_∂p[2,3], digits=6))
+    println("  [2,3] = ", round(dvm_dp[2,3], digits=6))
 end
 
-# =============================================================================
-# Unified Voltage Sensitivity Interface
-# =============================================================================
-println("\n" * "=" ^ 60)
-println("=== Unified Voltage Sensitivity Interface ===")
-println("=" ^ 60)
+dvm_dq = calc_sensitivity(state, :vm, :q)
+println("d|v|/dq shape: ", size(dvm_dq))
 
-# Both return "voltage" sensitivity, but different formulations
-dθ_dd = calc_voltage_sensitivity(pf_state, DEMAND)
-dθ_dz_pf = calc_voltage_sensitivity(pf_state, SWITCHING)
-dθ_dd_opf = calc_voltage_sensitivity(prob, DEMAND)
-dθ_dz_opf = calc_voltage_sensitivity(prob, SWITCHING)
-
-println("\nDC Power Flow:")
-println("  dtheta/dd shape = ", size(dθ_dd))
-println("  dtheta/dz shape = ", size(dθ_dz_pf))
-
-println("\nDC OPF:")
-println("  dtheta/dd shape = ", size(dθ_dd_opf))
-println("  dtheta/dz shape = ", size(dθ_dz_opf))
-
-println("\nAC Power Flow:")
-sens_ac = calc_voltage_sensitivity(state, POWER)
-println("  d|v|/dp shape = ", size(sens_ac.∂vm_∂p))
-println("  d|v|/dq shape = ", size(sens_ac.∂vm_∂q))
+# Current sensitivities
+dim_dp = calc_sensitivity(state, :im, :p)
+println("d|I|/dp shape: ", size(dim_dp))
 
 # =============================================================================
 # Type Hierarchy Verification
 # =============================================================================
 println("\n" * "=" ^ 60)
-println("=== Type Hierarchy Verification ===")
+println("=== Type Hierarchy ===")
 println("=" ^ 60)
 
 println("DCNetwork <: AbstractPowerNetwork: ", net isa AbstractPowerNetwork)
@@ -136,11 +145,6 @@ println("ACNetwork <: AbstractPowerNetwork: ", ac_net isa AbstractPowerNetwork)
 println("DCPowerFlowState <: AbstractPowerFlowState: ", pf_state isa AbstractPowerFlowState)
 println("DCOPFSolution <: AbstractOPFSolution: ", sol isa AbstractOPFSolution)
 println("ACPowerFlowState <: AbstractPowerFlowState: ", state isa AbstractPowerFlowState)
-
-println("\nParameter singletons:")
-println("  DEMAND isa DemandParameter: ", DEMAND isa DemandParameter)
-println("  SWITCHING isa SwitchingParameter: ", SWITCHING isa SwitchingParameter)
-println("  POWER isa PowerInjectionParameter: ", POWER isa PowerInjectionParameter)
 
 println("\n" * "=" ^ 60)
 println("MWE completed successfully!")

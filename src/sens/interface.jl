@@ -2,136 +2,379 @@
 # Unified Sensitivity Interface
 # =============================================================================
 #
-# Provides a single `calc_sensitivity(state, parameter)` function that dispatches
-# to the appropriate sensitivity computation based on the state and parameter types.
+# Symbol-based dispatch for sensitivity computation:
+#   calc_sensitivity(state, :operand, :parameter) → Matrix
+#
+# Operand symbols: :θ/:va (angles), :f (flows), :pg (generation), :lmp, :vm, :im
+# Parameter symbols: :d/:pd (demand), :z (switching), :cq/:cl (cost), :p/:q (power)
 
 """
-    calc_sensitivity(state, parameter) → AbstractSensitivity
+    calc_sensitivity(state, operand::Symbol, parameter::Symbol) → Matrix
 
-Unified sensitivity computation with type dispatch.
+Compute sensitivity of `operand` with respect to `parameter`.
 
-Computes the sensitivity of a power flow or OPF solution with respect to
-the specified parameter type.
+Returns a single matrix - only computes what you ask for.
+Invalid combinations throw ArgumentError.
 
-# Arguments
-- `state`: A power flow state or OPF solution (DCPowerFlowState, DCOPFSolution, ACPowerFlowState)
-- `parameter`: A sensitivity parameter type (DEMAND, SWITCHING, POWER, etc.)
+# Operand Symbols
+- `:θ` or `:va`: Phase angles (DC)
+- `:f`: Branch flows (DC)
+- `:pg` or `:g`: Generator real power (DC OPF only)
+- `:lmp`: Locational marginal prices (DC OPF only)
+- `:vm`: Voltage magnitude (AC)
+- `:im`: Current magnitude (AC)
+
+# Parameter Symbols
+- `:d` or `:pd`: Demand
+- `:z`: Switching states
+- `:cq`, `:cl`: Cost coefficients (DC OPF)
+- `:fmax`: Flow limits (DC OPF)
+- `:b`: Susceptances (DC OPF)
+- `:p`: Active power injection (AC)
+- `:q`: Reactive power injection (AC)
 
 # Examples
 ```julia
-# DC Power Flow sensitivities
+# DC Power Flow
 pf_state = DCPowerFlowState(net, d)
-sens = calc_sensitivity(pf_state, DEMAND)      # → DemandSensitivity
-sens = calc_sensitivity(pf_state, SWITCHING)   # → SwitchingSensitivity
+dθ_dd = calc_sensitivity(pf_state, :θ, :d)    # n×n
+df_dd = calc_sensitivity(pf_state, :f, :d)    # m×n
+dθ_dz = calc_sensitivity(pf_state, :θ, :z)    # n×m
 
-# DC OPF sensitivities
+# DC OPF
 prob = DCOPFProblem(net, d)
-sol = solve!(prob)
-sens = calc_sensitivity(sol, DEMAND)           # → DemandSensitivity
-sens = calc_sensitivity(sol, COST)             # → CostSensitivity
-sens = calc_sensitivity(sol, FLOWLIMIT)        # → FlowLimitSensitivity
-sens = calc_sensitivity(sol, SWITCHING)        # → SwitchingSensitivity
+solve!(prob)
+dlmp_dd = calc_sensitivity(prob, :lmp, :d)    # n×n
+dg_dcq = calc_sensitivity(prob, :pg, :cq)     # k×k
 
-# AC power flow sensitivities
-state = ACPowerFlowState(net)
-sens = calc_sensitivity(state, POWER)          # → VoltagePowerSensitivity
-sens = calc_sensitivity(state, TOPOLOGY)       # → VoltageTopologySensitivity
+# AC Power Flow
+dvm_dp = calc_sensitivity(ac_state, :vm, :p)  # n×n
+```
+
+# Invalid combinations throw ArgumentError
+```julia
+calc_sensitivity(pf_state, :lmp, :d)  # ERROR: no LMP for power flow
+calc_sensitivity(pf_state, :pg, :d)   # ERROR: no generation dispatch in PF
 ```
 """
 function calc_sensitivity end
 
 # =============================================================================
-# DC Power Flow Dispatch (non-OPF)
+# Symbol Dispatch Infrastructure
 # =============================================================================
 
-calc_sensitivity(state::DCPowerFlowState, ::DemandParameter) =
+# Main entry point: convert symbols to Val types for dispatch
+function calc_sensitivity(state, operand::Symbol, parameter::Symbol)
+    _calc_sensitivity(state, Val(operand), Val(parameter))
+end
+
+# Fallback: invalid combination
+function _calc_sensitivity(state, ::Val{O}, ::Val{P}) where {O, P}
+    throw(ArgumentError(
+        "calc_sensitivity($(typeof(state)), :$O, :$P) is not defined. " *
+        "See ?calc_sensitivity for valid operand/parameter combinations."
+    ))
+end
+
+# =============================================================================
+# DC Power Flow: Symbol Dispatch
+# =============================================================================
+
+# dθ/dd = L⁺ (via existing calc_sensitivity_demand, extract just dθ_dd)
+function _calc_sensitivity(state::DCPowerFlowState, ::Val{:θ}, ::Val{:d})
+    L = calc_susceptance_matrix(state.net)
+    return pinv(Matrix(L))
+end
+
+# df/dd: f = W*A*θ, so df/dd = W*A*dθ/dd where W = Diag(-b.*z)
+function _calc_sensitivity(state::DCPowerFlowState, ::Val{:f}, ::Val{:d})
+    net = state.net
+    W = Diagonal(-net.b .* net.z)
+    dθ_dd = calc_sensitivity(state, :θ, :d)
+    return W * net.A * dθ_dd
+end
+
+# dθ/dz (switching) - extract from existing implementation
+function _calc_sensitivity(state::DCPowerFlowState, ::Val{:θ}, ::Val{:z})
+    net = state.net
+    L = calc_susceptance_matrix(net)
+    L_pinv = pinv(Matrix(L))
+    ref = net.ref_bus
+
+    m = net.m
+    n = net.n
+    dθ_dz = zeros(n, m)
+
+    for e in 1:m
+        aₑ = Vector(net.A[e, :])
+        ∂L_∂zₑ = -net.b[e] * (aₑ * aₑ')
+        dθ_raw_dzₑ = -L_pinv * ∂L_∂zₑ * state.θ
+        # Account for centering: θ = θ_raw - θ_raw[ref]
+        dθ_dz[:, e] = dθ_raw_dzₑ .- dθ_raw_dzₑ[ref]
+    end
+
+    return dθ_dz
+end
+
+# df/dz (switching)
+function _calc_sensitivity(state::DCPowerFlowState, ::Val{:f}, ::Val{:z})
+    net = state.net
+    dθ_dz = calc_sensitivity(state, :θ, :z)
+    W = Diagonal(-net.b .* net.z)
+
+    m = net.m
+    df_dz = zeros(m, m)
+
+    for e in 1:m
+        # Indirect effect through θ: df/dz_e = W * A * dθ/dz_e
+        df_dz[:, e] = W * net.A * dθ_dz[:, e]
+        # Direct effect for edge e: fₑ = -bₑ * zₑ * (θᵢ - θⱼ)
+        df_dz[e, e] += -net.b[e] * (Vector(net.A[e, :]) ⋅ state.θ)
+    end
+
+    return df_dz
+end
+
+# Aliases: :va → :θ, :pd → :d
+# Define specific combinations to avoid ambiguity
+_calc_sensitivity(s::DCPowerFlowState, ::Val{:va}, ::Val{:d}) = _calc_sensitivity(s, Val(:θ), Val(:d))
+_calc_sensitivity(s::DCPowerFlowState, ::Val{:va}, ::Val{:z}) = _calc_sensitivity(s, Val(:θ), Val(:z))
+_calc_sensitivity(s::DCPowerFlowState, ::Val{:va}, ::Val{:pd}) = _calc_sensitivity(s, Val(:θ), Val(:d))
+_calc_sensitivity(s::DCPowerFlowState, ::Val{:θ}, ::Val{:pd}) = _calc_sensitivity(s, Val(:θ), Val(:d))
+_calc_sensitivity(s::DCPowerFlowState, ::Val{:f}, ::Val{:pd}) = _calc_sensitivity(s, Val(:f), Val(:d))
+
+# =============================================================================
+# DC Power Flow: Legacy Two-Argument API (Deprecated)
+# =============================================================================
+
+function calc_sensitivity(state::DCPowerFlowState, ::DemandParameter)
+    Base.depwarn(
+        "calc_sensitivity(state, DEMAND) is deprecated. " *
+        "Use calc_sensitivity(state, :θ, :d) or calc_sensitivity(state, :f, :d) instead.",
+        :calc_sensitivity
+    )
     calc_sensitivity_demand(state)
+end
 
-calc_sensitivity(state::DCPowerFlowState, ::SwitchingParameter) =
+function calc_sensitivity(state::DCPowerFlowState, ::SwitchingParameter)
+    Base.depwarn(
+        "calc_sensitivity(state, SWITCHING) is deprecated. " *
+        "Use calc_sensitivity(state, :θ, :z) or calc_sensitivity(state, :f, :z) instead.",
+        :calc_sensitivity
+    )
     calc_sensitivity_switching(state)
+end
 
 # =============================================================================
-# DC OPF Dispatch
+# DC OPF: Symbol Dispatch
 # =============================================================================
 
-# Note: DCOPFProblem stores the solution after solve!, so we dispatch on the problem
-# For demand sensitivity, we use the problem-based function
+# Demand sensitivities (via KKT system)
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:θ}, ::Val{:d}) =
+    calc_sensitivity_demand(prob).dθ_dd
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:pg}, ::Val{:d}) =
+    calc_sensitivity_demand(prob).dg_dd
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:f}, ::Val{:d}) =
+    calc_sensitivity_demand(prob).df_dd
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:lmp}, ::Val{:d}) =
+    calc_sensitivity_demand(prob).dlmp_dd
+
+# Cost sensitivities
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:pg}, ::Val{:cq}) =
+    calc_sensitivity_cost(prob).dg_dcq
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:pg}, ::Val{:cl}) =
+    calc_sensitivity_cost(prob).dg_dcl
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:lmp}, ::Val{:cq}) =
+    calc_sensitivity_cost(prob).dlmp_dcq
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:lmp}, ::Val{:cl}) =
+    calc_sensitivity_cost(prob).dlmp_dcl
+
+# Switching sensitivities
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:θ}, ::Val{:z}) =
+    calc_sensitivity_switching(prob).dθ_dz
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:pg}, ::Val{:z}) =
+    calc_sensitivity_switching(prob).dg_dz
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:f}, ::Val{:z}) =
+    calc_sensitivity_switching(prob).df_dz
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:lmp}, ::Val{:z}) =
+    calc_sensitivity_switching(prob).dlmp_dz
+
+# Flow limit sensitivities
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:θ}, ::Val{:fmax}) =
+    calc_sensitivity_flowlimit(prob).dθ_dfmax
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:pg}, ::Val{:fmax}) =
+    calc_sensitivity_flowlimit(prob).dg_dfmax
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:f}, ::Val{:fmax}) =
+    calc_sensitivity_flowlimit(prob).df_dfmax
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:lmp}, ::Val{:fmax}) =
+    calc_sensitivity_flowlimit(prob).dlmp_dfmax
+
+# Susceptance sensitivities
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:θ}, ::Val{:b}) =
+    calc_sensitivity_susceptance(prob).dθ_db
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:pg}, ::Val{:b}) =
+    calc_sensitivity_susceptance(prob).dg_db
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:f}, ::Val{:b}) =
+    calc_sensitivity_susceptance(prob).df_db
+
+_calc_sensitivity(prob::DCOPFProblem, ::Val{:lmp}, ::Val{:b}) =
+    calc_sensitivity_susceptance(prob).dlmp_db
+
+# Aliases for DCOPFProblem
+_calc_sensitivity(p::DCOPFProblem, ::Val{:va}, param::Val) = _calc_sensitivity(p, Val(:θ), param)
+_calc_sensitivity(p::DCOPFProblem, ::Val{:g}, param::Val) = _calc_sensitivity(p, Val(:pg), param)
+_calc_sensitivity(p::DCOPFProblem, op::Val, ::Val{:pd}) = _calc_sensitivity(p, op, Val(:d))
+
+# =============================================================================
+# DC OPF: Legacy Two-Argument API (Deprecated)
+# =============================================================================
+
 function calc_sensitivity(prob::DCOPFProblem, ::DemandParameter)
+    Base.depwarn(
+        "calc_sensitivity(prob, DEMAND) is deprecated. " *
+        "Use calc_sensitivity(prob, :θ, :d), calc_sensitivity(prob, :lmp, :d), etc.",
+        :calc_sensitivity
+    )
     return calc_sensitivity_demand(prob)
 end
 
 function calc_sensitivity(prob::DCOPFProblem, ::CostParameter)
+    Base.depwarn(
+        "calc_sensitivity(prob, COST) is deprecated. " *
+        "Use calc_sensitivity(prob, :pg, :cq) or calc_sensitivity(prob, :lmp, :cl), etc.",
+        :calc_sensitivity
+    )
     return calc_sensitivity_cost(prob)
 end
 
 function calc_sensitivity(prob::DCOPFProblem, ::FlowLimitParameter)
+    Base.depwarn(
+        "calc_sensitivity(prob, FLOWLIMIT) is deprecated. " *
+        "Use calc_sensitivity(prob, :θ, :fmax), calc_sensitivity(prob, :lmp, :fmax), etc.",
+        :calc_sensitivity
+    )
     return calc_sensitivity_flowlimit(prob)
 end
 
 function calc_sensitivity(prob::DCOPFProblem, ::SusceptanceParameter)
+    Base.depwarn(
+        "calc_sensitivity(prob, SUSCEPTANCE) is deprecated. " *
+        "Use calc_sensitivity(prob, :θ, :b), calc_sensitivity(prob, :lmp, :b), etc.",
+        :calc_sensitivity
+    )
     return calc_sensitivity_susceptance(prob)
 end
 
 function calc_sensitivity(prob::DCOPFProblem, ::SwitchingParameter)
+    Base.depwarn(
+        "calc_sensitivity(prob, SWITCHING) is deprecated. " *
+        "Use calc_sensitivity(prob, :θ, :z), calc_sensitivity(prob, :lmp, :z), etc.",
+        :calc_sensitivity
+    )
     return calc_sensitivity_switching(prob)
 end
 
 # =============================================================================
-# AC Power Flow Dispatch
+# AC Power Flow: Symbol Dispatch
 # =============================================================================
 
-calc_sensitivity(state::ACPowerFlowState, ::PowerInjectionParameter) =
-    calc_voltage_power_sensitivities(state)
+# Voltage magnitude sensitivities w.r.t. active power
+_calc_sensitivity(state::ACPowerFlowState, ::Val{:vm}, ::Val{:p}) =
+    calc_voltage_power_sensitivities(state).∂vm_∂p
 
-# For topology sensitivity, we need to convert ACPowerFlowState to Dict format
-# or provide a direct implementation
+# Voltage magnitude sensitivities w.r.t. reactive power
+_calc_sensitivity(state::ACPowerFlowState, ::Val{:vm}, ::Val{:q}) =
+    calc_voltage_power_sensitivities(state).∂vm_∂q
+
+# Complex voltage sensitivities
+_calc_sensitivity(state::ACPowerFlowState, ::Val{:v}, ::Val{:p}) =
+    calc_voltage_power_sensitivities(state).∂v_∂p
+
+_calc_sensitivity(state::ACPowerFlowState, ::Val{:v}, ::Val{:q}) =
+    calc_voltage_power_sensitivities(state).∂v_∂q
+
+# Current magnitude sensitivities
+function _calc_sensitivity(state::ACPowerFlowState, ::Val{:im}, ::Val{:p})
+    sens = calc_current_power_sensitivities(state)
+    return sens.∂Im_∂p
+end
+
+function _calc_sensitivity(state::ACPowerFlowState, ::Val{:im}, ::Val{:q})
+    sens = calc_current_power_sensitivities(state)
+    return sens.∂Im_∂q
+end
+
+# =============================================================================
+# AC Power Flow: Legacy Two-Argument API (Deprecated)
+# =============================================================================
+
+function calc_sensitivity(state::ACPowerFlowState, ::PowerInjectionParameter)
+    Base.depwarn(
+        "calc_sensitivity(state, POWER) is deprecated. " *
+        "Use calc_sensitivity(state, :vm, :p) or calc_sensitivity(state, :vm, :q), etc.",
+        :calc_sensitivity
+    )
+    calc_voltage_power_sensitivities(state)
+end
+
 function calc_sensitivity(state::ACPowerFlowState, ::TopologyParameter)
-    # Use the existing voltage_topology_sensitivities with appropriate conversion
     error("TopologyParameter sensitivity for ACPowerFlowState requires network Dict. " *
           "Use voltage_topology_sensitivities(net::Dict) directly or provide branch_data.")
 end
 
 # =============================================================================
-# Unified Voltage Sensitivity Interface
+# Unified Voltage Sensitivity Interface (Deprecated)
 # =============================================================================
 
 """
     calc_voltage_sensitivity(state, parameter) → voltage sensitivity matrix
 
+DEPRECATED: Use the symbol-based API instead:
+- `calc_sensitivity(state, :θ, :d)` for DC phase angle sensitivity
+- `calc_sensitivity(state, :vm, :p)` for AC voltage magnitude sensitivity
+
 Unified interface for "voltage" sensitivities across DC and AC formulations.
-
-Returns the sensitivity of voltage-like quantities:
-- DC formulations: ∂θ/∂parameter (phase angles)
-- AC formulations: ∂v/∂parameter (complex voltages or magnitudes)
-
-# Examples
-```julia
-# DC Power Flow: ∂θ/∂d
-dθ_dd = calc_voltage_sensitivity(pf_state, DEMAND)
-
-# DC OPF: ∂θ/∂z
-dθ_dz = calc_voltage_sensitivity(prob, SWITCHING)
-
-# AC Power Flow: ∂v/∂p, ∂|v|/∂p, etc.
-sens = calc_voltage_sensitivity(ac_state, POWER)
-```
 """
 function calc_voltage_sensitivity end
 
-# DC Power Flow
-calc_voltage_sensitivity(state::DCPowerFlowState, ::DemandParameter) =
-    calc_sensitivity_demand(state).dθ_dd
+# DC Power Flow (deprecated)
+function calc_voltage_sensitivity(state::DCPowerFlowState, ::DemandParameter)
+    Base.depwarn("calc_voltage_sensitivity is deprecated. Use calc_sensitivity(state, :θ, :d)", :calc_voltage_sensitivity)
+    calc_sensitivity(state, :θ, :d)
+end
 
-calc_voltage_sensitivity(state::DCPowerFlowState, ::SwitchingParameter) =
-    calc_sensitivity_switching(state).dθ_dz
+function calc_voltage_sensitivity(state::DCPowerFlowState, ::SwitchingParameter)
+    Base.depwarn("calc_voltage_sensitivity is deprecated. Use calc_sensitivity(state, :θ, :z)", :calc_voltage_sensitivity)
+    calc_sensitivity(state, :θ, :z)
+end
 
-# DC OPF
-calc_voltage_sensitivity(prob::DCOPFProblem, ::DemandParameter) =
-    calc_sensitivity_demand(prob).dθ_dd
+# DC OPF (deprecated)
+function calc_voltage_sensitivity(prob::DCOPFProblem, ::DemandParameter)
+    Base.depwarn("calc_voltage_sensitivity is deprecated. Use calc_sensitivity(prob, :θ, :d)", :calc_voltage_sensitivity)
+    calc_sensitivity(prob, :θ, :d)
+end
 
-calc_voltage_sensitivity(prob::DCOPFProblem, ::SwitchingParameter) =
-    calc_sensitivity_switching(prob).dθ_dz
+function calc_voltage_sensitivity(prob::DCOPFProblem, ::SwitchingParameter)
+    Base.depwarn("calc_voltage_sensitivity is deprecated. Use calc_sensitivity(prob, :θ, :z)", :calc_voltage_sensitivity)
+    calc_sensitivity(prob, :θ, :z)
+end
 
-# AC Power Flow
-calc_voltage_sensitivity(state::ACPowerFlowState, ::PowerInjectionParameter) =
+# AC Power Flow (deprecated)
+function calc_voltage_sensitivity(state::ACPowerFlowState, ::PowerInjectionParameter)
+    Base.depwarn("calc_voltage_sensitivity is deprecated. Use calc_sensitivity(state, :vm, :p)", :calc_voltage_sensitivity)
     calc_voltage_power_sensitivities(state)
+end
