@@ -1,8 +1,8 @@
+# =============================================================================
 # KKT System for DC OPF
-# Implements KKT conditions for implicit differentiation
-
-using SparseArrays
-using LinearAlgebra
+# =============================================================================
+#
+# Implements KKT conditions for implicit differentiation of DC OPF solutions.
 
 # =============================================================================
 # Dimension Calculations
@@ -30,6 +30,42 @@ function kkt_dims(net::DCNetwork)
     return 2n + 4m + 3k + 1
 end
 
+"""
+    kkt_indices(n, m, k) → NamedTuple
+
+Compute all KKT variable indices from network dimensions.
+Single source of truth for index calculations.
+
+# Variable ordering
+[θ(n), g(k), f(m), λ_lb(m), λ_ub(m), ρ_lb(k), ρ_ub(k), ν_bal(n), ν_flow(m), η_ref(1)]
+
+# Returns
+NamedTuple with index ranges for each variable block.
+"""
+function kkt_indices(n::Int, m::Int, k::Int)
+    i = 0
+    idx_θ = (i+1):(i+n); i += n
+    idx_g = (i+1):(i+k); i += k
+    idx_f = (i+1):(i+m); i += m
+    idx_λ_lb = (i+1):(i+m); i += m
+    idx_λ_ub = (i+1):(i+m); i += m
+    idx_ρ_lb = (i+1):(i+k); i += k
+    idx_ρ_ub = (i+1):(i+k); i += k
+    idx_ν_bal = (i+1):(i+n); i += n
+    idx_ν_flow = (i+1):(i+m); i += m
+    idx_η = i + 1
+
+    return (
+        θ = idx_θ, g = idx_g, f = idx_f,
+        λ_lb = idx_λ_lb, λ_ub = idx_λ_ub,
+        ρ_lb = idx_ρ_lb, ρ_ub = idx_ρ_ub,
+        ν_bal = idx_ν_bal, ν_flow = idx_ν_flow, η = idx_η
+    )
+end
+
+kkt_indices(net::DCNetwork) = kkt_indices(net.n, net.m, net.k)
+kkt_indices(prob::DCOPFProblem) = kkt_indices(prob.network)
+
 # =============================================================================
 # Variable Flattening/Unflattening
 # =============================================================================
@@ -45,8 +81,6 @@ Flatten solution primal and dual variables into a single vector for KKT evaluati
 where η_ref is the dual for the reference bus constraint (set to 0).
 """
 function flatten_variables(sol::DCOPFSolution, prob::DCOPFProblem)
-    # Extract dual for flow definition constraint
-    ν_flow = dual.(prob.cons.flow_def)
     # Reference bus dual (typically not needed, set to 0)
     η_ref = dual(prob.cons.ref)
 
@@ -59,7 +93,7 @@ function flatten_variables(sol::DCOPFSolution, prob::DCOPFProblem)
         sol.ρ_lb,
         sol.ρ_ub,
         sol.ν_bal,
-        ν_flow,
+        sol.ν_flow,
         [η_ref]
     )
 end
@@ -196,25 +230,30 @@ end
 # =============================================================================
 
 """
-    calc_kkt_jacobian(prob::DCOPFProblem)
+    calc_kkt_jacobian(prob::DCOPFProblem; sol=nothing)
 
 Compute the sparse Jacobian of the KKT operator analytically.
+
+# Arguments
+- `prob`: DCOPFProblem
+- `sol`: Optional pre-computed solution. If not provided, calls solve!(prob).
 
 # Returns
 Sparse matrix ∂K/∂z where z is the flattened variable vector.
 
 This analytical Jacobian is more efficient than ForwardDiff for large problems.
 """
-function calc_kkt_jacobian(prob::DCOPFProblem)
-    return calc_kkt_jacobian(prob.network, prob.d, prob)
+function calc_kkt_jacobian(prob::DCOPFProblem; sol::Union{DCOPFSolution,Nothing}=nothing)
+    if isnothing(sol)
+        sol = solve!(prob)
+    end
+    return calc_kkt_jacobian(prob.network, prob.d, prob, sol)
 end
 
-function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem)
+function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem, sol::DCOPFSolution)
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
 
-    # Get current solution values for complementary slackness terms
-    sol = solve!(prob)
     vars = (
         θ = sol.θ, g = sol.g, f = sol.f,
         λ_lb = sol.λ_lb, λ_ub = sol.λ_ub,
@@ -231,75 +270,63 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     e_ref = spzeros(n, 1)
     e_ref[net.ref_bus, 1] = 1.0
 
-    # Build Jacobian blocks
-    # Variable order: [θ(n), g(k), f(m), λ_lb(m), λ_ub(m), ρ_lb(k), ρ_ub(k), ν_bal(n), ν_flow(m), η_ref(1)]
-
-    # Block sizes
-    idx_θ = 1:n
-    idx_g = n+1:n+k
-    idx_f = n+k+1:n+k+m
-    idx_λ_lb = n+k+m+1:n+k+2m
-    idx_λ_ub = n+k+2m+1:n+k+3m
-    idx_ρ_lb = n+k+3m+1:n+k+3m+k
-    idx_ρ_ub = n+k+3m+k+1:n+k+3m+2k
-    idx_ν_bal = n+k+3m+2k+1:2n+k+3m+2k
-    idx_ν_flow = 2n+k+3m+2k+1:2n+k+4m+2k
-    idx_η = 2n+k+4m+2k+1
+    # Build Jacobian blocks using centralized index calculation
+    idx = kkt_indices(n, m, k)
 
     J = spzeros(dim, dim)
 
     # ∂K_θ/∂... (row block 1: indices 1:n)
     # K_θ = B' * ν_bal + WA' * ν_flow + e_ref * η_ref
-    J[idx_θ, idx_ν_bal] = B_mat'
-    J[idx_θ, idx_ν_flow] = WA'
-    J[idx_θ, idx_η] = e_ref
+    J[idx.θ, idx.ν_bal] = B_mat'
+    J[idx.θ, idx.ν_flow] = WA'
+    J[idx.θ, idx.η] = e_ref
 
     # ∂K_g/∂... (row block 2: indices n+1:n+k)
     # K_g = Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub
-    J[idx_g, idx_g] = sparse(Diagonal(net.cq))
-    J[idx_g, idx_ρ_lb] = -sparse(I, k, k)
-    J[idx_g, idx_ρ_ub] = sparse(I, k, k)
-    J[idx_g, idx_ν_bal] = -net.G_inc'
+    J[idx.g, idx.g] = sparse(Diagonal(net.cq))
+    J[idx.g, idx.ρ_lb] = -sparse(I, k, k)
+    J[idx.g, idx.ρ_ub] = sparse(I, k, k)
+    J[idx.g, idx.ν_bal] = -net.G_inc'
 
     # ∂K_f/∂... (row block 3: indices n+k+1:n+k+m)
     # K_f = τ² * f - ν_flow - λ_lb + λ_ub
-    J[idx_f, idx_f] = net.τ^2 * sparse(I, m, m)
-    J[idx_f, idx_λ_lb] = -sparse(I, m, m)
-    J[idx_f, idx_λ_ub] = sparse(I, m, m)
-    J[idx_f, idx_ν_flow] = -sparse(I, m, m)
+    J[idx.f, idx.f] = net.τ^2 * sparse(I, m, m)
+    J[idx.f, idx.λ_lb] = -sparse(I, m, m)
+    J[idx.f, idx.λ_ub] = sparse(I, m, m)
+    J[idx.f, idx.ν_flow] = -sparse(I, m, m)
 
     # ∂K_λ_lb/∂... (complementary slackness for lower flow bound)
     # K_λ_lb = λ_lb .* (f + fmax)
-    J[idx_λ_lb, idx_f] = sparse(Diagonal(vars.λ_lb))
-    J[idx_λ_lb, idx_λ_lb] = sparse(Diagonal(vars.f .+ net.fmax))
+    J[idx.λ_lb, idx.f] = sparse(Diagonal(vars.λ_lb))
+    J[idx.λ_lb, idx.λ_lb] = sparse(Diagonal(vars.f .+ net.fmax))
 
     # ∂K_λ_ub/∂... (complementary slackness for upper flow bound)
     # K_λ_ub = λ_ub .* (fmax - f)
-    J[idx_λ_ub, idx_f] = -sparse(Diagonal(vars.λ_ub))
-    J[idx_λ_ub, idx_λ_ub] = sparse(Diagonal(net.fmax .- vars.f))
+    J[idx.λ_ub, idx.f] = -sparse(Diagonal(vars.λ_ub))
+    J[idx.λ_ub, idx.λ_ub] = sparse(Diagonal(net.fmax .- vars.f))
 
     # ∂K_ρ_lb/∂... (complementary slackness for lower gen bound)
     # K_ρ_lb = ρ_lb .* (g - gmin)
-    J[idx_ρ_lb, idx_g] = sparse(Diagonal(vars.ρ_lb))
-    J[idx_ρ_lb, idx_ρ_lb] = sparse(Diagonal(vars.g .- net.gmin))
+    J[idx.ρ_lb, idx.g] = sparse(Diagonal(vars.ρ_lb))
+    J[idx.ρ_lb, idx.ρ_lb] = sparse(Diagonal(vars.g .- net.gmin))
 
     # ∂K_ρ_ub/∂... (complementary slackness for upper gen bound)
     # K_ρ_ub = ρ_ub .* (gmax - g)
-    J[idx_ρ_ub, idx_g] = -sparse(Diagonal(vars.ρ_ub))
-    J[idx_ρ_ub, idx_ρ_ub] = sparse(Diagonal(net.gmax .- vars.g))
+    J[idx.ρ_ub, idx.g] = -sparse(Diagonal(vars.ρ_ub))
+    J[idx.ρ_ub, idx.ρ_ub] = sparse(Diagonal(net.gmax .- vars.g))
 
     # ∂K_power_bal/∂... (primal feasibility: power balance)
     # K_power_bal = G_inc * g - d - B * θ
-    J[idx_ν_bal, idx_θ] = -B_mat
-    J[idx_ν_bal, idx_g] = net.G_inc
+    J[idx.ν_bal, idx.θ] = -B_mat
+    J[idx.ν_bal, idx.g] = net.G_inc
 
     # ∂K_flow_def/∂... (primal feasibility: flow definition)
     # K_flow_def = f - WA * θ
-    J[idx_ν_flow, idx_θ] = -WA
-    J[idx_ν_flow, idx_f] = sparse(I, m, m)
+    J[idx.ν_flow, idx.θ] = -WA
+    J[idx.ν_flow, idx.f] = sparse(I, m, m)
 
     # ∂K_ref/∂θ (reference bus)
-    J[idx_η, net.ref_bus] = 1.0
+    J[idx.η, net.ref_bus] = 1.0
 
     return J
 end
@@ -315,23 +342,12 @@ Sparse matrix of size (kkt_dims × n).
 function calc_kkt_jacobian_demand(net::DCNetwork)
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
+    idx = kkt_indices(n, m, k)
 
     # ∂K/∂d only affects the power balance equation: K_power_bal = G_inc * g - d - B * θ
     # ∂K_power_bal/∂d = -I
-
-    # Index where power balance residuals start
-    idx_ν_bal = 2n + k + 3m + 2k + 1 - n  # Need to recalculate based on ordering
-    # Actually: idx starts at n+k+3m+2k+1 for power_bal block
-
     J_d = spzeros(dim, n)
-
-    # Power balance block starts at row (n + k + m + 2m + 2k + 1) = n + k + 3m + 2k + 1
-    # Wait, need to count rows properly based on kkt function output:
-    # K_θ (n), K_g (k), K_f (m), K_λ_lb (m), K_λ_ub (m), K_ρ_lb (k), K_ρ_ub (k), K_power_bal (n), K_flow_def (m), K_ref (1)
-    row_start = n + k + m + 2m + 2k + 1  # = n + k + 3m + 2k + 1
-    row_end = row_start + n - 1
-
-    J_d[row_start:row_end, :] = -sparse(I, n, n)
+    J_d[idx.ν_bal, :] = -sparse(I, n, n)
 
     return J_d
 end
@@ -341,7 +357,7 @@ end
 # =============================================================================
 
 """
-    calc_kkt_jacobian_switching(prob::DCOPFProblem)
+    calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
 
 Compute the Jacobian of KKT conditions with respect to switching variables ∂K/∂s.
 
@@ -350,6 +366,10 @@ The switching variable s ∈ [0,1]^m affects the susceptance-weighted Laplacian:
 - B = A' * W * A
 - Flow definition: f = W * A * θ
 
+# Arguments
+- `prob`: DCOPFProblem
+- `sol`: Pre-computed solution
+
 # Returns
 Sparse matrix of size (kkt_dims × m).
 
@@ -357,13 +377,11 @@ Sparse matrix of size (kkt_dims × m).
 The switching variables s relaxes the binary line status to continuous values,
 enabling gradient-based optimization for topology control.
 """
-function calc_kkt_jacobian_switching(prob::DCOPFProblem)
+function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
 
-    # Get current solution for θ values
-    sol = solve!(prob)
     θ = sol.θ
 
     # Current switching state
@@ -373,11 +391,8 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem)
 
     J_s = spzeros(dim, m)
 
-    # Row indices in KKT system:
-    # K_θ (n), K_g (k), K_f (m), K_λ_lb (m), K_λ_ub (m), K_ρ_lb (k), K_ρ_ub (k), K_power_bal (n), K_flow_def (m), K_ref (1)
-    idx_θ = 1:n
-    idx_power_bal = n + k + 3m + 2k + 1 : n + k + 3m + 2k + n
-    idx_flow_def = n + k + 3m + 2k + n + 1 : n + k + 3m + 2k + n + m
+    # Use centralized index calculation
+    idx = kkt_indices(n, m, k)
 
     # ∂W/∂s_e = Diagonal with -b_e at position (e,e)
     # ∂B/∂s_e = A' * ∂W/∂s_e * A = -b_e * A[e,:]' * A[e,:]
@@ -409,7 +424,7 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem)
         A_e_vec = Vector(A_e[:])  # Convert to dense vector
         Aθ_e = (A * θ)[e]  # scalar: phase angle difference across branch e
         ∂K_power_bal_∂s_e = b[e] * A_e_vec * Aθ_e  # n×1 vector (scalar times vector)
-        J_s[idx_power_bal, e] = ∂K_power_bal_∂s_e
+        J_s[idx.ν_bal, e] = ∂K_power_bal_∂s_e
 
         # 3. ∂K_flow_def/∂s_e: K_flow_def = f - WA * θ
         # ∂K_flow_def/∂s_e = -∂(WA)/∂s_e * θ
@@ -417,7 +432,7 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem)
         # All other rows are 0
         ∂K_flow_def_∂s_e = spzeros(m)
         ∂K_flow_def_∂s_e[e] = b[e] * Aθ_e  # Note: -(-b_e * Aθ_e) = b_e * Aθ_e
-        J_s[idx_flow_def, e] = ∂K_flow_def_∂s_e
+        J_s[idx.ν_flow, e] = ∂K_flow_def_∂s_e
 
         # 4. K_θ also depends on s through B and WA affecting the stationarity conditions
         # K_θ = B' * ν_bal + WA' * ν_flow + e_ref * η_ref
@@ -426,7 +441,7 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem)
         # However, for implicit differentiation, we treat duals as variables, not functions of s.
         # So ∂K_θ/∂s_e at fixed duals is computed as above.
         ν_bal = sol.ν_bal
-        ν_flow = dual.(prob.cons.flow_def)
+        ν_flow = sol.ν_flow
 
         # ∂B'/∂s_e = -b_e * A[e,:]' * A[e,:]  (this is symmetric, same as ∂B/∂s_e)
         # For the outer product, we need: -b_e * (A[e,:] ⋅ ν_bal) * A[e,:]'
@@ -439,32 +454,14 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem)
         # So ∂(WA')/∂s_e * ν_flow = -b_e * A[e,:]' * ν_flow[e]
         ∂K_θ_from_ν_flow = -b[e] * A_e_vec * ν_flow[e]  # n×1
 
-        J_s[idx_θ, e] = ∂K_θ_from_ν_bal + ∂K_θ_from_ν_flow
+        J_s[idx.θ, e] = ∂K_θ_from_ν_bal + ∂K_θ_from_ν_flow
     end
 
     return J_s
 end
 
 """
-    TopologySensitivity
-
-Sensitivity of DC OPF solution with respect to switching variables s ∈ [0,1]^m.
-
-# Fields
-- `dθ_ds::Matrix{Float64}`: Sensitivity of phase angles (n × m)
-- `dg_ds::Matrix{Float64}`: Sensitivity of generation (k × m)
-- `df_ds::Matrix{Float64}`: Sensitivity of flows (m × m)
-- `dlmp_ds::Matrix{Float64}`: Sensitivity of LMPs (n × m)
-"""
-struct TopologySensitivity
-    dθ_ds::Matrix{Float64}
-    dg_ds::Matrix{Float64}
-    df_ds::Matrix{Float64}
-    dlmp_ds::Matrix{Float64}
-end
-
-"""
-    calc_sensitivity_switching(prob::DCOPFProblem)
+    calc_sensitivity_switching(prob::DCOPFProblem) → OPFSwitchingSens
 
 Compute sensitivities of DC OPF solution with respect to switching variables.
 
@@ -474,40 +471,40 @@ Uses the implicit function theorem on KKT conditions:
 where z is the flattened primal-dual variable vector.
 
 # Returns
-`TopologySensitivity` containing Jacobians of solution variables w.r.t. switching.
+`OPFSwitchingSens` containing Jacobians of solution variables w.r.t. switching:
+- `dva_dz`: ∂va/∂z (n × m) - voltage angles w.r.t. switching
+- `dg_dz`: ∂g/∂z (k × m) - generation w.r.t. switching
+- `df_dz`: ∂f/∂z (m × m) - flows w.r.t. switching
+- `dlmp_dz`: ∂LMP/∂z (n × m) - LMP w.r.t. switching
 """
 function calc_sensitivity_switching(prob::DCOPFProblem)
     net = prob.network
     n, m, k = net.n, net.m, net.k
 
-    # Solve the problem first
+    # Solve the problem once
     sol = solve!(prob)
 
-    # Compute Jacobians
-    J_z = calc_kkt_jacobian(prob)  # ∂K/∂z
-    J_s = calc_kkt_jacobian_switching(prob)  # ∂K/∂s
+    # Compute Jacobians (pass solution to avoid re-solving)
+    J_z = calc_kkt_jacobian(prob; sol=sol)  # ∂K/∂z
+    J_s = calc_kkt_jacobian_switching(prob, sol)  # ∂K/∂s
 
     # Implicit function theorem: ∂z/∂s = -(∂K/∂z)⁻¹ · (∂K/∂s)
     dz_ds = -Matrix(J_z) \ Matrix(J_s)
 
-    # Extract sensitivities for each variable type
-    # Variable ordering: [θ(n), g(k), f(m), λ_lb(m), λ_ub(m), ρ_lb(k), ρ_ub(k), ν_bal(n), ν_flow(m), η_ref(1)]
-    idx_θ = 1:n
-    idx_g = n+1:n+k
-    idx_f = n+k+1:n+k+m
-    idx_ν_bal = n+k+3m+2k+1:2n+k+3m+2k
+    # Extract sensitivities using centralized indices
+    idx = kkt_indices(n, m, k)
 
-    dθ_ds = dz_ds[idx_θ, :]
-    dg_ds = dz_ds[idx_g, :]
-    df_ds = dz_ds[idx_f, :]
-    dν_ds = dz_ds[idx_ν_bal, :]  # For LMP sensitivity
+    dva_ds = dz_ds[idx.θ, :]
+    dg_ds = dz_ds[idx.g, :]
+    df_ds = dz_ds[idx.f, :]
+    dν_ds = dz_ds[idx.ν_bal, :]  # For LMP sensitivity
 
     # LMP sensitivity: LMP_i = ν_i - Σₑ (A[e,i] · bₑ · sₑ · (λ_ub_e - λ_lb_e))
     # This requires chain rule accounting for both ν and constraint duals
     # For simplicity, use ν_bal as primary LMP component
     dlmp_ds = dν_ds  # Simplified: assumes congestion terms don't dominate
 
-    return TopologySensitivity(dθ_ds, dg_ds, df_ds, dlmp_ds)
+    return OPFSwitchingSens(dva_ds, dg_ds, df_ds, dlmp_ds)
 end
 
 """
