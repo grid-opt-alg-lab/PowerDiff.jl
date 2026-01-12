@@ -446,25 +446,7 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem)
 end
 
 """
-    TopologySensitivity
-
-Sensitivity of DC OPF solution with respect to switching variables s ∈ [0,1]^m.
-
-# Fields
-- `dθ_ds::Matrix{Float64}`: Sensitivity of phase angles (n × m)
-- `dg_ds::Matrix{Float64}`: Sensitivity of generation (k × m)
-- `df_ds::Matrix{Float64}`: Sensitivity of flows (m × m)
-- `dlmp_ds::Matrix{Float64}`: Sensitivity of LMPs (n × m)
-"""
-struct TopologySensitivity
-    dθ_ds::Matrix{Float64}
-    dg_ds::Matrix{Float64}
-    df_ds::Matrix{Float64}
-    dlmp_ds::Matrix{Float64}
-end
-
-"""
-    calc_sensitivity_switching(prob::DCOPFProblem)
+    calc_sensitivity_switching(prob::DCOPFProblem) → SwitchingSensitivity
 
 Compute sensitivities of DC OPF solution with respect to switching variables.
 
@@ -474,7 +456,7 @@ Uses the implicit function theorem on KKT conditions:
 where z is the flattened primal-dual variable vector.
 
 # Returns
-`TopologySensitivity` containing Jacobians of solution variables w.r.t. switching.
+`SwitchingSensitivity` containing Jacobians of solution variables w.r.t. switching.
 """
 function calc_sensitivity_switching(prob::DCOPFProblem)
     net = prob.network
@@ -507,7 +489,7 @@ function calc_sensitivity_switching(prob::DCOPFProblem)
     # For simplicity, use ν_bal as primary LMP component
     dlmp_ds = dν_ds  # Simplified: assumes congestion terms don't dominate
 
-    return TopologySensitivity(dθ_ds, dg_ds, df_ds, dlmp_ds)
+    return SwitchingSensitivity(dθ_ds, dg_ds, df_ds, dlmp_ds)
 end
 
 """

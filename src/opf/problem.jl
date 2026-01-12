@@ -343,3 +343,125 @@ function _find_reference_bus(net::Dict)
     # Default to bus 1 if no reference found
     return 1
 end
+
+# =============================================================================
+# DC Power Flow (non-OPF)
+# =============================================================================
+
+"""
+    DCPowerFlowState(net::DCNetwork, g::AbstractVector, d::AbstractVector)
+
+Solve DC power flow for given generation and demand.
+
+Computes phase angles θ by solving the linear system:
+    L * θ = p
+where L = A' * Diag(-b ⊙ z) * A is the susceptance-weighted Laplacian
+and p = g - d is the net injection.
+
+The slack bus angle is set to zero, and the pseudoinverse is used for
+robustness (handles singular Laplacian from disconnected networks).
+
+# Arguments
+- `net`: DCNetwork containing topology and parameters
+- `g`: Generation vector (length n, aggregated at each bus)
+- `d`: Demand vector (length n)
+
+# Returns
+DCPowerFlowState containing angles, injections, and flows.
+
+# Example
+```julia
+net = DCNetwork(pm_data)
+d = calc_demand_vector(pm_data)
+g = zeros(net.n)  # Or specify generation at each bus
+state = DCPowerFlowState(net, g, d)
+```
+"""
+function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::AbstractVector{<:Real})
+    n, m = net.n, net.m
+    @assert length(g) == n "Generation vector length must match number of buses"
+    @assert length(d) == n "Demand vector length must match number of buses"
+
+    # Net injection
+    p = Float64.(g) - Float64.(d)
+
+    # Build susceptance matrix
+    L = calc_susceptance_matrix(net)
+
+    # Solve θ = L⁺ p using pseudoinverse
+    # Set slack bus injection to ensure power balance
+    p_balanced = copy(p)
+    p_balanced[net.ref_bus] = -sum(p) + p[net.ref_bus]  # Slack absorbs imbalance
+
+    # Use pseudoinverse for robustness
+    θ = pinv(Matrix(L)) * p_balanced
+
+    # Center around reference bus
+    θ = θ .- θ[net.ref_bus]
+
+    # Compute flows: f = W * A * θ where W = Diag(-b ⊙ z)
+    W = Diagonal(-net.b .* net.z)
+    f = Vector(W * net.A * θ)
+
+    return DCPowerFlowState(net, θ, p, Float64.(g), Float64.(d), f)
+end
+
+"""
+    DCPowerFlowState(net::DCNetwork, d::AbstractVector)
+
+Solve DC power flow with zero generation (pure load flow).
+
+# Arguments
+- `net`: DCNetwork containing topology and parameters
+- `d`: Demand vector (length n)
+
+# Returns
+DCPowerFlowState with generation set to zeros.
+"""
+function DCPowerFlowState(net::DCNetwork, d::AbstractVector{<:Real})
+    g = zeros(net.n)
+    return DCPowerFlowState(net, g, d)
+end
+
+"""
+    DCPowerFlowState(net::Dict; g=nothing, d=nothing)
+
+Construct DCPowerFlowState from PowerModels network dictionary.
+
+If `d` is not provided, extracts demand from the network.
+If `g` is not provided, aggregates generation from gen data to buses.
+"""
+function DCPowerFlowState(pm_net::Dict; g::Union{Nothing,AbstractVector}=nothing, d::Union{Nothing,AbstractVector}=nothing)
+    net = DCNetwork(pm_net)
+
+    # Extract demand if not provided
+    if isnothing(d)
+        d = calc_demand_vector(pm_net)
+    end
+
+    # Aggregate generation to buses if not provided
+    if isnothing(g)
+        g = _calc_generation_vector(pm_net, net.n)
+    end
+
+    return DCPowerFlowState(net, g, d)
+end
+
+"""
+Aggregate generation to bus-level vector.
+"""
+function _calc_generation_vector(net::Dict, n::Int)
+    gen = net["gen"]
+    k = length(gen)
+
+    g = zeros(n)
+    for i in 1:k
+        gen_data = gen[string(i)]
+        bus_idx = gen_data["gen_bus"]
+        # Use pg if available (from solved power flow), otherwise use midpoint of limits
+        pg = get(gen_data, "pg", (gen_data["pmin"] + gen_data["pmax"]) / 2)
+        g[bus_idx] += pg
+    end
+
+    return g
+end

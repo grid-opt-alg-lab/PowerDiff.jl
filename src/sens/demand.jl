@@ -62,10 +62,10 @@ function calc_sensitivity_demand(prob::DCOPFProblem)
     dν_bal_dd = dz_dd[idx_ν_bal, :]
 
     # Compute LMP sensitivity
-    # LMP = ν_bal - A' * Diag(b .* z) * (λ_ub - λ_lb)
-    # ∂LMP/∂d = ∂ν_bal/∂d - A' * Diag(b .* z) * (∂λ_ub/∂d - ∂λ_lb/∂d)
-    bz_diag = Diagonal(net.b .* net.z)
-    dlmp_dd = dν_bal_dd - net.A' * bz_diag * (dλ_ub_dd - dλ_lb_dd)
+    # In the B-θ formulation, LMP = ν_bal (the power balance dual already
+    # incorporates network topology through the Laplacian constraint)
+    # Therefore: ∂LMP/∂d = ∂ν_bal/∂d
+    dlmp_dd = dν_bal_dd
 
     return DemandSensitivity(
         Matrix(dθ_dd),

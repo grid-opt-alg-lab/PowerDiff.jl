@@ -63,7 +63,7 @@ function voltage_topology_sensitivities(
     sensitivities_g = _vm_projection(vm, v_re, v_im, Δstate_g)
     sensitivities_b = _vm_projection(vm, v_re, v_im, Δstate_b)
 
-    return VoltageSensitivityTopology(Matrix(sensitivities_g), Matrix(sensitivities_b))
+    return VoltageTopologySensitivity(Matrix(sensitivities_g), Matrix(sensitivities_b))
 end
 
 function _assert_pf_solution(
@@ -136,4 +136,119 @@ function _vm_projection(
     Δv_re = Δstate[1:n, :]
     Δv_im = Δstate[n+1:end, :]
     return scaling_re * Δv_re + scaling_im * Δv_im
+end
+
+# =============================================================================
+# DC Power Flow Switching Sensitivity
+# =============================================================================
+
+"""
+    calc_sensitivity_switching(state::DCPowerFlowState) → SwitchingSensitivity
+
+Compute switching sensitivity for DC power flow (not OPF).
+
+For DC power flow θ = L(z)⁺ p, the sensitivity of angles w.r.t. switching is:
+
+    ∂θ/∂zₑ = -L⁺ · (∂L/∂zₑ) · θ
+
+where ∂L/∂zₑ = -bₑ · (aₑ · aₑ') is the rank-1 outer product of incidence column.
+
+This uses the formula from matrix perturbation theory (RandomizedSwitching pattern).
+
+# Arguments
+- `state`: DCPowerFlowState containing the solved power flow
+
+# Returns
+`SwitchingSensitivity` with:
+- `dθ_dz`: Jacobian ∂θ/∂z (n × m)
+- `dg_dz`: Empty matrix (no generation in power flow)
+- `df_dz`: Jacobian ∂f/∂z (m × m)
+- `dlmp_dz`: Zeros (no LMP in power flow)
+"""
+function calc_sensitivity_switching(state::DCPowerFlowState)
+    net = state.net
+    n, m = net.n, net.m
+
+    # Build susceptance matrix and its pseudoinverse
+    L = calc_susceptance_matrix(net)
+    L_pinv = pinv(Matrix(L))
+
+    # Preallocate
+    dθ_dz = zeros(n, m)
+
+    # For each edge e, compute ∂θ/∂zₑ
+    for e in 1:m
+        # Get incidence column for edge e: a_e = A[e, :]
+        # Note: A is m × n, so we get the e-th row
+        aₑ = Vector(net.A[e, :])
+
+        # ∂L/∂zₑ = -bₑ · (aₑ · aₑ')
+        # This is a rank-1 matrix
+        ∂L_∂zₑ = -net.b[e] * (aₑ * aₑ')
+
+        # ∂θ/∂zₑ = -L⁺ · ∂L/∂zₑ · θ
+        dθ_dz[:, e] = -L_pinv * ∂L_∂zₑ * state.θ
+    end
+
+    # Flow sensitivity: f = W · A · θ where W = Diag(-b ⊙ z)
+    # fₑ = -bₑ · zₑ · (A[e,:] · θ)
+    #
+    # ∂fₑ/∂zₑ' has two components:
+    # 1. Direct effect (if e' = e): ∂fₑ/∂zₑ = -bₑ · (A[e,:] · θ)
+    # 2. Indirect effect via θ: ∂fₑ/∂zₑ' = -bₑ · zₑ · (A[e,:] · ∂θ/∂zₑ')
+    df_dz = zeros(m, m)
+
+    W = Diagonal(-net.b .* net.z)
+    for e_prime in 1:m
+        # Indirect effect: all edges feel the change in θ
+        df_dz[:, e_prime] = W * net.A * dθ_dz[:, e_prime]
+
+        # Direct effect: only edge e_prime
+        df_dz[e_prime, e_prime] += -net.b[e_prime] * dot(net.A[e_prime, :], state.θ)
+    end
+
+    return SwitchingSensitivity(dθ_dz, df_dz)
+end
+
+"""
+    calc_sensitivity_demand(state::DCPowerFlowState) → DemandSensitivity
+
+Compute demand sensitivity for DC power flow (not OPF).
+
+For DC power flow θ = L(z)⁺ p, the sensitivity of angles w.r.t. demand is:
+
+    ∂θ/∂d = -L⁺
+
+since p = g - d and ∂p/∂d = -I.
+
+# Arguments
+- `state`: DCPowerFlowState containing the solved power flow
+
+# Returns
+`DemandSensitivity` with:
+- `dθ_dd`: Jacobian ∂θ/∂d (n × n), equals -L⁺
+- `dg_dd`: Zero matrix (no generation sensitivity in pure power flow)
+- `df_dd`: Jacobian ∂f/∂d (m × n)
+- `dlmp_dd`: Zero matrix (no LMP in power flow)
+"""
+function calc_sensitivity_demand(state::DCPowerFlowState)
+    net = state.net
+    n, m = net.n, net.m
+
+    # Build susceptance matrix and its pseudoinverse
+    L = calc_susceptance_matrix(net)
+    L_pinv = pinv(Matrix(L))
+
+    # ∂θ/∂d = -L⁺ (since ∂p/∂d = -I and θ = L⁺ p)
+    dθ_dd = -L_pinv
+
+    # ∂f/∂d = W · A · ∂θ/∂d
+    W = Diagonal(-net.b .* net.z)
+    df_dd = W * net.A * dθ_dd
+
+    # No generation or LMP in pure power flow
+    dg_dd = zeros(0, n)  # No generators
+    dlmp_dd = zeros(n, n)  # No LMP
+
+    return DemandSensitivity(dθ_dd, dg_dd, df_dd, dlmp_dd)
 end
