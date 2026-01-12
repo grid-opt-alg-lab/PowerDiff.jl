@@ -21,10 +21,13 @@ include("types/abstract.jl")
 include("types/parameters.jl")
 
 # =============================================================================
-# Core type definitions
+# Core type definitions (modular structure)
 # =============================================================================
-include("structs.jl")
-include("types/ac_network.jl")
+include("types/dc_network.jl")      # DCNetwork
+include("types/dc_states.jl")       # DCPowerFlowState, DCOPFSolution
+include("types/ac_states.jl")       # ACPowerFlowState (struct)
+include("types/ac_network.jl")      # ACNetwork, ACPowerFlowState constructors
+include("types/sensitivities.jl")   # All sensitivity result types
 
 # =============================================================================
 # Power flow and graph utilities
@@ -33,6 +36,12 @@ include("pf/admittance_matrix.jl")
 include("graphs/laplacian.jl")
 include("pf/bus_injection.jl")
 include("pf/pf_eqns.jl")
+
+# =============================================================================
+# Deprecated types (for backwards compatibility)
+# =============================================================================
+include("deprecated/pf_structs.jl")
+include("deprecated/measurements.jl")
 
 # =============================================================================
 # DC OPF (B-θ formulation)

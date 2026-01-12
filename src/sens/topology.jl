@@ -168,10 +168,18 @@ This uses the formula from matrix perturbation theory (RandomizedSwitching patte
 function calc_sensitivity_switching(state::DCPowerFlowState)
     net = state.net
     n, m = net.n, net.m
+    ref = net.ref_bus
 
     # Build susceptance matrix and its pseudoinverse
     L = calc_susceptance_matrix(net)
     L_pinv = pinv(Matrix(L))
+
+    # Balance p at slack bus as in DCPowerFlowState constructor
+    p_balanced = copy(state.p)
+    p_balanced[ref] = -sum(state.p) + state.p[ref]
+
+    # Compute raw θ (before centering)
+    θ_raw = L_pinv * p_balanced
 
     # Preallocate
     dθ_dz = zeros(n, m)
@@ -186,8 +194,12 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
         # This is a rank-1 matrix
         ∂L_∂zₑ = -net.b[e] * (aₑ * aₑ')
 
-        # ∂θ/∂zₑ = -L⁺ · ∂L/∂zₑ · θ
-        dθ_dz[:, e] = -L_pinv * ∂L_∂zₑ * state.θ
+        # ∂θ_raw/∂zₑ = -L⁺ · ∂L/∂zₑ · θ_raw
+        dθ_raw_dzₑ = -L_pinv * ∂L_∂zₑ * θ_raw
+
+        # Account for centering: θ = θ_raw - θ_raw[ref]
+        # So ∂θ/∂zₑ = ∂θ_raw/∂zₑ - (∂θ_raw/∂zₑ)[ref] · 1
+        dθ_dz[:, e] = dθ_raw_dzₑ .- dθ_raw_dzₑ[ref]
     end
 
     # Flow sensitivity: f = W · A · θ where W = Diag(-b ⊙ z)

@@ -25,79 +25,133 @@ julia> using PowerModelsDiff
 
 ## Architecture
 
-### Core Components
+### Unified Type Hierarchy
 
-**DC OPF - B-theta Formulation (src/opf/)**
+The package uses a unified type hierarchy enabling multiple dispatch for sensitivity computations:
 
-The primary feature is a differentiable DC OPF using the susceptance-weighted Laplacian (B-theta) formulation:
+```
+AbstractPowerNetwork
+├── DCNetwork           # DC B-theta formulation
+└── ACNetwork           # AC with vectorized admittance
 
-- `DCNetwork`: Network data struct with topology (`A`), generator mapping (`G_inc`), susceptances (`b`), switching states (`z`), limits, and costs
-- `DCOPFProblem`: JuMP-based optimization wrapper with variables theta (angles), g (generation), f (flows)
-- `DCOPFSolution`: Solution container with primal values and dual variables
-- `solve!(prob)`: Solve and return solution with duals
+AbstractPowerFlowState
+├── DCPowerFlowState    # DC power flow solution (theta = L+ * p)
+├── ACPowerFlowState    # AC power flow solution (complex voltages)
+└── AbstractOPFSolution
+    └── DCOPFSolution   # DC OPF with generation, flows, duals
 
-Key files:
-- `src/opf/problem.jl`: Network construction, problem formulation, solving
-- `src/opf/kkt.jl`: KKT system for implicit differentiation
+AbstractOPFProblem
+└── DCOPFProblem        # JuMP-based DC OPF wrapper
 
-**Sensitivity Analysis (src/sens/)**
-
-Sensitivities computed via implicit function theorem on KKT conditions:
-
-- `calc_sensitivity_demand(prob)`: Returns `DemandSensitivity` with dtheta_dd, dg_dd, df_dd, dlmp_dd
-- `calc_sensitivity_switching(prob)`: Returns `TopologySensitivity` with derivatives w.r.t. switching variables
-- `calc_lmp(sol, net)`: Locational Marginal Prices from duals
-
-Key files:
-- `src/sens/demand.jl`: Demand sensitivity via KKT system
-- `src/sens/lmp.jl`: LMP computation and decomposition
-- `src/sens/topology.jl`: AC voltage topology sensitivity (existing)
-
-**Vectorized Admittance Representation (src/graphs/, src/pf/)**
-
-The package uses vectorized admittance for efficient differentiation:
-- Off-diagonal elements stored as `G_edges`, `B_edges`
-- Self-edges stored separately as `G_self`, `B_self`
-- Reconstruction: `A' * Diagonal(G + B*im) * A`
-
-Key utilities:
-- `vectorize_laplacian_weights(net)`: Convert admittance matrix to vector form
-- `calc_incidence_matrix(net; full_nodes, full_edges)`: Flexible incidence construction
-- `laplacian(G, B, n)`: Reconstruct Laplacian from vectors
-
-### Key Structs (src/structs.jl)
-
-```julia
-# DC OPF Types
-struct DCNetwork           # Network topology and parameters
-struct DCOPFSolution       # Primal and dual solution values
-mutable struct DCOPFProblem # JuMP model wrapper
-
-# Sensitivity Types
-struct DemandSensitivity      # dtheta/dd, dg/dd, df/dd, dlmp/dd
-struct TopologySensitivity    # dtheta/ds, dg/ds, df/ds, dlmp/ds
-
-# AC Sensitivity Types
-struct VectorizedAdmittanceMatrix
-struct VoltageSensitivityTopology
+AbstractSensitivityParameter
+├── DemandParameter, CostParameter, FlowLimitParameter
+├── SusceptanceParameter, SwitchingParameter
+├── PowerInjectionParameter, TopologyParameter
 ```
 
-### KKT System
-
-For implicit differentiation, the KKT conditions are structured as:
+### Unified Sensitivity API
 
 ```julia
-# Variable ordering in flattened vector z:
-# [theta(n), g(k), f(m), lambda_lb(m), lambda_ub(m), rho_lb(k), rho_ub(k), nu_bal(n), nu_flow(m), eta_ref(1)]
+# Parameter singletons for dispatch
+DEMAND, COST, FLOWLIMIT, SUSCEPTANCE, SWITCHING, POWER, TOPOLOGY
 
-kkt_dims(net)              # Total dimension: 2n + 4m + 3k + 1
+# Unified interface
+calc_sensitivity(state, parameter) -> AbstractSensitivity
+
+# Examples:
+sens = calc_sensitivity(pf_state, SWITCHING)   # DC PF switching
+sens = calc_sensitivity(prob, DEMAND)          # DC OPF demand
+sens = calc_sensitivity(ac_state, POWER)       # AC voltage-power
+```
+
+### DC OPF - B-theta Formulation
+
+Uses susceptance-weighted Laplacian `L = A' * Diagonal(-b .* z) * A`:
+
+- `DCNetwork`: Network data (topology `A`, susceptances `b`, switching `z`, limits, costs)
+- `DCOPFProblem`: JuMP optimization wrapper
+- `DCOPFSolution`: Primal (theta, g, f) and dual variables
+- `DCPowerFlowState`: Non-OPF power flow (theta = L+ * p)
+
+### AC Power Flow
+
+- `ACNetwork`: Vectorized admittance (g, b vectors, incidence A, shunts)
+- `ACPowerFlowState`: Complex voltages, injections, with optional ACNetwork reference
+- Power flow equations as functions: `p(net, v)`, `q(net, v)`, `admittance_matrix(net)`
+
+### Sensitivity Analysis (src/sens/)
+
+**DC Sensitivities** (via KKT implicit differentiation):
+- `calc_sensitivity_demand(prob)` -> `DemandSensitivity`
+- `calc_sensitivity_switching(prob)` -> `SwitchingSensitivity`
+- `calc_sensitivity_cost(prob)` -> `CostSensitivity`
+- `calc_sensitivity_flowlimit(prob)` -> `FlowLimitSensitivity`
+- `calc_sensitivity_susceptance(prob)` -> `SusceptanceSensitivity`
+
+**DC Power Flow Sensitivities** (via Laplacian derivative):
+- `calc_sensitivity_switching(state::DCPowerFlowState)` -> `SwitchingSensitivity`
+- `calc_sensitivity_demand(state::DCPowerFlowState)` -> `DemandSensitivity`
+
+**AC Sensitivities**:
+- `calc_voltage_power_sensitivities(state)` -> `VoltagePowerSensitivity`
+- `voltage_topology_sensitivities(net)` -> `VoltageTopologySensitivity`
+
+### KKT System (src/opf/kkt.jl)
+
+For implicit differentiation via `dz/dp = -(dK/dz)^{-1} * (dK/dp)`:
+
+```julia
+kkt_dims(net)                  # Total KKT dimension
 flatten_variables(sol, prob)   # Solution -> vector
 unflatten_variables(z, prob)   # Vector -> named tuple
-kkt(z, prob, d)            # Evaluate KKT residuals
-calc_kkt_jacobian(prob)    # Analytical sparse Jacobian d(KKT)/dz
+kkt(z, prob, d)                # KKT residual vector
+calc_kkt_jacobian(prob)        # Sparse Jacobian d(KKT)/dz
 ```
 
-Sensitivities computed as: `dz/dp = -(dK/dz)^{-1} * (dK/dp)`
+## File Organization
+
+```
+src/
+├── PowerModelsDiff.jl          # Main module with exports
+├── types/
+│   ├── abstract.jl             # Abstract type hierarchy
+│   ├── parameters.jl           # Sensitivity parameter types (singletons)
+│   ├── dc_network.jl           # DCNetwork
+│   ├── dc_states.jl            # DCPowerFlowState, DCOPFSolution
+│   ├── ac_states.jl            # ACPowerFlowState
+│   ├── ac_network.jl           # ACNetwork + constructors
+│   └── sensitivities.jl        # All sensitivity result types
+├── opf/
+│   ├── problem.jl              # DCOPFProblem, solve!, DCNetwork constructors
+│   └── kkt.jl                  # KKT system, OPF switching sensitivity
+├── sens/
+│   ├── interface.jl            # Unified calc_sensitivity() dispatch
+│   ├── topology.jl             # DC PF switching/demand sensitivity
+│   ├── demand.jl               # DC OPF demand sensitivity
+│   ├── cost.jl                 # DC OPF cost sensitivity
+│   ├── flowlimit.jl            # DC OPF flow limit sensitivity
+│   ├── susceptance.jl          # DC OPF susceptance sensitivity
+│   ├── voltage.jl              # AC voltage-power sensitivity
+│   ├── current.jl              # AC current sensitivity
+│   └── lmp.jl                  # LMP computation
+├── pf/
+│   ├── pf_eqns.jl              # Power flow equations (p, q, vm functions)
+│   ├── admittance_matrix.jl    # VectorizedAdmittanceMatrix
+│   └── bus_injection.jl        # Power injection calculations
+├── graphs/
+│   └── laplacian.jl            # Incidence matrices, Laplacian utilities
+└── deprecated/
+    ├── pf_structs.jl           # NetworkTopology, PowerFlowEquations (deprecated)
+    └── measurements.jl         # Legacy state estimation types
+
+test/
+├── runtests.jl                 # Main test runner
+├── common.jl                   # Shared test utilities
+├── unified/
+│   ├── test_interface.jl       # Unified API tests
+│   └── test_sensitivity_verification.jl  # ForwardDiff validation
+└── mwe_unified.jl              # Minimum working example
+```
 
 ## Important Conventions
 
@@ -107,75 +161,60 @@ Sensitivities computed as: `dz/dp = -(dK/dz)^{-1} * (dK/dp)`
 - Module alias: `const PM = PowerModels`
 
 **Multiple Dispatch Style**
-- Use dispatch instead of function name suffixes (e.g., `kkt(prob::DCOPFProblem)` not `kkt_Btheta`)
-- Use `calc_` prefix for computation functions (following PowerModels.jl style)
+- Use dispatch on types, not function name suffixes
+- Use `calc_` prefix for computation functions (PowerModels.jl convention)
+- Sensitivity functions dispatch on state type AND parameter type
 
 **Matrix Orientations**
 - Incidence matrix `A` is (m x n): rows are branches, columns are buses
-- B-theta formulation: `B = A' * Diagonal(-b .* z) * A` (susceptance-weighted Laplacian)
+- B-theta Laplacian: `L = A' * Diagonal(-b .* z) * A`
+- AC admittance: `Y = A' * Diag(g + j*b) * A + Diag(g_shunt + j*b_shunt)`
 
 **Switching Variables**
-- `z` in DCNetwork stores switching states in [0,1]
-- z=1 means branch is closed (active), z=0 means open
+- `z` in DCNetwork/ACNetwork stores switching states in [0,1]
+- z=1 means branch closed (active), z=0 means open
 
 **Default Solver**
-- Clarabel (interior-point conic solver) is the default
+- Clarabel (interior-point conic solver) is the default for DC OPF
 - Other supported: Ipopt, HiGHS, Gurobi
 
-## File Organization
-
-```
-src/
-├── PowerModelsDiff.jl     # Main module with exports
-├── structs.jl             # Type definitions
-├── opf/
-│   ├── problem.jl         # DCNetwork, DCOPFProblem, solve!
-│   └── kkt.jl            # KKT system, Jacobians, topology sensitivity
-├── sens/
-│   ├── demand.jl         # Demand sensitivity analysis
-│   ├── lmp.jl            # LMP computation
-│   └── topology.jl       # AC voltage topology sensitivity
-├── pf/
-│   ├── admittance_matrix.jl  # VectorizedAdmittanceMatrix
-│   ├── bus_injection.jl      # Power injection calculations
-│   └── pf_eqns.jl           # Power flow equation structs
-├── graphs/
-│   └── laplacian.jl      # Incidence matrices, Laplacian utilities
-└── deprecated/           # Legacy implementations (dcopf.jl, dcopf_B_theta.jl)
-
-test/
-└── runtests.jl           # Comprehensive test suite
-```
-
-## Exports
+## Key Exports
 
 ```julia
-# DC OPF Types
-export DCNetwork, DCOPFProblem, DCOPFSolution
+# Abstract Types
+export AbstractPowerNetwork, AbstractPowerFlowState, AbstractOPFSolution, AbstractOPFProblem
 
-# OPF Functions
-export solve!, update_demand!
+# Parameter Types (for unified dispatch)
+export DEMAND, GENERATION, COST, FLOWLIMIT, SUSCEPTANCE, SWITCHING, POWER, TOPOLOGY
+
+# DC Types
+export DCNetwork, DCPowerFlowState, DCOPFProblem, DCOPFSolution
+
+# AC Types
+export ACNetwork, ACPowerFlowState
+
+# Sensitivity Result Types
+export DemandSensitivity, CostSensitivity, SwitchingSensitivity
+export FlowLimitSensitivity, SusceptanceSensitivity
+export VoltagePowerSensitivity, VoltageTopologySensitivity
+export CurrentPowerSensitivity, CurrentTopologySensitivity
+
+# Unified Sensitivity Interface
+export calc_sensitivity, calc_voltage_sensitivity
+
+# DC Functions
+export solve!, update_demand!, update_switching!
 export calc_demand_vector, calc_susceptance_matrix
+export calc_lmp, calc_congestion_component, calc_energy_component
 
-# LMP Functions
-export calc_lmp, calc_lmp_from_duals, calc_congestion_component
+# AC Functions
+export admittance_matrix, branch_current, branch_power
+export calc_voltage_power_sensitivities, voltage_topology_sensitivities
+export p, q, vm, vm2, p_polar, q_polar
 
-# Sensitivity Types
-export DemandSensitivity, TopologySensitivity
-
-# Sensitivity Functions
-export calc_sensitivity_demand, calc_sensitivity_demand_primal
-export calc_sensitivity_switching, update_switching!
-export calc_generation_participation_factors, calc_ptdf_from_sensitivity
-
-# KKT Functions
-export kkt, kkt_dims, calc_kkt_jacobian
-export flatten_variables, unflatten_variables
-
-# AC Topology Sensitivity (existing)
-export VoltageSensitivityTopology, voltage_topology_sensitivities
+# KKT Functions (advanced)
+export kkt, kkt_dims, calc_kkt_jacobian, flatten_variables, unflatten_variables
 
 # Graph Utilities
-export VectorizedAdmittanceMatrix, vectorize_laplacian_weights
 export laplacian, full_incidence_matrix, calc_incidence_matrix
 ```

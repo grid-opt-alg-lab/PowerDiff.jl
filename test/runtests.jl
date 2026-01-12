@@ -4,6 +4,7 @@ using SparseArrays
 using Statistics
 using PowerModelsDiff
 using PowerModels
+using ForwardDiff
 using Ipopt
 using JuMP: MOI
 
@@ -561,3 +562,8 @@ end
 # investigation of admittance matrix reconstruction issues with standard test cases.
 # The original implementation was tested with a specific case14.m file.
 # TODO: Fix vectorize_laplacian_weights for general MATPOWER cases
+
+# =============================================================================
+# Unified Architecture Tests
+# =============================================================================
+include("unified/test_interface.jl")

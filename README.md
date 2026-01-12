@@ -4,12 +4,13 @@ A Julia package for differentiable power system analysis. Provides automatic dif
 
 ## Features
 
-- **DC OPF (B-theta formulation)**: Susceptance-weighted Laplacian formulation that preserves graphical structure
-- **Implicit differentiation**: Compute sensitivities via KKT conditions without differentiating through the solver
-- **LMP computation**: Locational Marginal Prices from dual variables
-- **Demand sensitivity**: How OPF solutions change with demand perturbations
-- **Topology sensitivity**: Sensitivities w.r.t. switching variables for topology optimization
-- **AC power flow sensitivities**: Voltage sensitivity with respect to topology parameters
+- **Unified type hierarchy**: Consistent API for DC OPF, DC power flow, and AC power flow
+- **DC OPF (B-theta formulation)**: Susceptance-weighted Laplacian that preserves graphical structure
+- **DC power flow sensitivities**: Switching and demand sensitivity for non-OPF power flow
+- **Implicit differentiation**: Compute OPF sensitivities via KKT conditions
+- **LMP computation**: Locational Marginal Prices from dual variables with decomposition
+- **AC power flow sensitivities**: Voltage and current sensitivity w.r.t. power and topology
+- **ForwardDiff verification**: All sensitivities verified against automatic differentiation
 
 ## Installation
 
@@ -28,99 +29,116 @@ using PowerModels
 raw = PowerModels.parse_file("case14.m")
 net = PowerModels.make_basic_network(raw)
 
-# Create DC network and solve OPF
+# =============================================================================
+# DC Power Flow (non-OPF)
+# =============================================================================
 dc_net = DCNetwork(net)
 d = calc_demand_vector(net)
+pf_state = DCPowerFlowState(dc_net, d)
+
+# Unified sensitivity API
+sens = calc_sensitivity(pf_state, SWITCHING)  # dtheta/dz
+sens = calc_sensitivity(pf_state, DEMAND)     # dtheta/dd
+
+# =============================================================================
+# DC OPF
+# =============================================================================
 prob = DCOPFProblem(dc_net, d)
 sol = solve!(prob)
 
-# Compute LMPs
+# LMPs and decomposition
 lmps = calc_lmp(sol, dc_net)
+energy = calc_energy_component(sol, dc_net)
+congestion = calc_congestion_component(sol, dc_net)
 
-# Compute demand sensitivities
-sens = calc_sensitivity_demand(prob)
+# Unified sensitivity API
+sens = calc_sensitivity(prob, DEMAND)      # dg/dd, dtheta/dd, df/dd, dlmp/dd
+sens = calc_sensitivity(prob, SWITCHING)   # dg/dz, dtheta/dz, df/dz, dlmp/dz
+sens = calc_sensitivity(prob, COST)        # dg/dcq, dg/dcl, dlmp/dc
 
-# Compute topology (switching) sensitivities
-topo_sens = calc_sensitivity_switching(prob)
+# =============================================================================
+# AC Power Flow
+# =============================================================================
+PowerModels.compute_ac_pf!(net)
+ac_state = ACPowerFlowState(net)
+
+# Voltage-power sensitivities
+sens = calc_sensitivity(ac_state, POWER)   # d|v|/dp, d|v|/dq
 ```
+
+## Type Hierarchy
+
+```
+AbstractPowerNetwork
+├── DCNetwork           # DC B-theta formulation
+└── ACNetwork           # AC with vectorized admittance
+
+AbstractPowerFlowState
+├── DCPowerFlowState    # DC power flow (theta = L+ * p)
+├── ACPowerFlowState    # AC power flow (complex voltages)
+└── AbstractOPFSolution
+    └── DCOPFSolution   # DC OPF with duals
+
+AbstractOPFProblem
+└── DCOPFProblem        # JuMP-based DC OPF
+```
+
+## Sensitivity Parameters
+
+Use parameter singletons with `calc_sensitivity(state, parameter)`:
+
+| Parameter | Description | Works with |
+|-----------|-------------|------------|
+| `DEMAND` | Demand sensitivity | DCPowerFlowState, DCOPFProblem |
+| `SWITCHING` | Topology switching | DCPowerFlowState, DCOPFProblem |
+| `COST` | Cost coefficient | DCOPFProblem |
+| `FLOWLIMIT` | Flow limits | DCOPFProblem |
+| `SUSCEPTANCE` | Susceptances | DCOPFProblem |
+| `POWER` | Power injection | ACPowerFlowState |
 
 ## Core Types
 
 ### DCNetwork
-Network data for B-theta DC OPF formulation:
 ```julia
-struct DCNetwork
-    n::Int          # Number of buses
-    m::Int          # Number of branches
-    k::Int          # Number of generators
-    A               # Branch incidence matrix (m x n)
-    G_inc           # Generator-bus incidence matrix (n x k)
-    b               # Branch susceptances
-    z               # Switching states (1=closed, 0=open)
-    fmax, gmax, gmin    # Flow and generation limits
-    cq, cl          # Quadratic and linear cost coefficients
-    ref_bus         # Reference bus index
-    tau             # Regularization parameter
+struct DCNetwork <: AbstractPowerNetwork
+    n, m, k       # Buses, branches, generators
+    A             # Incidence matrix (m x n)
+    G_inc         # Generator-bus incidence (n x k)
+    b             # Susceptances
+    z             # Switching states [0,1]
+    fmax, gmax, gmin  # Limits
+    cq, cl        # Cost coefficients
+    ref_bus       # Reference bus
+    tau           # Regularization
 end
 ```
 
-### DCOPFProblem
-JuMP-based optimization problem:
+### ACNetwork
 ```julia
-mutable struct DCOPFProblem
-    model::JuMP.Model
-    network::DCNetwork
-    theta           # Phase angle variables
-    g               # Generation variables
-    f               # Flow variables
-    d               # Demand vector
-    cons            # Constraint references
+struct ACNetwork <: AbstractPowerNetwork
+    n, m          # Buses, branches
+    A             # Incidence matrix
+    incidences    # Edge list [(i,j), ...]
+    g, b          # Conductances, susceptances
+    g_shunt, b_shunt  # Shunt admittances
+    z             # Switching states
+    # ... limits
 end
 ```
 
-### DCOPFSolution
-Solution container:
+### Sensitivity Results
 ```julia
-struct DCOPFSolution
-    theta           # Optimal phase angles
-    g               # Optimal generation
-    f               # Optimal flows
-    nu_bal          # Power balance duals (for LMPs)
-    lambda_ub, lambda_lb  # Flow limit duals
-    rho_ub, rho_lb  # Generation limit duals
-    objective       # Optimal objective value
-end
+# DC sensitivities
+DemandSensitivity      # dtheta_dd, dg_dd, df_dd, dlmp_dd
+SwitchingSensitivity   # dtheta_dz, dg_dz, df_dz, dlmp_dz
+CostSensitivity        # dg_dcq, dg_dcl, dlmp_dcq, dlmp_dcl
+
+# AC sensitivities
+VoltagePowerSensitivity    # dv_dp, dv_dq, dvm_dp, dvm_dq
+VoltageTopologySensitivity # dvm_dg, dvm_db
 ```
 
-## Sensitivity Analysis
-
-### Demand Sensitivity
-Compute how the OPF solution changes with demand:
-
-```julia
-sens = calc_sensitivity_demand(prob)
-# Returns DemandSensitivity with:
-#   dtheta_dd: (n x n) sensitivity of angles to demand
-#   dg_dd:     (k x n) sensitivity of generation to demand
-#   df_dd:     (m x n) sensitivity of flows to demand
-#   dlmp_dd:   (n x n) sensitivity of LMPs to demand
-```
-
-### Topology Sensitivity
-Compute sensitivities w.r.t. switching variables:
-
-```julia
-topo_sens = calc_sensitivity_switching(prob)
-# Returns TopologySensitivity with:
-#   dtheta_ds: (n x m) sensitivity of angles to switching
-#   dg_ds:     (k x m) sensitivity of generation to switching
-#   df_ds:     (m x m) sensitivity of flows to switching
-#   dlmp_ds:   (n x m) sensitivity of LMPs to switching
-```
-
-## KKT System
-
-For advanced users, the package exposes the KKT system for custom sensitivity analysis:
+## KKT System (Advanced)
 
 ```julia
 # Flatten/unflatten primal-dual variables
@@ -132,14 +150,33 @@ K = kkt(z, prob, d)
 
 # Compute analytical KKT Jacobian
 J = calc_kkt_jacobian(prob)
+
+# Sensitivities: dz/dp = -(dK/dz)^{-1} * (dK/dp)
 ```
+
+## Mathematical Background
+
+### B-theta Formulation
+```
+min  (1/2) g' Cq g + cl' g + (tau/2) ||f||^2
+s.t. G_inc * g - d = L * theta     (power balance)
+     f = W * A * theta              (flow definition)
+     |f| <= fmax                    (flow limits)
+     gmin <= g <= gmax              (gen limits)
+     theta[ref] = 0                 (reference)
+```
+
+where L = A' * Diag(-b .* z) * A is the susceptance-weighted Laplacian.
+
+### DC Power Flow
+For non-OPF power flow: theta = L+ * p where p = g - d.
+
+### AC Admittance
+Y = A' * Diag(g + j*b) * A + Diag(g_shunt + j*b_shunt)
 
 ## Solver Support
 
-The default solver is Clarabel (interior-point conic solver). Other supported solvers:
-- Ipopt (nonlinear)
-- HiGHS (linear/quadratic)
-- Gurobi (commercial)
+Default: Clarabel (interior-point conic). Also supported: Ipopt, HiGHS, Gurobi.
 
 ```julia
 using Ipopt
@@ -152,34 +189,6 @@ prob = DCOPFProblem(dc_net, d; optimizer=Ipopt.Optimizer)
 - [JuMP.jl](https://github.com/jump-dev/JuMP.jl): Optimization modeling
 - [Clarabel.jl](https://github.com/oxfordcontrol/Clarabel.jl): Default interior-point solver
 - [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl): Automatic differentiation
-
-## Mathematical Background
-
-### B-theta Formulation
-The DC OPF is formulated using the susceptance-weighted Laplacian:
-
-```
-min  (1/2) g' Cq g + cl' g + (tau^2/2) ||f||^2
-s.t. G_inc * g - d = B * theta     (power balance)
-     f = W * A * theta              (flow definition)
-     -fmax <= f <= fmax             (flow limits)
-     gmin <= g <= gmax              (gen limits)
-     theta[ref] = 0                 (reference bus)
-```
-
-where:
-- `B = A' * W * A` is the susceptance-weighted Laplacian
-- `W = Diagonal(-b .* z)` includes switching variables
-- `A` is the branch incidence matrix
-
-### Implicit Differentiation
-Sensitivities are computed via the implicit function theorem on KKT conditions:
-
-```
-dz/dp = -(dK/dz)^{-1} * (dK/dp)
-```
-
-where `z` is the primal-dual solution and `p` is the parameter (demand, switching, etc.).
 
 ## License
 

@@ -376,7 +376,7 @@ function ACPowerFlowState(
     q_net = qg_vec - qd_vec
 
     return ACPowerFlowState(
-        Vector{ComplexF64}(v), Y,
+        net, Vector{ComplexF64}(v), Y,
         p_net, q_net,
         pg_vec, pd_vec, qg_vec, qd_vec,
         nothing, net.idx_slack, n, m
@@ -389,20 +389,21 @@ end
 Construct ACPowerFlowState from a solved PowerModels network.
 
 Extracts voltage solution and injection data from the network dictionary.
+Creates an ACNetwork internally for access to edge-level data.
 The network must have a solved power flow.
 """
 function ACPowerFlowState(pm_net::Dict)
     @assert haskey(pm_net, "basic_network") && pm_net["basic_network"] "Network must be a basic network"
 
+    # Create ACNetwork from the PowerModels data
+    net = ACNetwork(pm_net)
+
     # Get voltage solution
     v = PM.calc_basic_bus_voltage(pm_net)
-    Y = PM.calc_basic_admittance_matrix(pm_net)
+    Y = admittance_matrix(net)
 
-    n = length(pm_net["bus"])
-    m = length(pm_net["branch"])
-
-    # Find slack bus
-    idx_slack = _find_slack_bus(pm_net)
+    n = net.n
+    m = net.m
 
     # Extract generation and demand
     pg = zeros(n)
@@ -425,10 +426,10 @@ function ACPowerFlowState(pm_net::Dict)
     q_net = qg - qd
 
     return ACPowerFlowState(
-        v, Y,
+        net, v, Y,
         p_net, q_net,
         pg, pd, qg, qd,
-        pm_net["branch"], idx_slack, n, m
+        pm_net["branch"], net.idx_slack, n, m
     )
 end
 
