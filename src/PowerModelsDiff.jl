@@ -23,10 +23,8 @@ include("types/parameters.jl")
 # =============================================================================
 # Core type definitions (modular structure)
 # =============================================================================
-include("types/dc_network.jl")      # DCNetwork
-include("types/dc_states.jl")       # DCPowerFlowState, DCOPFSolution
-include("types/ac_states.jl")       # ACPowerFlowState (struct)
-include("types/ac_network.jl")      # ACNetwork, ACPowerFlowState constructors
+include("types/dc_network.jl")      # DCNetwork, DCPowerFlowState, DCOPFSolution
+include("types/ac_network.jl")      # ACNetwork, ACPowerFlowState
 include("types/sensitivities.jl")   # All sensitivity result types
 
 # =============================================================================
