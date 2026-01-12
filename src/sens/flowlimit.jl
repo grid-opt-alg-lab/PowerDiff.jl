@@ -12,7 +12,7 @@ using LinearAlgebra
 using SparseArrays
 
 """
-    calc_sensitivity_flowlimit(prob::DCOPFProblem)
+    calc_sensitivity_flowlimit(prob::DCOPFProblem) → OPFFlowLimitSens
 
 Compute sensitivity of DC OPF solution with respect to flow limits using implicit differentiation.
 
@@ -24,8 +24,8 @@ dz/dfmax = -(dK/dz)^-1 * (dK/dfmax)
 where K(z, fmax) = 0 are the KKT conditions and z contains all primal/dual variables.
 
 # Returns
-`FlowLimitSensitivity` containing Jacobian matrices:
-- `dtheta_dfmax`: d(theta)/d(fmax) (n x m) - phase angle sensitivity
+`OPFFlowLimitSens` containing Jacobian matrices:
+- `dva_dfmax`: d(va)/d(fmax) (n x m) - voltage angle sensitivity
 - `dg_dfmax`: dg/d(fmax) (k x m) - generation sensitivity
 - `df_dfmax`: df/d(fmax) (m x m) - flow sensitivity
 - `dlmp_dfmax`: d(LMP)/d(fmax) (n x m) - LMP sensitivity
@@ -52,23 +52,19 @@ function calc_sensitivity_flowlimit(prob::DCOPFProblem)
     # Solve linear system: dz/dfmax = -J_z^-1 * J_fmax
     dz_dfmax = -(J_z \ Matrix(J_fmax))
 
-    # Extract individual sensitivities from flattened result
-    # Variable order: [θ(n), g(k), f(m), λ_lb(m), λ_ub(m), ρ_lb(k), ρ_ub(k), ν_bal(n), ν_flow(m), η_ref(1)]
-    idx_θ = 1:n
-    idx_g = n+1:n+k
-    idx_f = n+k+1:n+k+m
-    idx_ν_bal = n+k+3m+2k+1:2n+k+3m+2k
+    # Extract individual sensitivities using centralized index calculation
+    idx = kkt_indices(n, m, k)
 
-    dθ_dfmax = dz_dfmax[idx_θ, :]
-    dg_dfmax = dz_dfmax[idx_g, :]
-    df_dfmax = dz_dfmax[idx_f, :]
-    dν_bal_dfmax = dz_dfmax[idx_ν_bal, :]
+    dva_dfmax = dz_dfmax[idx.θ, :]
+    dg_dfmax = dz_dfmax[idx.g, :]
+    df_dfmax = dz_dfmax[idx.f, :]
+    dν_bal_dfmax = dz_dfmax[idx.ν_bal, :]
 
     # LMP sensitivity: LMP = ν_bal in B-θ formulation
     dlmp_dfmax = dν_bal_dfmax
 
-    return FlowLimitSensitivity(
-        Matrix(dθ_dfmax),
+    return OPFFlowLimitSens(
+        Matrix(dva_dfmax),
         Matrix(dg_dfmax),
         Matrix(df_dfmax),
         Matrix(dlmp_dfmax)
@@ -96,6 +92,7 @@ function calc_kkt_jacobian_flowlimit(prob::DCOPFProblem)
     net = prob.network
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
+    idx = kkt_indices(n, m, k)
 
     # Get current solution for dual values
     sol = solve!(prob)
@@ -104,18 +101,13 @@ function calc_kkt_jacobian_flowlimit(prob::DCOPFProblem)
 
     J_fmax = spzeros(dim, m)
 
-    # Row indices in KKT system (matching kkt function output order):
-    # K_θ (n), K_g (k), K_f (m), K_λ_lb (m), K_λ_ub (m), K_ρ_lb (k), K_ρ_ub (k), K_power_bal (n), K_flow_def (m), K_ref (1)
-    idx_λ_lb = n + k + m + 1 : n + k + 2m
-    idx_λ_ub = n + k + 2m + 1 : n + k + 3m
-
     # ∂K_λ_lb/∂fmax = Diag(λ_lb)
     # K_λ_lb = λ_lb .* (f + fmax), so ∂K_λ_lb/∂fmax_e = λ_lb[e] for row e
-    J_fmax[idx_λ_lb, :] = sparse(Diagonal(λ_lb))
+    J_fmax[idx.λ_lb, :] = sparse(Diagonal(λ_lb))
 
     # ∂K_λ_ub/∂fmax = Diag(λ_ub)
     # K_λ_ub = λ_ub .* (fmax - f), so ∂K_λ_ub/∂fmax_e = λ_ub[e] for row e
-    J_fmax[idx_λ_ub, :] = sparse(Diagonal(λ_ub))
+    J_fmax[idx.λ_ub, :] = sparse(Diagonal(λ_ub))
 
     return J_fmax
 end

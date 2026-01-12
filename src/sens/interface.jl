@@ -80,60 +80,28 @@ end
 # DC Power Flow: Symbol Dispatch
 # =============================================================================
 
-# dva/dd = L+ (phase angles w.r.t. demand)
+# dva/dd = -L+ (phase angles w.r.t. demand)
+# Since va = L+ * p and p = g - d, we have dva/dd = -L+
+# Uses cached L_pinv from state for O(1) lookup instead of O(n³) pseudoinverse
 function _calc_sensitivity(state::DCPowerFlowState, ::Val{:va}, ::Val{:d})
-    L = calc_susceptance_matrix(state.net)
-    return pinv(Matrix(L))
+    return -state.L_pinv
 end
 
 # df/dd: f = W*A*va, so df/dd = W*A*dva/dd where W = Diag(-b.*z)
+# Uses cached L_pinv from state
 function _calc_sensitivity(state::DCPowerFlowState, ::Val{:f}, ::Val{:d})
     net = state.net
     W = Diagonal(-net.b .* net.z)
-    dva_dd = calc_sensitivity(state, :va, :d)
-    return W * net.A * dva_dd
+    return W * net.A * (-state.L_pinv)
 end
 
-# dva/dz (switching)
-function _calc_sensitivity(state::DCPowerFlowState, ::Val{:va}, ::Val{:z})
-    net = state.net
-    L = calc_susceptance_matrix(net)
-    L_pinv = pinv(Matrix(L))
-    ref = net.ref_bus
+# dva/dz (switching) - delegates to calc_sensitivity_switching for consistency
+_calc_sensitivity(state::DCPowerFlowState, ::Val{:va}, ::Val{:z}) =
+    calc_sensitivity_switching(state).dva_dz
 
-    m = net.m
-    n = net.n
-    dva_dz = zeros(n, m)
-
-    for e in 1:m
-        a_e = Vector(net.A[e, :])
-        dL_dz_e = -net.b[e] * (a_e * a_e')
-        dva_raw_dz_e = -L_pinv * dL_dz_e * state.θ
-        # Account for centering: va = va_raw - va_raw[ref]
-        dva_dz[:, e] = dva_raw_dz_e .- dva_raw_dz_e[ref]
-    end
-
-    return dva_dz
-end
-
-# df/dz (switching)
-function _calc_sensitivity(state::DCPowerFlowState, ::Val{:f}, ::Val{:z})
-    net = state.net
-    dva_dz = calc_sensitivity(state, :va, :z)
-    W = Diagonal(-net.b .* net.z)
-
-    m = net.m
-    df_dz = zeros(m, m)
-
-    for e in 1:m
-        # Indirect effect through va: df/dz_e = W * A * dva/dz_e
-        df_dz[:, e] = W * net.A * dva_dz[:, e]
-        # Direct effect for edge e: f_e = -b_e * z_e * (va_i - va_j)
-        df_dz[e, e] += -net.b[e] * (Vector(net.A[e, :])' * state.θ)
-    end
-
-    return df_dz
-end
+# df/dz (switching) - delegates to calc_sensitivity_switching for consistency
+_calc_sensitivity(state::DCPowerFlowState, ::Val{:f}, ::Val{:z}) =
+    calc_sensitivity_switching(state).df_dz
 
 # Aliases for :pd -> :d
 _calc_sensitivity(s::DCPowerFlowState, ::Val{:va}, ::Val{:pd}) = _calc_sensitivity(s, Val(:va), Val(:d))
@@ -167,7 +135,7 @@ end
 
 # Demand sensitivities (via KKT system)
 _calc_sensitivity(prob::DCOPFProblem, ::Val{:va}, ::Val{:d}) =
-    calc_sensitivity_demand(prob).dθ_dd
+    calc_sensitivity_demand(prob).dva_dd
 
 _calc_sensitivity(prob::DCOPFProblem, ::Val{:pg}, ::Val{:d}) =
     calc_sensitivity_demand(prob).dg_dd
@@ -193,7 +161,7 @@ _calc_sensitivity(prob::DCOPFProblem, ::Val{:lmp}, ::Val{:cl}) =
 
 # Switching sensitivities
 _calc_sensitivity(prob::DCOPFProblem, ::Val{:va}, ::Val{:z}) =
-    calc_sensitivity_switching(prob).dθ_dz
+    calc_sensitivity_switching(prob).dva_dz
 
 _calc_sensitivity(prob::DCOPFProblem, ::Val{:pg}, ::Val{:z}) =
     calc_sensitivity_switching(prob).dg_dz
@@ -206,7 +174,7 @@ _calc_sensitivity(prob::DCOPFProblem, ::Val{:lmp}, ::Val{:z}) =
 
 # Flow limit sensitivities
 _calc_sensitivity(prob::DCOPFProblem, ::Val{:va}, ::Val{:fmax}) =
-    calc_sensitivity_flowlimit(prob).dθ_dfmax
+    calc_sensitivity_flowlimit(prob).dva_dfmax
 
 _calc_sensitivity(prob::DCOPFProblem, ::Val{:pg}, ::Val{:fmax}) =
     calc_sensitivity_flowlimit(prob).dg_dfmax
@@ -219,7 +187,7 @@ _calc_sensitivity(prob::DCOPFProblem, ::Val{:lmp}, ::Val{:fmax}) =
 
 # Susceptance sensitivities
 _calc_sensitivity(prob::DCOPFProblem, ::Val{:va}, ::Val{:b}) =
-    calc_sensitivity_susceptance(prob).dθ_db
+    calc_sensitivity_susceptance(prob).dva_db
 
 _calc_sensitivity(prob::DCOPFProblem, ::Val{:pg}, ::Val{:b}) =
     calc_sensitivity_susceptance(prob).dg_db

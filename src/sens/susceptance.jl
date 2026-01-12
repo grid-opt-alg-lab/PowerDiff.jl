@@ -5,7 +5,7 @@ using LinearAlgebra
 using SparseArrays
 
 """
-    calc_sensitivity_susceptance(prob::DCOPFProblem)
+    calc_sensitivity_susceptance(prob::DCOPFProblem) → OPFSusceptanceSens
 
 Compute sensitivity of DC OPF solution with respect to branch susceptances using implicit differentiation.
 
@@ -21,8 +21,8 @@ The susceptance b_e affects:
 - Flow definition: f = W * A * θ where W = Diag(-b .* z)
 
 # Returns
-`SusceptanceSensitivity` containing Jacobian matrices:
-- `dθ_db`: ∂θ/∂b (n × m) - phase angle sensitivity
+`OPFSusceptanceSens` containing Jacobian matrices:
+- `dva_db`: ∂va/∂b (n × m) - voltage angle sensitivity
 - `dg_db`: ∂g/∂b (k × m) - generation sensitivity
 - `df_db`: ∂f/∂b (m × m) - flow sensitivity
 - `dlmp_db`: ∂LMP/∂b (n × m) - LMP sensitivity
@@ -49,23 +49,19 @@ function calc_sensitivity_susceptance(prob::DCOPFProblem)
     # Solve linear system: ∂z/∂b = -J_z⁻¹ * J_b
     dz_db = -(J_z \ Matrix(J_b))
 
-    # Extract individual sensitivities from flattened result
-    # Variable order: [θ(n), g(k), f(m), λ_lb(m), λ_ub(m), ρ_lb(k), ρ_ub(k), ν_bal(n), ν_flow(m), η_ref(1)]
-    idx_θ = 1:n
-    idx_g = n+1:n+k
-    idx_f = n+k+1:n+k+m
-    idx_ν_bal = n+k+3m+2k+1:2n+k+3m+2k
+    # Extract individual sensitivities using centralized index calculation
+    idx = kkt_indices(n, m, k)
 
-    dθ_db = dz_db[idx_θ, :]
-    dg_db = dz_db[idx_g, :]
-    df_db = dz_db[idx_f, :]
-    dν_bal_db = dz_db[idx_ν_bal, :]
+    dva_db = dz_db[idx.θ, :]
+    dg_db = dz_db[idx.g, :]
+    df_db = dz_db[idx.f, :]
+    dν_bal_db = dz_db[idx.ν_bal, :]
 
     # LMP sensitivity: LMP = ν_bal in B-θ formulation
     dlmp_db = dν_bal_db
 
-    return SusceptanceSensitivity(
-        Matrix(dθ_db),
+    return OPFSusceptanceSens(
+        Matrix(dva_db),
         Matrix(dg_db),
         Matrix(df_db),
         Matrix(dlmp_db)
@@ -99,12 +95,13 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem)
     net = prob.network
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
+    idx = kkt_indices(n, m, k)
 
     # Get current solution
     sol = solve!(prob)
     θ = sol.θ
     ν_bal = sol.ν_bal
-    ν_flow = dual.(prob.cons.flow_def)
+    ν_flow = sol.ν_flow
 
     # Network parameters
     z = net.z
@@ -112,12 +109,6 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem)
     A = net.A
 
     J_b = spzeros(dim, m)
-
-    # Row indices in KKT system:
-    # K_θ (n), K_g (k), K_f (m), K_λ_lb (m), K_λ_ub (m), K_ρ_lb (k), K_ρ_ub (k), K_power_bal (n), K_flow_def (m), K_ref (1)
-    idx_θ = 1:n
-    idx_power_bal = n + k + 3m + 2k + 1 : n + k + 3m + 2k + n
-    idx_flow_def = n + k + 3m + 2k + n + 1 : n + k + 3m + 2k + n + m
 
     for e in 1:m
         # For each branch e, compute ∂K/∂b_e
@@ -138,14 +129,14 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem)
         # ∂(WA')/∂b_e * ν_flow = -z_e * A[e,:]' * ν_flow[e]
         ∂K_θ_from_ν_flow = -z[e] * A_e_vec * ν_flow[e]
 
-        J_b[idx_θ, e] = ∂K_θ_from_ν_bal + ∂K_θ_from_ν_flow
+        J_b[idx.θ, e] = ∂K_θ_from_ν_bal + ∂K_θ_from_ν_flow
 
         # 2. ∂K_power_bal/∂b_e: K_power_bal = G_inc * g - d - B * θ
         # ∂K_power_bal/∂b_e = -∂B/∂b_e * θ = -(-z_e * A[e,:]' * A[e,:]) * θ
         #                    = z_e * A[e,:]' * (A[e,:] · θ)
         #                    = z_e * A_e_vec * Aθ_e
         ∂K_power_bal_∂b_e = z[e] * A_e_vec * Aθ_e
-        J_b[idx_power_bal, e] = ∂K_power_bal_∂b_e
+        J_b[idx.ν_bal, e] = ∂K_power_bal_∂b_e
 
         # 3. ∂K_flow_def/∂b_e: K_flow_def = f - W * A * θ
         # ∂K_flow_def/∂b_e = -∂(WA)/∂b_e * θ
@@ -153,7 +144,7 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem)
         # So ∂K_flow_def/∂b_e: row e is z_e * Aθ_e (note the sign flip)
         ∂K_flow_def_∂b_e = spzeros(m)
         ∂K_flow_def_∂b_e[e] = z[e] * Aθ_e
-        J_b[idx_flow_def, e] = ∂K_flow_def_∂b_e
+        J_b[idx.ν_flow, e] = ∂K_flow_def_∂b_e
     end
 
     return J_b

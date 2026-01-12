@@ -5,7 +5,7 @@ using LinearAlgebra
 using SparseArrays
 
 """
-    calc_sensitivity_cost(prob::DCOPFProblem)
+    calc_sensitivity_cost(prob::DCOPFProblem) → OPFCostSens
 
 Compute sensitivity of DC OPF solution with respect to cost coefficients using implicit differentiation.
 
@@ -17,7 +17,7 @@ Uses the implicit function theorem on KKT conditions:
 where K(z, c) = 0 are the KKT conditions and z contains all primal/dual variables.
 
 # Returns
-`CostSensitivity` containing Jacobian matrices:
+`OPFCostSens` containing Jacobian matrices:
 - `dg_dcq`: ∂g/∂cq (k × k) - generation sensitivity to quadratic cost
 - `dg_dcl`: ∂g/∂cl (k × k) - generation sensitivity to linear cost
 - `dlmp_dcq`: ∂LMP/∂cq (n × k) - LMP sensitivity to quadratic cost
@@ -47,23 +47,19 @@ function calc_sensitivity_cost(prob::DCOPFProblem)
     dz_dcl = -(J_z \ Matrix(J_cl))
     dz_dcq = -(J_z \ Matrix(J_cq))
 
-    # Extract individual sensitivities from flattened result
-    # Variable order: [θ(n), g(k), f(m), λ_lb(m), λ_ub(m), ρ_lb(k), ρ_ub(k), ν_bal(n), ν_flow(m), η_ref(1)]
-    idx_g = n+1:n+k
-    idx_ν_bal = n+k+3m+2k+1:2n+k+3m+2k
-    idx_λ_lb = n+k+m+1:n+k+2m
-    idx_λ_ub = n+k+2m+1:n+k+3m
+    # Extract individual sensitivities using centralized index calculation
+    idx = kkt_indices(n, m, k)
 
-    dg_dcl = dz_dcl[idx_g, :]
-    dg_dcq = dz_dcq[idx_g, :]
+    dg_dcl = dz_dcl[idx.g, :]
+    dg_dcq = dz_dcq[idx.g, :]
 
-    dν_bal_dcl = dz_dcl[idx_ν_bal, :]
-    dν_bal_dcq = dz_dcq[idx_ν_bal, :]
+    dν_bal_dcl = dz_dcl[idx.ν_bal, :]
+    dν_bal_dcq = dz_dcq[idx.ν_bal, :]
 
-    dλ_lb_dcl = dz_dcl[idx_λ_lb, :]
-    dλ_lb_dcq = dz_dcq[idx_λ_lb, :]
-    dλ_ub_dcl = dz_dcl[idx_λ_ub, :]
-    dλ_ub_dcq = dz_dcq[idx_λ_ub, :]
+    dλ_lb_dcl = dz_dcl[idx.λ_lb, :]
+    dλ_lb_dcq = dz_dcq[idx.λ_lb, :]
+    dλ_ub_dcl = dz_dcl[idx.λ_ub, :]
+    dλ_ub_dcq = dz_dcq[idx.λ_ub, :]
 
     # Compute LMP sensitivity
     # In the B-θ formulation, LMP = ν_bal (the power balance dual already
@@ -72,7 +68,7 @@ function calc_sensitivity_cost(prob::DCOPFProblem)
     dlmp_dcl = dν_bal_dcl
     dlmp_dcq = dν_bal_dcq
 
-    return CostSensitivity(
+    return OPFCostSens(
         Matrix(dg_dcq),
         Matrix(dg_dcl),
         Matrix(dlmp_dcq),
@@ -96,14 +92,12 @@ Only the stationarity condition for g depends on cl:
 function calc_kkt_jacobian_cost_linear(net::DCNetwork)
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
+    idx = kkt_indices(n, m, k)
 
     J_cl = spzeros(dim, k)
 
-    # K_g row indices: n+1:n+k (after K_θ which is 1:n)
-    idx_g = n+1:n+k
-
     # ∂K_g/∂cl = I_k
-    J_cl[idx_g, :] = sparse(I, k, k)
+    J_cl[idx.g, :] = sparse(I, k, k)
 
     return J_cl
 end
@@ -127,6 +121,7 @@ function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem)
     net = prob.network
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
+    idx = kkt_indices(n, m, k)
 
     # Get current solution for g values
     sol = solve!(prob)
@@ -134,12 +129,9 @@ function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem)
 
     J_cq = spzeros(dim, k)
 
-    # K_g row indices: n+1:n+k
-    idx_g = n+1:n+k
-
     # ∂K_g/∂cq = Diagonal(g)
     # The (i, i) entry is g_i: derivative of cq_i * g_i with respect to cq_i is g_i
-    J_cq[idx_g, :] = sparse(Diagonal(g))
+    J_cq[idx.g, :] = sparse(Diagonal(g))
 
     return J_cq
 end

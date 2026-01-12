@@ -56,14 +56,13 @@ using Test
         pf_state = DCPowerFlowState(net, d)
 
         sens = calc_sensitivity_switching(pf_state)
-        @test sens isa SwitchingSensitivity
-        @test size(sens.dθ_dz) == (net.n, net.m)
+        @test sens isa DCPFSwitchingSens
+        @test size(sens.dva_dz) == (net.n, net.m)
         @test size(sens.df_dz) == (net.m, net.m)
 
-        # Test unified interface
-        sens2 = calc_sensitivity(pf_state, SWITCHING)
-        @test sens2 isa SwitchingSensitivity
-        @test sens2.dθ_dz == sens.dθ_dz
+        # Test symbol-based interface
+        dva_dz = calc_sensitivity(pf_state, :va, :z)
+        @test dva_dz == sens.dva_dz
     end
 
     @testset "DC Power Flow Demand Sensitivity" begin
@@ -72,14 +71,13 @@ using Test
         pf_state = DCPowerFlowState(net, d)
 
         sens = calc_sensitivity_demand(pf_state)
-        @test sens isa DemandSensitivity
-        @test size(sens.dθ_dd) == (net.n, net.n)
+        @test sens isa DCPFDemandSens
+        @test size(sens.dva_dd) == (net.n, net.n)
         @test size(sens.df_dd) == (net.m, net.n)
 
-        # Test unified interface
-        sens2 = calc_sensitivity(pf_state, DEMAND)
-        @test sens2 isa DemandSensitivity
-        @test sens2.dθ_dd == sens.dθ_dd
+        # Test symbol-based interface
+        dva_dd = calc_sensitivity(pf_state, :va, :d)
+        @test dva_dd == sens.dva_dd
     end
 
     @testset "DC OPF Switching Sensitivity" begin
@@ -88,14 +86,14 @@ using Test
         prob = DCOPFProblem(net, d)
 
         sens = calc_sensitivity_switching(prob)
-        @test sens isa SwitchingSensitivity
-        @test size(sens.dθ_dz) == (net.n, net.m)
+        @test sens isa OPFSwitchingSens
+        @test size(sens.dva_dz) == (net.n, net.m)
         @test size(sens.dg_dz) == (net.k, net.m)
         @test size(sens.df_dz) == (net.m, net.m)
 
-        # Test unified interface
-        sens2 = calc_sensitivity(prob, SWITCHING)
-        @test sens2 isa SwitchingSensitivity
+        # Test symbol-based interface
+        dva_dz = calc_sensitivity(prob, :va, :z)
+        @test dva_dz == sens.dva_dz
     end
 
     @testset "Unified Voltage Sensitivity" begin

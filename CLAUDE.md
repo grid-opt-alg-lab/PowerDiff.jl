@@ -110,7 +110,7 @@ Uses susceptance-weighted Laplacian `L = A' * Diagonal(-b .* z) * A`:
 - `DCOPFSolution`: Primal (θ, g, f) and dual variables (ν_bal for LMPs)
 - `DCPowerFlowState`: Non-OPF power flow (θ = L⁺ * p, no optimization)
 
-### KKT System (src/opf/kkt.jl)
+### KKT System (src/prob/kkt_dc_opf.jl)
 
 For implicit differentiation via `dz/dp = -(dK/dz)⁻¹ * (dK/dp)`:
 
@@ -130,15 +130,16 @@ src/
 ├── types/
 │   ├── abstract.jl             # Abstract type hierarchy
 │   ├── parameters.jl           # Sensitivity parameter singletons (legacy)
-│   ├── dc_network.jl           # DCNetwork, DCPowerFlowState, DCOPFSolution
+│   ├── dc_network.jl           # DCNetwork, DCPowerFlowState, DCOPFSolution + constructors
+│   ├── dc_opf_problem.jl       # DCOPFProblem struct + constructors
 │   ├── ac_network.jl           # ACNetwork, ACPowerFlowState
-│   └── sensitivities.jl        # Bundled sensitivity result types (legacy)
-├── opf/
-│   ├── problem.jl              # DCOPFProblem, solve!, DCNetwork constructors
-│   └── kkt.jl                  # KKT system, Jacobians
+│   └── sensitivities.jl        # Sensitivity result types (state-specific + legacy)
+├── prob/
+│   ├── dc_opf.jl               # solve!, update_demand!
+│   └── kkt_dc_opf.jl           # KKT system, Jacobians, switching sensitivity
 ├── sens/
 │   ├── interface.jl            # Symbol-based calc_sensitivity() dispatch
-│   ├── topology.jl             # DC PF switching sensitivity
+│   ├── topology.jl             # DC PF switching/demand sensitivity
 │   ├── demand.jl               # DC OPF demand sensitivity
 │   ├── cost.jl                 # DC OPF cost sensitivity
 │   ├── flowlimit.jl            # DC OPF flow limit sensitivity

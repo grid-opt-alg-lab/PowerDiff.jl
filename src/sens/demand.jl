@@ -5,7 +5,7 @@ using LinearAlgebra
 using SparseArrays
 
 """
-    calc_sensitivity_demand(prob::DCOPFProblem)
+    calc_sensitivity_demand(prob::DCOPFProblem) → OPFDemandSens
 
 Compute sensitivity of DC OPF solution with respect to demand using implicit differentiation.
 
@@ -17,8 +17,8 @@ Uses the implicit function theorem on KKT conditions:
 where K(z, d) = 0 are the KKT conditions and z contains all primal/dual variables.
 
 # Returns
-`DemandSensitivity` containing Jacobian matrices:
-- `dθ_dd`: ∂θ/∂d (n × n) - phase angle sensitivity
+`OPFDemandSens` containing Jacobian matrices:
+- `dva_dd`: ∂va/∂d (n × n) - voltage angle sensitivity
 - `dg_dd`: ∂g/∂d (k × n) - generation sensitivity
 - `df_dd`: ∂f/∂d (m × n) - flow sensitivity
 - `dlmp_dd`: ∂LMP/∂d (n × n) - LMP sensitivity
@@ -46,20 +46,17 @@ function calc_sensitivity_demand(prob::DCOPFProblem)
     # Use sparse LU factorization for efficiency
     dz_dd = -(J_z \ Matrix(J_d))
 
-    # Extract individual sensitivities from flattened result
-    # Variable order: [θ(n), g(k), f(m), λ_lb(m), λ_ub(m), ρ_lb(k), ρ_ub(k), ν_bal(n), ν_flow(m), η_ref(1)]
-    dθ_dd = dz_dd[1:n, :]
-    dg_dd = dz_dd[n+1:n+k, :]
-    df_dd = dz_dd[n+k+1:n+k+m, :]
+    # Extract individual sensitivities using centralized index calculation
+    idx = kkt_indices(n, m, k)
+
+    dθ_dd = dz_dd[idx.θ, :]
+    dg_dd = dz_dd[idx.g, :]
+    df_dd = dz_dd[idx.f, :]
 
     # Dual variable sensitivities (for LMP computation)
-    idx_λ_lb = n+k+m+1:n+k+2m
-    idx_λ_ub = n+k+2m+1:n+k+3m
-    idx_ν_bal = n+k+3m+2k+1:2n+k+3m+2k
-
-    dλ_lb_dd = dz_dd[idx_λ_lb, :]
-    dλ_ub_dd = dz_dd[idx_λ_ub, :]
-    dν_bal_dd = dz_dd[idx_ν_bal, :]
+    dλ_lb_dd = dz_dd[idx.λ_lb, :]
+    dλ_ub_dd = dz_dd[idx.λ_ub, :]
+    dν_bal_dd = dz_dd[idx.ν_bal, :]
 
     # Compute LMP sensitivity
     # In the B-θ formulation, LMP = ν_bal (the power balance dual already
@@ -67,7 +64,7 @@ function calc_sensitivity_demand(prob::DCOPFProblem)
     # Therefore: ∂LMP/∂d = ∂ν_bal/∂d
     dlmp_dd = dν_bal_dd
 
-    return DemandSensitivity(
+    return OPFDemandSens(
         Matrix(dθ_dd),
         Matrix(dg_dd),
         Matrix(df_dd),

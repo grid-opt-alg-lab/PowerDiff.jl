@@ -23,7 +23,8 @@ include("types/parameters.jl")
 # =============================================================================
 # Core type definitions (modular structure)
 # =============================================================================
-include("types/dc_network.jl")      # DCNetwork, DCPowerFlowState, DCOPFSolution
+include("types/dc_network.jl")      # DCNetwork, DCPowerFlowState, DCOPFSolution + constructors
+include("types/dc_opf_problem.jl")  # DCOPFProblem + constructors
 include("types/ac_network.jl")      # ACNetwork, ACPowerFlowState
 include("types/sensitivities.jl")   # All sensitivity result types
 
@@ -42,10 +43,10 @@ include("deprecated/pf_structs.jl")
 include("deprecated/measurements.jl")
 
 # =============================================================================
-# DC OPF (B-θ formulation)
+# DC OPF (B-θ formulation) - solving and KKT conditions
 # =============================================================================
-include("opf/problem.jl")
-include("opf/kkt.jl")
+include("prob/dc_opf.jl")
+include("prob/kkt_dc_opf.jl")
 
 # =============================================================================
 # Sensitivity analysis
@@ -92,7 +93,12 @@ export DCOPFProblem, DCOPFSolution
 export solve!, update_demand!
 export calc_demand_vector, calc_susceptance_matrix
 
-# DC Sensitivity Types
+# DC Sensitivity Types (state-specific)
+export DCPFDemandSens, DCPFSwitchingSens   # DC Power Flow
+export OPFDemandSens, OPFSwitchingSens     # DC OPF
+export OPFCostSens, OPFFlowLimitSens, OPFSusceptanceSens
+
+# DC Sensitivity Types (legacy, deprecated)
 export DemandSensitivity, CostSensitivity, SwitchingSensitivity
 export FlowLimitSensitivity, SusceptanceSensitivity
 
@@ -107,7 +113,7 @@ export calc_sensitivity_flowlimit, calc_sensitivity_susceptance
 export calc_lmp, calc_congestion_component, calc_energy_component
 
 # KKT Functions (advanced)
-export kkt, kkt_dims, calc_kkt_jacobian
+export kkt, kkt_dims, kkt_indices, calc_kkt_jacobian
 export flatten_variables, unflatten_variables
 
 # -----------------------------------------------------------------------------

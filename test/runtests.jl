@@ -152,12 +152,12 @@ end
 
         sens = calc_sensitivity_demand(prob)
 
-        @test size(sens.dθ_dd) == (dc_net.n, dc_net.n)
+        @test size(sens.dva_dd) == (dc_net.n, dc_net.n)
         @test size(sens.dg_dd) == (dc_net.k, dc_net.n)
         @test size(sens.df_dd) == (dc_net.m, dc_net.n)
         @test size(sens.dlmp_dd) == (dc_net.n, dc_net.n)
 
-        @test !any(isnan, sens.dθ_dd)
+        @test !any(isnan, sens.dva_dd)
         @test !any(isnan, sens.dg_dd)
         @test !any(isnan, sens.df_dd)
         @test !any(isnan, sens.dlmp_dd)
@@ -182,18 +182,18 @@ end
         # Compute switching sensitivities
         sens = calc_sensitivity_switching(prob)
 
-        @test size(sens.dθ_dz) == (dc_net.n, dc_net.m)
+        @test size(sens.dva_dz) == (dc_net.n, dc_net.m)
         @test size(sens.dg_dz) == (dc_net.k, dc_net.m)
         @test size(sens.df_dz) == (dc_net.m, dc_net.m)
         @test size(sens.dlmp_dz) == (dc_net.n, dc_net.m)
 
-        @test !any(isnan, sens.dθ_dz)
+        @test !any(isnan, sens.dva_dz)
         @test !any(isnan, sens.dg_dz)
         @test !any(isnan, sens.df_dz)
         @test !any(isnan, sens.dlmp_dz)
 
         # Verify sensitivities are finite
-        @test all(isfinite, sens.dθ_dz)
+        @test all(isfinite, sens.dva_dz)
         @test all(isfinite, sens.dg_dz)
         @test all(isfinite, sens.df_dz)
         @test all(isfinite, sens.dlmp_dz)
@@ -337,7 +337,7 @@ end
         end
 
         if norm(dθ_dd_numerical) > 1e-10
-            rel_error_θ = norm(sens.dθ_dd[:, bus_idx] - dθ_dd_numerical) / norm(dθ_dd_numerical)
+            rel_error_θ = norm(sens.dva_dd[:, bus_idx] - dθ_dd_numerical) / norm(dθ_dd_numerical)
             @test rel_error_θ < 0.01
         end
 
@@ -403,7 +403,7 @@ end
     sens = calc_sensitivity_demand(prob)
     @test sens.dg_dd[1, 2] ≈ 1.0 atol=0.01  # ∂g₁/∂d₂ = 1
     # ∂θ₂/∂d₂ = 1/b = 0.1 (same sign as θ₂)
-    @test abs(sens.dθ_dd[2, 2]) ≈ 0.1 atol=0.01
+    @test abs(sens.dva_dd[2, 2]) ≈ 0.1 atol=0.01
 end
 
 @testset "3-Bus Congested - LMP Differentiation" begin
