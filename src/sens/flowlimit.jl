@@ -43,11 +43,14 @@ function calc_sensitivity_flowlimit(prob::DCOPFProblem)
     net = prob.network
     n, m, k = net.n, net.m, net.k
 
-    # Compute KKT Jacobian dK/dz
-    J_z = calc_kkt_jacobian(prob)
+    # Solve once and reuse solution
+    sol = solve!(prob)
+
+    # Compute KKT Jacobian dK/dz (pass solution to avoid re-solving)
+    J_z = calc_kkt_jacobian(prob; sol=sol)
 
     # Compute KKT Jacobian w.r.t. flow limits dK/dfmax
-    J_fmax = calc_kkt_jacobian_flowlimit(prob)
+    J_fmax = calc_kkt_jacobian_flowlimit(prob, sol)
 
     # Solve linear system: dz/dfmax = -J_z^-1 * J_fmax
     dz_dfmax = -(J_z \ Matrix(J_fmax))
@@ -72,9 +75,13 @@ function calc_sensitivity_flowlimit(prob::DCOPFProblem)
 end
 
 """
-    calc_kkt_jacobian_flowlimit(prob::DCOPFProblem)
+    calc_kkt_jacobian_flowlimit(prob::DCOPFProblem, sol::DCOPFSolution)
 
 Compute the Jacobian of KKT conditions with respect to flow limits dK/dfmax.
+
+# Arguments
+- `prob`: DCOPFProblem
+- `sol`: Pre-computed solution
 
 # Returns
 Sparse matrix of size (kkt_dims x m).
@@ -88,14 +95,12 @@ Therefore:
 - dK_lambda_lb/dfmax = Diag(lambda_lb)
 - dK_lambda_ub/dfmax = Diag(lambda_ub)
 """
-function calc_kkt_jacobian_flowlimit(prob::DCOPFProblem)
+function calc_kkt_jacobian_flowlimit(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
     idx = kkt_indices(n, m, k)
 
-    # Get current solution for dual values
-    sol = solve!(prob)
     λ_lb = sol.λ_lb
     λ_ub = sol.λ_ub
 

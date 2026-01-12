@@ -230,25 +230,30 @@ end
 # =============================================================================
 
 """
-    calc_kkt_jacobian(prob::DCOPFProblem)
+    calc_kkt_jacobian(prob::DCOPFProblem; sol=nothing)
 
 Compute the sparse Jacobian of the KKT operator analytically.
+
+# Arguments
+- `prob`: DCOPFProblem
+- `sol`: Optional pre-computed solution. If not provided, calls solve!(prob).
 
 # Returns
 Sparse matrix ∂K/∂z where z is the flattened variable vector.
 
 This analytical Jacobian is more efficient than ForwardDiff for large problems.
 """
-function calc_kkt_jacobian(prob::DCOPFProblem)
-    return calc_kkt_jacobian(prob.network, prob.d, prob)
+function calc_kkt_jacobian(prob::DCOPFProblem; sol::Union{DCOPFSolution,Nothing}=nothing)
+    if isnothing(sol)
+        sol = solve!(prob)
+    end
+    return calc_kkt_jacobian(prob.network, prob.d, prob, sol)
 end
 
-function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem)
+function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem, sol::DCOPFSolution)
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
 
-    # Get current solution values for complementary slackness terms
-    sol = solve!(prob)
     vars = (
         θ = sol.θ, g = sol.g, f = sol.f,
         λ_lb = sol.λ_lb, λ_ub = sol.λ_ub,
@@ -352,7 +357,7 @@ end
 # =============================================================================
 
 """
-    calc_kkt_jacobian_switching(prob::DCOPFProblem)
+    calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
 
 Compute the Jacobian of KKT conditions with respect to switching variables ∂K/∂s.
 
@@ -361,6 +366,10 @@ The switching variable s ∈ [0,1]^m affects the susceptance-weighted Laplacian:
 - B = A' * W * A
 - Flow definition: f = W * A * θ
 
+# Arguments
+- `prob`: DCOPFProblem
+- `sol`: Pre-computed solution
+
 # Returns
 Sparse matrix of size (kkt_dims × m).
 
@@ -368,13 +377,11 @@ Sparse matrix of size (kkt_dims × m).
 The switching variables s relaxes the binary line status to continuous values,
 enabling gradient-based optimization for topology control.
 """
-function calc_kkt_jacobian_switching(prob::DCOPFProblem)
+function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
 
-    # Get current solution for θ values
-    sol = solve!(prob)
     θ = sol.θ
 
     # Current switching state
@@ -474,12 +481,12 @@ function calc_sensitivity_switching(prob::DCOPFProblem)
     net = prob.network
     n, m, k = net.n, net.m, net.k
 
-    # Solve the problem first
+    # Solve the problem once
     sol = solve!(prob)
 
-    # Compute Jacobians
-    J_z = calc_kkt_jacobian(prob)  # ∂K/∂z
-    J_s = calc_kkt_jacobian_switching(prob)  # ∂K/∂s
+    # Compute Jacobians (pass solution to avoid re-solving)
+    J_z = calc_kkt_jacobian(prob; sol=sol)  # ∂K/∂z
+    J_s = calc_kkt_jacobian_switching(prob, sol)  # ∂K/∂s
 
     # Implicit function theorem: ∂z/∂s = -(∂K/∂z)⁻¹ · (∂K/∂s)
     dz_ds = -Matrix(J_z) \ Matrix(J_s)

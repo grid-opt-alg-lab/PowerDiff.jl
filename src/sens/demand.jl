@@ -36,8 +36,11 @@ function calc_sensitivity_demand(prob::DCOPFProblem)
     net = prob.network
     n, m, k = net.n, net.m, net.k
 
-    # Compute KKT Jacobian ∂K/∂z
-    J_z = calc_kkt_jacobian(prob)
+    # Solve once and reuse solution
+    sol = solve!(prob)
+
+    # Compute KKT Jacobian ∂K/∂z (pass solution to avoid re-solving)
+    J_z = calc_kkt_jacobian(prob; sol=sol)
 
     # Compute KKT Jacobian w.r.t. demand ∂K/∂d
     J_d = calc_kkt_jacobian_demand(net)

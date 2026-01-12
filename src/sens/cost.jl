@@ -36,12 +36,15 @@ function calc_sensitivity_cost(prob::DCOPFProblem)
     net = prob.network
     n, m, k = net.n, net.m, net.k
 
-    # Compute KKT Jacobian ∂K/∂z
-    J_z = calc_kkt_jacobian(prob)
+    # Solve once and reuse solution
+    sol = solve!(prob)
+
+    # Compute KKT Jacobian ∂K/∂z (pass solution to avoid re-solving)
+    J_z = calc_kkt_jacobian(prob; sol=sol)
 
     # Compute KKT Jacobians w.r.t. cost coefficients
     J_cl = calc_kkt_jacobian_cost_linear(net)
-    J_cq = calc_kkt_jacobian_cost_quadratic(prob)
+    J_cq = calc_kkt_jacobian_cost_quadratic(prob, sol)
 
     # Solve linear systems: ∂z/∂c = -J_z⁻¹ * J_c
     dz_dcl = -(J_z \ Matrix(J_cl))
@@ -103,9 +106,13 @@ function calc_kkt_jacobian_cost_linear(net::DCNetwork)
 end
 
 """
-    calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem)
+    calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem, sol::DCOPFSolution)
 
 Compute the Jacobian of KKT conditions with respect to quadratic cost coefficients ∂K/∂cq.
+
+# Arguments
+- `prob`: DCOPFProblem
+- `sol`: Pre-computed solution
 
 # Returns
 Sparse matrix of size (kkt_dims × k).
@@ -117,14 +124,12 @@ Only the stationarity condition for g depends on cq:
 
 So ∂K_g/∂cq = Diagonal(g) evaluated at the solution.
 """
-function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem)
+function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
     idx = kkt_indices(n, m, k)
 
-    # Get current solution for g values
-    sol = solve!(prob)
     g = sol.g
 
     J_cq = spzeros(dim, k)

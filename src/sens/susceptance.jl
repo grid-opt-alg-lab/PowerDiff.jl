@@ -40,11 +40,14 @@ function calc_sensitivity_susceptance(prob::DCOPFProblem)
     net = prob.network
     n, m, k = net.n, net.m, net.k
 
-    # Compute KKT Jacobian ∂K/∂z
-    J_z = calc_kkt_jacobian(prob)
+    # Solve once and reuse solution
+    sol = solve!(prob)
+
+    # Compute KKT Jacobian ∂K/∂z (pass solution to avoid re-solving)
+    J_z = calc_kkt_jacobian(prob; sol=sol)
 
     # Compute KKT Jacobian w.r.t. susceptance ∂K/∂b
-    J_b = calc_kkt_jacobian_susceptance(prob)
+    J_b = calc_kkt_jacobian_susceptance(prob, sol)
 
     # Solve linear system: ∂z/∂b = -J_z⁻¹ * J_b
     dz_db = -(J_z \ Matrix(J_b))
@@ -69,9 +72,13 @@ function calc_sensitivity_susceptance(prob::DCOPFProblem)
 end
 
 """
-    calc_kkt_jacobian_susceptance(prob::DCOPFProblem)
+    calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
 
 Compute the Jacobian of KKT conditions with respect to susceptances ∂K/∂b.
+
+# Arguments
+- `prob`: DCOPFProblem
+- `sol`: Pre-computed solution
 
 # Returns
 Sparse matrix of size (kkt_dims × m).
@@ -91,14 +98,12 @@ Derivatives:
 - ∂B/∂b_e = -z_e * A[e,:]' * A[e,:]
 - ∂(WA)/∂b_e: row e becomes -z_e * A[e,:]
 """
-function calc_kkt_jacobian_susceptance(prob::DCOPFProblem)
+function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
     idx = kkt_indices(n, m, k)
 
-    # Get current solution
-    sol = solve!(prob)
     θ = sol.θ
     ν_bal = sol.ν_bal
     ν_flow = sol.ν_flow
