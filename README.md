@@ -1,6 +1,6 @@
 # PowerModelsDiff.jl
 
-A Julia package for differentiable power system analysis. Provides automatic differentiation capabilities for power flow equations, optimal power flow (OPF) problems, and sensitivity analysis of power networks.
+A Julia package for differentiable power system analysis. Provides automatic differentiation capabilities for the power flow equations, optimal power flow (OPF) problems, and sensitivity analysis of power networks.
 
 ## Features
 
@@ -36,9 +36,9 @@ dc_net = DCNetwork(net)
 d = calc_demand_vector(net)
 pf_state = DCPowerFlowState(dc_net, d)
 
-# Unified sensitivity API
-sens = calc_sensitivity(pf_state, SWITCHING)  # dtheta/dz
-sens = calc_sensitivity(pf_state, DEMAND)     # dtheta/dd
+# Symbol-based sensitivity API: calc_sensitivity(state, :operand, :parameter)
+dva_dd = calc_sensitivity(pf_state, :va, :d)   # dθ/dd (n×n)
+df_dz = calc_sensitivity(pf_state, :f, :z)     # df/dz (m×m)
 
 # =============================================================================
 # DC OPF
@@ -51,10 +51,11 @@ lmps = calc_lmp(sol, dc_net)
 energy = calc_energy_component(sol, dc_net)
 congestion = calc_congestion_component(sol, dc_net)
 
-# Unified sensitivity API
-sens = calc_sensitivity(prob, DEMAND)      # dg/dd, dtheta/dd, df/dd, dlmp/dd
-sens = calc_sensitivity(prob, SWITCHING)   # dg/dz, dtheta/dz, df/dz, dlmp/dz
-sens = calc_sensitivity(prob, COST)        # dg/dcq, dg/dcl, dlmp/dc
+# OPF sensitivities (includes LMP because it has duals)
+dlmp_dd = calc_sensitivity(prob, :lmp, :d)     # dLMP/dd (n×n)
+dpg_dd = calc_sensitivity(prob, :pg, :d)       # dg/dd (k×n)
+dpg_dcq = calc_sensitivity(prob, :pg, :cq)     # dg/dcq (k×k)
+dlmp_dz = calc_sensitivity(prob, :lmp, :z)     # dLMP/dz (n×m)
 
 # =============================================================================
 # AC Power Flow
@@ -63,7 +64,8 @@ PowerModels.compute_ac_pf!(net)
 ac_state = ACPowerFlowState(net)
 
 # Voltage-power sensitivities
-sens = calc_sensitivity(ac_state, POWER)   # d|v|/dp, d|v|/dq
+dvm_dp = calc_sensitivity(ac_state, :vm, :p)   # d|V|/dp (n×n)
+dvm_dq = calc_sensitivity(ac_state, :vm, :q)   # d|V|/dq (n×n)
 ```
 
 ## Type Hierarchy
@@ -83,18 +85,35 @@ AbstractOPFProblem
 └── DCOPFProblem        # JuMP-based DC OPF
 ```
 
-## Sensitivity Parameters
+## Sensitivity API
 
-Use parameter singletons with `calc_sensitivity(state, parameter)`:
+The symbol-based API returns exactly the Jacobian you need:
 
-| Parameter | Description | Works with |
-|-----------|-------------|------------|
-| `DEMAND` | Demand sensitivity | DCPowerFlowState, DCOPFProblem |
-| `SWITCHING` | Topology switching | DCPowerFlowState, DCOPFProblem |
-| `COST` | Cost coefficient | DCOPFProblem |
-| `FLOWLIMIT` | Flow limits | DCOPFProblem |
-| `SUSCEPTANCE` | Susceptances | DCOPFProblem |
-| `POWER` | Power injection | ACPowerFlowState |
+```julia
+calc_sensitivity(state, :operand, :parameter) → Matrix
+```
+
+**Operand symbols** (what we differentiate):
+| Symbol | Description | Works with |
+|--------|-------------|------------|
+| `:va` | Voltage phase angles | DCPowerFlowState, DCOPFProblem |
+| `:f` | Branch flows | DCPowerFlowState, DCOPFProblem |
+| `:pg` / `:g` | Generator power | DCOPFProblem |
+| `:lmp` | Locational marginal prices | DCOPFProblem |
+| `:vm` | Voltage magnitude | ACPowerFlowState |
+| `:im` | Current magnitude | ACPowerFlowState |
+
+**Parameter symbols** (what we differentiate w.r.t.):
+| Symbol | Description | Works with |
+|--------|-------------|------------|
+| `:d` / `:pd` | Demand | DCPowerFlowState, DCOPFProblem |
+| `:z` | Switching states | DCPowerFlowState, DCOPFProblem |
+| `:cq`, `:cl` | Cost coefficients | DCOPFProblem |
+| `:fmax` | Flow limits | DCOPFProblem |
+| `:b` | Susceptances | DCOPFProblem |
+| `:p`, `:q` | Power injections | ACPowerFlowState |
+
+Invalid operand/parameter combinations throw `ArgumentError`.
 
 ## Core Types
 
@@ -127,15 +146,22 @@ end
 ```
 
 ### Sensitivity Results
+
+The symbol-based API returns raw matrices. For bundled results, state-specific types are available:
+
 ```julia
-# DC sensitivities
-DemandSensitivity      # dtheta_dd, dg_dd, df_dd, dlmp_dd
-SwitchingSensitivity   # dtheta_dz, dg_dz, df_dz, dlmp_dz
-CostSensitivity        # dg_dcq, dg_dcl, dlmp_dcq, dlmp_dcl
+# DC Power Flow sensitivities
+DCPFDemandSens         # dva_dd, df_dd
+DCPFSwitchingSens      # dva_dz, df_dz
+
+# DC OPF sensitivities (includes duals)
+OPFDemandSens          # dva_dd, dg_dd, df_dd, dlmp_dd
+OPFSwitchingSens       # dva_dz, dg_dz, df_dz, dlmp_dz
+OPFCostSens            # dg_dcq, dg_dcl, dlmp_dcq, dlmp_dcl
 
 # AC sensitivities
-VoltagePowerSensitivity    # dv_dp, dv_dq, dvm_dp, dvm_dq
-VoltageTopologySensitivity # dvm_dg, dvm_db
+VoltagePowerSensitivity    # dvm_dp, dvm_dq
+CurrentPowerSensitivity    # dim_dp, dim_dq
 ```
 
 ## KKT System (Advanced)

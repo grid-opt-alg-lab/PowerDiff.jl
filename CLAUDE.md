@@ -25,6 +25,11 @@ julia --project=. test/unified/test_interface.jl
 julia --project=. test/mwe_unified.jl
 ```
 
+**Test Data**: Tests use PowerModels' built-in MATPOWER cases (case5.m, case14.m, etc.) located at:
+```julia
+joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
+```
+
 ## Architecture
 
 ### Unified Type Hierarchy
@@ -154,7 +159,8 @@ src/
 test/
 ├── runtests.jl                 # Main test runner
 ├── unified/
-│   └── test_interface.jl       # Unified API tests
+│   ├── test_interface.jl       # Unified API tests
+│   └── test_sensitivity_verification.jl  # ForwardDiff verification
 └── mwe_unified.jl              # Minimum working example
 ```
 
@@ -174,3 +180,8 @@ test/
 
 **Default Solver**
 - Clarabel (interior-point conic solver) is the default for DC OPF
+- Use alternate solvers: `DCOPFProblem(net, d; optimizer=Ipopt.Optimizer)`
+
+**Sensitivity Verification**
+- All sensitivities are verified against ForwardDiff in tests
+- Run `test/unified/test_sensitivity_verification.jl` to check numerical correctness
