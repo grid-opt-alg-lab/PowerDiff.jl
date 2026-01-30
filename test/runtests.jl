@@ -150,17 +150,21 @@ end
         prob = DCOPFProblem(dc_net, d)
         solve!(prob)
 
-        sens = calc_sensitivity_demand(prob)
+        # Use the type-based interface
+        dva_dd = calc_sensitivity(prob, VoltageAngle(), Demand())
+        dg_dd = calc_sensitivity(prob, Generation(), Demand())
+        df_dd = calc_sensitivity(prob, Flow(), Demand())
+        dlmp_dd = calc_sensitivity(prob, LMP(), Demand())
 
-        @test size(sens.dva_dd) == (dc_net.n, dc_net.n)
-        @test size(sens.dg_dd) == (dc_net.k, dc_net.n)
-        @test size(sens.df_dd) == (dc_net.m, dc_net.n)
-        @test size(sens.dlmp_dd) == (dc_net.n, dc_net.n)
+        @test size(dva_dd) == (dc_net.n, dc_net.n)
+        @test size(dg_dd) == (dc_net.k, dc_net.n)
+        @test size(df_dd) == (dc_net.m, dc_net.n)
+        @test size(dlmp_dd) == (dc_net.n, dc_net.n)
 
-        @test !any(isnan, sens.dva_dd)
-        @test !any(isnan, sens.dg_dd)
-        @test !any(isnan, sens.df_dd)
-        @test !any(isnan, sens.dlmp_dd)
+        @test !any(isnan, Matrix(dva_dd))
+        @test !any(isnan, Matrix(dg_dd))
+        @test !any(isnan, Matrix(df_dd))
+        @test !any(isnan, Matrix(dlmp_dd))
     end
 end
 
@@ -179,24 +183,27 @@ end
         prob = DCOPFProblem(dc_net, d)
         solve!(prob)
 
-        # Compute switching sensitivities
-        sens = calc_sensitivity_switching(prob)
+        # Compute switching sensitivities using type-based interface
+        dva_dz = calc_sensitivity(prob, VoltageAngle(), Switching())
+        dg_dz = calc_sensitivity(prob, Generation(), Switching())
+        df_dz = calc_sensitivity(prob, Flow(), Switching())
+        dlmp_dz = calc_sensitivity(prob, LMP(), Switching())
 
-        @test size(sens.dva_dz) == (dc_net.n, dc_net.m)
-        @test size(sens.dg_dz) == (dc_net.k, dc_net.m)
-        @test size(sens.df_dz) == (dc_net.m, dc_net.m)
-        @test size(sens.dlmp_dz) == (dc_net.n, dc_net.m)
+        @test size(dva_dz) == (dc_net.n, dc_net.m)
+        @test size(dg_dz) == (dc_net.k, dc_net.m)
+        @test size(df_dz) == (dc_net.m, dc_net.m)
+        @test size(dlmp_dz) == (dc_net.n, dc_net.m)
 
-        @test !any(isnan, sens.dva_dz)
-        @test !any(isnan, sens.dg_dz)
-        @test !any(isnan, sens.df_dz)
-        @test !any(isnan, sens.dlmp_dz)
+        @test !any(isnan, Matrix(dva_dz))
+        @test !any(isnan, Matrix(dg_dz))
+        @test !any(isnan, Matrix(df_dz))
+        @test !any(isnan, Matrix(dlmp_dz))
 
         # Verify sensitivities are finite
-        @test all(isfinite, sens.dva_dz)
-        @test all(isfinite, sens.dg_dz)
-        @test all(isfinite, sens.df_dz)
-        @test all(isfinite, sens.dlmp_dz)
+        @test all(isfinite, Matrix(dva_dz))
+        @test all(isfinite, Matrix(dg_dz))
+        @test all(isfinite, Matrix(df_dz))
+        @test all(isfinite, Matrix(dlmp_dz))
     end
 end
 
@@ -306,10 +313,12 @@ end
         dc_net = DCNetwork(net)
         d = calc_demand_vector(net)
 
-        # Compute analytical sensitivity
+        # Compute analytical sensitivity using type-based interface
         prob = DCOPFProblem(dc_net, d)
         sol_base = solve!(prob)
-        sens = calc_sensitivity_demand(prob)
+        dg_dd = calc_sensitivity(prob, Generation(), Demand())
+        dva_dd = calc_sensitivity(prob, VoltageAngle(), Demand())
+        df_dd = calc_sensitivity(prob, Flow(), Demand())
 
         # Find a bus with demand
         bus_idx = findfirst(d .> 0)
@@ -318,31 +327,31 @@ end
         end
 
         # Finite difference validation
-        δ = 1e-5
+        delta = 1e-5
         d_pert = copy(d)
-        d_pert[bus_idx] += δ
+        d_pert[bus_idx] += delta
 
         prob_pert = DCOPFProblem(dc_net, d_pert)
         sol_pert = solve!(prob_pert)
 
         # Numerical derivatives
-        dg_dd_numerical = (sol_pert.g - sol_base.g) / δ
-        dθ_dd_numerical = (sol_pert.θ - sol_base.θ) / δ
-        df_dd_numerical = (sol_pert.f - sol_base.f) / δ
+        dg_dd_numerical = (sol_pert.g - sol_base.g) / delta
+        dva_dd_numerical = (sol_pert.θ - sol_base.θ) / delta
+        df_dd_numerical = (sol_pert.f - sol_base.f) / delta
 
         # Compare against analytical (relative error)
         if norm(dg_dd_numerical) > 1e-10
-            rel_error_g = norm(sens.dg_dd[:, bus_idx] - dg_dd_numerical) / norm(dg_dd_numerical)
+            rel_error_g = norm(Matrix(dg_dd)[:, bus_idx] - dg_dd_numerical) / norm(dg_dd_numerical)
             @test rel_error_g < 0.01  # 1% tolerance
         end
 
-        if norm(dθ_dd_numerical) > 1e-10
-            rel_error_θ = norm(sens.dva_dd[:, bus_idx] - dθ_dd_numerical) / norm(dθ_dd_numerical)
-            @test rel_error_θ < 0.01
+        if norm(dva_dd_numerical) > 1e-10
+            rel_error_theta = norm(Matrix(dva_dd)[:, bus_idx] - dva_dd_numerical) / norm(dva_dd_numerical)
+            @test rel_error_theta < 0.01
         end
 
         if norm(df_dd_numerical) > 1e-10
-            rel_error_f = norm(sens.df_dd[:, bus_idx] - df_dd_numerical) / norm(df_dd_numerical)
+            rel_error_f = norm(Matrix(df_dd)[:, bus_idx] - df_dd_numerical) / norm(df_dd_numerical)
             @test rel_error_f < 0.01
         end
     end
@@ -358,12 +367,13 @@ end
         prob = DCOPFProblem(dc_net, d)
         solve!(prob)
 
-        sens = calc_sensitivity_demand(prob)
+        # Use the type-based interface
+        dg_dd = calc_sensitivity(prob, Generation(), Demand())
 
         # For each demand bus, generation participation factors should sum to 1
         # This is because total generation must equal total demand
         for i in 1:dc_net.n
-            pf_sum = sum(sens.dg_dd[:, i])
+            pf_sum = sum(Matrix(dg_dd)[:, i])
             @test abs(pf_sum - 1.0) < 0.01  # Should sum to 1 (power balance)
         end
     end
@@ -399,11 +409,12 @@ end
     lmps = calc_lmp(sol, dc_net)
     @test abs(lmps[1] - lmps[2]) < 0.1  # Nearly equal (no congestion)
 
-    # Verify sensitivities
-    sens = calc_sensitivity_demand(prob)
-    @test sens.dg_dd[1, 2] ≈ 1.0 atol=0.01  # ∂g₁/∂d₂ = 1
-    # ∂θ₂/∂d₂ = 1/b = 0.1 (same sign as θ₂)
-    @test abs(sens.dva_dd[2, 2]) ≈ 0.1 atol=0.01
+    # Verify sensitivities using type-based interface
+    dg_dd = calc_sensitivity(prob, Generation(), Demand())
+    dva_dd = calc_sensitivity(prob, VoltageAngle(), Demand())
+    @test Matrix(dg_dd)[1, 2] ≈ 1.0 atol=0.01  # dg1/dd2 = 1
+    # dtheta2/dd2 = 1/b = 0.1 (same sign as theta2)
+    @test abs(Matrix(dva_dd)[2, 2]) ≈ 0.1 atol=0.01
 end
 
 @testset "3-Bus Congested - LMP Differentiation" begin
@@ -491,18 +502,22 @@ end
         prob = DCOPFProblem(dc_net, d)
         solve!(prob)
 
-        sens = calc_sensitivity_cost(prob)
+        # Use the type-based interface
+        dg_dcl = calc_sensitivity(prob, Generation(), LinearCost())
+        dg_dcq = calc_sensitivity(prob, Generation(), QuadraticCost())
+        dlmp_dcl = calc_sensitivity(prob, LMP(), LinearCost())
+        dlmp_dcq = calc_sensitivity(prob, LMP(), QuadraticCost())
 
         # Check dimensions
-        @test size(sens.dg_dcl) == (dc_net.k, dc_net.k)
-        @test size(sens.dg_dcq) == (dc_net.k, dc_net.k)
-        @test size(sens.dlmp_dcl) == (dc_net.n, dc_net.k)
-        @test size(sens.dlmp_dcq) == (dc_net.n, dc_net.k)
+        @test size(dg_dcl) == (dc_net.k, dc_net.k)
+        @test size(dg_dcq) == (dc_net.k, dc_net.k)
+        @test size(dlmp_dcl) == (dc_net.n, dc_net.k)
+        @test size(dlmp_dcq) == (dc_net.n, dc_net.k)
 
-        @test !any(isnan, sens.dg_dcl)
-        @test !any(isnan, sens.dg_dcq)
-        @test !any(isnan, sens.dlmp_dcl)
-        @test !any(isnan, sens.dlmp_dcq)
+        @test !any(isnan, Matrix(dg_dcl))
+        @test !any(isnan, Matrix(dg_dcq))
+        @test !any(isnan, Matrix(dlmp_dcl))
+        @test !any(isnan, Matrix(dlmp_dcq))
     end
 end
 
@@ -521,12 +536,12 @@ end
     d = [0.0, 1.0]
     prob = DCOPFProblem(dc_net, d)
     sol_base = solve!(prob)
-    sens = calc_sensitivity_cost(prob)
+    dg_dcl = calc_sensitivity(prob, Generation(), LinearCost())
 
     # Finite difference validation for linear cost
-    δ = 1e-5
+    delta = 1e-5
     cl_pert = copy(cl_base)
-    cl_pert[1] += δ
+    cl_pert[1] += delta
 
     dc_net_pert = DCNetwork(n, m, k, A, G_inc, b;
         fmax=[100.0], gmax=[10.0], gmin=[0.0],
@@ -535,21 +550,22 @@ end
     sol_pert = solve!(prob_pert)
 
     # Numerical derivative
-    dg_dcl_numerical = (sol_pert.g - sol_base.g) / δ
+    dg_dcl_numerical = (sol_pert.g - sol_base.g) / delta
 
     # Compare (single generator case)
     if norm(dg_dcl_numerical) > 1e-10
-        rel_error = norm(sens.dg_dcl[:, 1] - dg_dcl_numerical) / norm(dg_dcl_numerical)
+        rel_error = norm(Matrix(dg_dcl)[:, 1] - dg_dcl_numerical) / norm(dg_dcl_numerical)
         @test rel_error < 0.05  # 5% tolerance for finite difference
     end
 
     # LMP sensitivity check
     lmp_base = calc_lmp(sol_base, dc_net)
     lmp_pert = calc_lmp(sol_pert, dc_net_pert)
-    dlmp_dcl_numerical = (lmp_pert - lmp_base) / δ
+    dlmp_dcl_numerical = (lmp_pert - lmp_base) / delta
+    dlmp_dcl = calc_sensitivity(prob, LMP(), LinearCost())
 
     if norm(dlmp_dcl_numerical) > 1e-10
-        rel_error_lmp = norm(sens.dlmp_dcl[:, 1] - dlmp_dcl_numerical) / norm(dlmp_dcl_numerical)
+        rel_error_lmp = norm(Matrix(dlmp_dcl)[:, 1] - dlmp_dcl_numerical) / norm(dlmp_dcl_numerical)
         @test rel_error_lmp < 0.1  # 10% tolerance
     end
 end

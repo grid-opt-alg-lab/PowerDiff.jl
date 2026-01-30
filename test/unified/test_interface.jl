@@ -13,105 +13,126 @@ using Test
         net = DCNetwork(net_data)
         @test net isa AbstractPowerNetwork
 
-        d = calc_demand_vector(net_data)
-        prob = DCOPFProblem(net, d)
+        demand = calc_demand_vector(net_data)
+        prob = DCOPFProblem(net, demand)
         sol = solve!(prob)
         @test sol isa AbstractOPFSolution
         @test sol isa AbstractPowerFlowState
 
-        pf_state = DCPowerFlowState(net, d)
+        pf_state = DCPowerFlowState(net, demand)
         @test pf_state isa AbstractPowerFlowState
     end
 
-    @testset "Parameter Types" begin
-        @test DEMAND isa DemandParameter
-        @test SWITCHING isa SwitchingParameter
-        @test POWER isa PowerInjectionParameter
-        @test TOPOLOGY isa TopologyParameter
-        @test COST isa CostParameter
+    @testset "Singleton Type Tags" begin
+        # Test formulation tags
+        @test DCOPF() isa AbstractFormulation
+        @test DCPF() isa AbstractFormulation
+        @test ACOPF() isa AbstractFormulation
+        @test ACPF() isa AbstractFormulation
+
+        # Test operand tags
+        @test VoltageAngle() isa AbstractOperand
+        @test VoltageMagnitude() isa AbstractOperand
+        @test LMP() isa AbstractOperand
+        @test Generation() isa AbstractOperand
+        @test Flow() isa AbstractOperand
+
+        # Test parameter tags
+        @test Demand() isa AbstractParameter
+        @test Switching() isa AbstractParameter
+        @test QuadraticCost() isa AbstractParameter
+        @test LinearCost() isa AbstractParameter
+        @test FlowLimit() isa AbstractParameter
+        @test Susceptance() isa AbstractParameter
+        @test ActivePower() isa AbstractParameter
+        @test ReactivePower() isa AbstractParameter
     end
 
     @testset "DC Power Flow State" begin
         net = DCNetwork(net_data)
-        d = calc_demand_vector(net_data)
+        demand = calc_demand_vector(net_data)
 
         # Test construction
-        pf_state = DCPowerFlowState(net, d)
+        pf_state = DCPowerFlowState(net, demand)
         @test length(pf_state.θ) == net.n
         @test length(pf_state.f) == net.m
-        @test pf_state.p == -d  # Since g = 0
+        @test pf_state.p == -demand  # Since g = 0
 
         # Test with generation
         g = zeros(net.n)
-        g[1] = sum(d)  # All generation at bus 1
-        pf_state2 = DCPowerFlowState(net, g, d)
+        g[1] = sum(demand)  # All generation at bus 1
+        pf_state2 = DCPowerFlowState(net, g, demand)
         @test pf_state2.g == g
-        @test pf_state2.d == d
-        @test pf_state2.p == g - d
+        @test pf_state2.d == demand
+        @test pf_state2.p == g - demand
     end
 
     @testset "DC Power Flow Switching Sensitivity" begin
         net = DCNetwork(net_data)
-        d = calc_demand_vector(net_data)
-        pf_state = DCPowerFlowState(net, d)
+        demand = calc_demand_vector(net_data)
+        pf_state = DCPowerFlowState(net, demand)
 
-        sens = calc_sensitivity_switching(pf_state)
-        @test sens isa DCPFSwitchingSens
-        @test size(sens.dva_dz) == (net.n, net.m)
-        @test size(sens.df_dz) == (net.m, net.m)
+        # Test type-based interface
+        dva_dz = calc_sensitivity(pf_state, VoltageAngle(), Switching())
+        @test dva_dz isa Sensitivity{DCPF, VoltageAngle, Switching}
+        @test size(dva_dz) == (net.n, net.m)
 
-        # Test symbol-based interface
-        dva_dz = calc_sensitivity(pf_state, :va, :z)
-        @test dva_dz == sens.dva_dz
+        df_dz = calc_sensitivity(pf_state, Flow(), Switching())
+        @test df_dz isa Sensitivity{DCPF, Flow, Switching}
+        @test size(df_dz) == (net.m, net.m)
     end
 
     @testset "DC Power Flow Demand Sensitivity" begin
         net = DCNetwork(net_data)
-        d = calc_demand_vector(net_data)
-        pf_state = DCPowerFlowState(net, d)
+        demand = calc_demand_vector(net_data)
+        pf_state = DCPowerFlowState(net, demand)
 
-        sens = calc_sensitivity_demand(pf_state)
-        @test sens isa DCPFDemandSens
-        @test size(sens.dva_dd) == (net.n, net.n)
-        @test size(sens.df_dd) == (net.m, net.n)
+        # Test type-based interface
+        dva_dd = calc_sensitivity(pf_state, VoltageAngle(), Demand())
+        @test dva_dd isa Sensitivity{DCPF, VoltageAngle, Demand}
+        @test size(dva_dd) == (net.n, net.n)
 
-        # Test symbol-based interface
-        dva_dd = calc_sensitivity(pf_state, :va, :d)
-        @test dva_dd == sens.dva_dd
+        df_dd = calc_sensitivity(pf_state, Flow(), Demand())
+        @test df_dd isa Sensitivity{DCPF, Flow, Demand}
+        @test size(df_dd) == (net.m, net.n)
     end
 
     @testset "DC OPF Switching Sensitivity" begin
         net = DCNetwork(net_data)
-        d = calc_demand_vector(net_data)
-        prob = DCOPFProblem(net, d)
+        demand = calc_demand_vector(net_data)
+        prob = DCOPFProblem(net, demand)
 
-        sens = calc_sensitivity_switching(prob)
-        @test sens isa OPFSwitchingSens
-        @test size(sens.dva_dz) == (net.n, net.m)
-        @test size(sens.dg_dz) == (net.k, net.m)
-        @test size(sens.df_dz) == (net.m, net.m)
+        # Test type-based interface
+        dva_dz = calc_sensitivity(prob, VoltageAngle(), Switching())
+        @test dva_dz isa Sensitivity{DCOPF, VoltageAngle, Switching}
+        @test size(dva_dz) == (net.n, net.m)
 
-        # Test symbol-based interface
-        dva_dz = calc_sensitivity(prob, :va, :z)
-        @test dva_dz == sens.dva_dz
+        dg_dz = calc_sensitivity(prob, Generation(), Switching())
+        @test dg_dz isa Sensitivity{DCOPF, Generation, Switching}
+        @test size(dg_dz) == (net.k, net.m)
+
+        df_dz = calc_sensitivity(prob, Flow(), Switching())
+        @test df_dz isa Sensitivity{DCOPF, Flow, Switching}
+        @test size(df_dz) == (net.m, net.m)
     end
 
-    @testset "Unified Voltage Sensitivity" begin
+    @testset "DC OPF Demand Sensitivity" begin
         net = DCNetwork(net_data)
-        d = calc_demand_vector(net_data)
-        pf_state = DCPowerFlowState(net, d)
+        demand = calc_demand_vector(net_data)
+        prob = DCOPFProblem(net, demand)
 
-        # DC Power Flow
-        dθ_dd = calc_voltage_sensitivity(pf_state, DEMAND)
-        @test size(dθ_dd) == (net.n, net.n)
+        # Test type-based interface returns typed result
+        dlmp_dd = calc_sensitivity(prob, LMP(), Demand())
+        @test dlmp_dd isa Sensitivity{DCOPF, LMP, Demand}
+        @test size(dlmp_dd) == (net.n, net.n)
 
-        dθ_dz = calc_voltage_sensitivity(pf_state, SWITCHING)
-        @test size(dθ_dz) == (net.n, net.m)
+        # Test index mappings
+        @test length(dlmp_dd.row_to_id) == net.n
+        @test length(dlmp_dd.col_to_id) == net.n
 
-        # DC OPF
-        prob = DCOPFProblem(net, d)
-        dθ_dd_opf = calc_voltage_sensitivity(prob, DEMAND)
-        @test size(dθ_dd_opf) == (net.n, net.n)
+        # Test matrix interface
+        @test dlmp_dd[1, 1] isa Float64
+        @test Matrix(dlmp_dd) isa Matrix{Float64}
     end
 
     @testset "ACNetwork" begin
@@ -160,9 +181,45 @@ using Test
         @test size(sens.∂vm_∂p) == (state.n, state.n)
         @test size(sens.∂vm_∂q) == (state.n, state.n)
 
-        # Unified interface
-        sens2 = calc_sensitivity(state, POWER)
-        @test sens2 isa VoltagePowerSensitivity
+        # Test non-unicode accessors
+        @test sens.dvm_dp == sens.∂vm_∂p
+        @test sens.dvm_dq == sens.∂vm_∂q
+
+        # Type-based interface
+        dvm_dp = calc_sensitivity(state, VoltageMagnitude(), ActivePower())
+        @test dvm_dp isa Sensitivity{ACPF, VoltageMagnitude, ActivePower}
+        @test Matrix(dvm_dp) == sens.∂vm_∂p
+    end
+
+    @testset "Sensitivity Type Dispatch" begin
+        net = DCNetwork(net_data)
+        demand = calc_demand_vector(net_data)
+        prob = DCOPFProblem(net, demand)
+
+        # Get typed sensitivity
+        sens = calc_sensitivity(prob, LMP(), Demand())
+
+        # Test dispatch helpers
+        @test formulation(sens) == DCOPF
+        @test operand(sens) == LMP
+        @test parameter(sens) == Demand
+
+        # Test type-based dispatch
+        function process_sens(s::Sensitivity{DCOPF, LMP, Demand})
+            return "DC OPF LMP-demand"
+        end
+        function process_sens(s::Sensitivity{F, O, P}) where {F, O, P}
+            return "Generic sensitivity"
+        end
+
+        @test process_sens(sens) == "DC OPF LMP-demand"
+
+        # Test dispatching on any switching sensitivity
+        dva_dz = calc_sensitivity(prob, VoltageAngle(), Switching())
+        function process_switching(s::Sensitivity{F, O, Switching}) where {F, O}
+            return "Switching sensitivity"
+        end
+        @test process_switching(dva_dz) == "Switching sensitivity"
     end
 end
 
