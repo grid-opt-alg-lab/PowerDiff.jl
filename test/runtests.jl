@@ -583,3 +583,4 @@ end
 # Unified Architecture Tests
 # =============================================================================
 include("unified/test_interface.jl")
+include("test_ac_opf_sens.jl")
