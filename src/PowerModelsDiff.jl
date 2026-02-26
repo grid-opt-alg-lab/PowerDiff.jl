@@ -102,6 +102,9 @@ export formulation, operand, parameter
 # DC Power Flow Bundled types (used by DCPowerFlowState)
 export DCPFDemandSens, DCPFSwitchingSens
 
+# AC OPF Bundled types (used by ACOPFProblem)
+export ACOPFSwitchingSens
+
 # -----------------------------------------------------------------------------
 # DC Power Flow Types
 # -----------------------------------------------------------------------------

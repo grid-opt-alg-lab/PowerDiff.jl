@@ -88,3 +88,36 @@ abstract type AbstractSensitivityPower <: AbstractSensitivity end
 Sensitivity with respect to network topology/parameters (z, b, g).
 """
 abstract type AbstractSensitivityTopology <: AbstractSensitivity end
+
+# =============================================================================
+# Level 5: Singleton Type Tag Hierarchy (for Sensitivity{F,O,P})
+# =============================================================================
+
+"""
+    AbstractFormulation
+
+Abstract base type for formulation tags (DCOPF, ACOPF, DCPF, ACPF).
+
+Used as a type parameter in `Sensitivity{F,O,P}` for dispatch.
+"""
+abstract type AbstractFormulation end
+
+"""
+    AbstractOperand
+
+Abstract base type for operand tags (VA, VM, PG, QG, F, LMP, etc.).
+
+Operands are what we differentiate (the "output" of the sensitivity).
+Used as a type parameter in `Sensitivity{F,O,P}` for dispatch.
+"""
+abstract type AbstractOperand end
+
+"""
+    AbstractParameter
+
+Abstract base type for parameter tags (D, Z, CQ, CL, FMAX, B, P, Q).
+
+Parameters are what we differentiate with respect to (the "input").
+Used as a type parameter in `Sensitivity{F,O,P}` for dispatch.
+"""
+abstract type AbstractParameter end

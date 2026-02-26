@@ -153,6 +153,19 @@ struct DCPFSwitchingSens <: AbstractSensitivity
     df_dz::Matrix{Float64}
 end
 
+"""
+    ACOPFSwitchingSens
+
+Bundled AC OPF switching sensitivity matrices.
+Used by calc_sensitivity_switching(::ACOPFProblem).
+"""
+struct ACOPFSwitchingSens <: AbstractSensitivity
+    dvm_dz::Matrix{Float64}
+    dva_dz::Matrix{Float64}
+    dpg_dz::Matrix{Float64}
+    dqg_dz::Matrix{Float64}
+end
+
 # =============================================================================
 # AC Power Flow Sensitivity Types (kept for voltage/current sensitivity functions)
 # =============================================================================

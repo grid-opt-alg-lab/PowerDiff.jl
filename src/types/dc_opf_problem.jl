@@ -4,6 +4,70 @@
 #
 # B-θ formulation of DC OPF wrapped around a JuMP model.
 
+# =============================================================================
+# Sensitivity Cache
+# =============================================================================
+
+"""
+    SensitivityCache
+
+Mutable cache for storing computed sensitivity data to avoid redundant KKT solves.
+
+The cache stores the full derivative matrices `dz_d*` for each parameter type,
+allowing efficient extraction of individual operand sensitivities without
+recomputing the expensive KKT factorization.
+
+# Fields
+- `solution`: Cached DCOPFSolution (or nothing if not yet solved)
+- `kkt_factor`: Cached LU factorization of KKT Jacobian (or nothing)
+- `dz_dd`: Full KKT derivative w.r.t. demand (or nothing)
+- `dz_dcl`: Full KKT derivative w.r.t. linear cost (or nothing)
+- `dz_dcq`: Full KKT derivative w.r.t. quadratic cost (or nothing)
+- `dz_dz`: Full KKT derivative w.r.t. switching (or nothing)
+- `dz_dfmax`: Full KKT derivative w.r.t. flow limits (or nothing)
+- `dz_db`: Full KKT derivative w.r.t. susceptances (or nothing)
+"""
+mutable struct SensitivityCache
+    solution::Union{Nothing,DCOPFSolution}
+    kkt_factor::Union{Nothing,LinearAlgebra.LU}
+    dz_dd::Union{Nothing,Matrix{Float64}}
+    dz_dcl::Union{Nothing,Matrix{Float64}}
+    dz_dcq::Union{Nothing,Matrix{Float64}}
+    dz_dz::Union{Nothing,Matrix{Float64}}
+    dz_dfmax::Union{Nothing,Matrix{Float64}}
+    dz_db::Union{Nothing,Matrix{Float64}}
+end
+
+"""
+    SensitivityCache()
+
+Create an empty sensitivity cache with all fields set to nothing.
+"""
+function SensitivityCache()
+    return SensitivityCache(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
+end
+
+"""
+    invalidate!(cache::SensitivityCache)
+
+Clear all cached sensitivity data. Called when problem parameters change.
+"""
+function invalidate!(cache::SensitivityCache)
+    cache.solution = nothing
+    cache.kkt_factor = nothing
+    cache.dz_dd = nothing
+    cache.dz_dcl = nothing
+    cache.dz_dcq = nothing
+    cache.dz_dz = nothing
+    cache.dz_dfmax = nothing
+    cache.dz_db = nothing
+    return nothing
+end
+
+# =============================================================================
+# DCOPFProblem
+# =============================================================================
+
 """
     DCOPFProblem <: AbstractOPFProblem
 
@@ -15,6 +79,7 @@ B-θ formulation of DC OPF wrapped around a JuMP model.
 - `θ`, `g`, `f`: Variable references for phase angles, generation, flows
 - `d`: Demand parameter (can be updated for sensitivity analysis)
 - `cons`: Named tuple of constraint references
+- `cache`: Mutable sensitivity cache for avoiding redundant KKT solves
 """
 mutable struct DCOPFProblem <: AbstractOPFProblem
     model::JuMP.Model
@@ -24,6 +89,7 @@ mutable struct DCOPFProblem <: AbstractOPFProblem
     f::Vector{VariableRef}
     d::Vector{Float64}
     cons::NamedTuple
+    cache::SensitivityCache
 end
 
 # =============================================================================
@@ -104,7 +170,7 @@ function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.
         phase_diff = phase_diff
     )
 
-    return DCOPFProblem(model, network, θ, g, f, Float64.(d), cons)
+    return DCOPFProblem(model, network, θ, g, f, Float64.(d), cons, SensitivityCache())
 end
 
 """
