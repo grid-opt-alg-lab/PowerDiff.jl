@@ -9,6 +9,8 @@
 
 Solve the DC OPF problem and return a DCOPFSolution.
 
+Invalidates the sensitivity cache since the solution may have changed.
+
 # Returns
 DCOPFSolution containing optimal primal and dual variables.
 
@@ -16,6 +18,9 @@ DCOPFSolution containing optimal primal and dual variables.
 Error if optimization does not converge to optimal/locally optimal solution.
 """
 function solve!(prob::DCOPFProblem)
+    # Invalidate sensitivity cache since we're re-solving
+    invalidate!(prob.cache)
+
     optimize!(prob.model)
 
     status = termination_status(prob.model)
@@ -36,7 +41,12 @@ function solve!(prob::DCOPFProblem)
 
     obj = objective_value(prob.model)
 
-    return DCOPFSolution(θ_val, g_val, f_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, obj)
+    sol = DCOPFSolution(θ_val, g_val, f_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, obj)
+
+    # Cache the solution for sensitivity computations
+    prob.cache.solution = sol
+
+    return sol
 end
 
 """
@@ -45,10 +55,14 @@ end
 Update the demand parameter in the DC OPF problem.
 
 This modifies the RHS of power balance constraints for re-solving with new demand.
+Invalidates the sensitivity cache since parameters have changed.
 """
 function update_demand!(prob::DCOPFProblem, d::AbstractVector)
     n = prob.network.n
     @assert length(d) == n "Demand vector length must match number of buses"
+
+    # Invalidate sensitivity cache since parameters changed
+    invalidate!(prob.cache)
 
     # Update stored demand
     prob.d .= d

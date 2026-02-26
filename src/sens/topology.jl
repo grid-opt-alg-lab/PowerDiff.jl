@@ -63,7 +63,7 @@ function voltage_topology_sensitivities(
     sensitivities_g = _vm_projection(vm, v_re, v_im, Δstate_g)
     sensitivities_b = _vm_projection(vm, v_re, v_im, Δstate_b)
 
-    return VoltageTopologySensitivity(Matrix(sensitivities_g), Matrix(sensitivities_b))
+    return VoltageTopologySensitivity(sensitivities_g, sensitivities_b)
 end
 
 function _assert_pf_solution(
