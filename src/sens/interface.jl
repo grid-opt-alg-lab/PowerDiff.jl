@@ -70,6 +70,51 @@ calc_sensitivity(pf_state, Generation(), Demand()) # ERROR: no generation dispat
 function calc_sensitivity end
 
 # =============================================================================
+# Symbol-Based Entry Point
+# =============================================================================
+
+"""
+    calc_sensitivity(state, operand::Symbol, parameter::Symbol)
+
+Symbol-based entry point for sensitivity computation.
+
+Maps symbol names to singleton types and delegates to the typed dispatch:
+    calc_sensitivity(state, OperandType(), ParameterType()) → Sensitivity{F, O, P}
+
+# Examples
+```julia
+calc_sensitivity(prob, :lmp, :d)    # equivalent to calc_sensitivity(prob, LMP(), Demand())
+calc_sensitivity(prob, :pg, :cq)    # equivalent to calc_sensitivity(prob, Generation(), QuadraticCost())
+calc_sensitivity(state, :vm, :p)    # equivalent to calc_sensitivity(state, VoltageMagnitude(), ActivePower())
+```
+"""
+function calc_sensitivity(state, operand::Symbol, parameter::Symbol)
+    op = _resolve_operand(operand)
+    param = _resolve_parameter(parameter)
+    return calc_sensitivity(state, op, param)
+end
+
+_resolve_operand(s::Symbol) = get(_OPERAND_MAP, s) do
+    throw(ArgumentError("Unknown operand symbol :$s. Valid: :va, :f, :pg, :g, :lmp, :vm, :im, :v, :qg"))
+end
+_resolve_parameter(s::Symbol) = get(_PARAMETER_MAP, s) do
+    throw(ArgumentError("Unknown parameter symbol :$s. Valid: :d, :pd, :z, :cq, :cl, :fmax, :b, :p, :q"))
+end
+
+const _OPERAND_MAP = Dict{Symbol, AbstractOperand}(
+    :va => VoltageAngle(), :f => Flow(), :pg => Generation(), :g => Generation(),
+    :lmp => LMP(), :vm => VoltageMagnitude(), :im => CurrentMagnitude(),
+    :v => Voltage(), :qg => ReactiveGeneration(),
+)
+
+const _PARAMETER_MAP = Dict{Symbol, AbstractParameter}(
+    :d => Demand(), :pd => Demand(), :z => Switching(),
+    :cq => QuadraticCost(), :cl => LinearCost(),
+    :fmax => FlowLimit(), :b => Susceptance(),
+    :p => ActivePower(), :q => ReactivePower(),
+)
+
+# =============================================================================
 # Formulation/Operand/Parameter Type Mappings
 # =============================================================================
 
