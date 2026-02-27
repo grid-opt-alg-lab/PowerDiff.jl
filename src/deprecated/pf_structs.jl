@@ -42,6 +42,7 @@ end
 Use `ACNetwork(net)` instead.
 """
 function NetworkTopology(net::Dict{String,<:Any}; full_nodes::Bool=true, full_edges::Bool=false)
+    Base.depwarn("`NetworkTopology` is deprecated, use `ACNetwork` instead.", :NetworkTopology)
     @assert haskey(net, "basic_network") && net["basic_network"] "Network must be a basic network"
 
     A = calc_incidence_matrix(net; full_nodes=full_nodes, full_edges=full_edges)
@@ -115,6 +116,7 @@ end
 Use `ACNetwork(net)` instead.
 """
 function PowerFlowEquations(net::Dict{String,<:Any})
+    Base.depwarn("`PowerFlowEquations` is deprecated, use `ACNetwork` instead.", :PowerFlowEquations)
     topology = NetworkTopology(net)
     return PowerFlowEquations(topology)
 end

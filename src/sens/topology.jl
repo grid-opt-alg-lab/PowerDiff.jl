@@ -23,7 +23,7 @@ Arguments
 
 Returns
 -------
-`VoltageSensitivityTopology` whose fields `p` and `q` store the Jacobians
+NamedTuple with fields `dvm_dg` and `dvm_db` storing the Jacobians
 ∂|V|/∂G and ∂|V|/∂B respectively, matching the ordering produced by
 `vectorize_laplacian_weights(net; full_nodes, full_edges)`.
 """
@@ -63,7 +63,7 @@ function voltage_topology_sensitivities(
     sensitivities_g = _vm_projection(vm, v_re, v_im, Δstate_g)
     sensitivities_b = _vm_projection(vm, v_re, v_im, Δstate_b)
 
-    return VoltageTopologySensitivity(sensitivities_g, sensitivities_b)
+    return (dvm_dg=sensitivities_g, dvm_db=sensitivities_b)
 end
 
 function _assert_pf_solution(
@@ -143,7 +143,7 @@ end
 # =============================================================================
 
 """
-    calc_sensitivity_switching(state::DCPowerFlowState) → DCPFSwitchingSens
+    calc_sensitivity_switching(state::DCPowerFlowState) → NamedTuple
 
 Compute switching sensitivity for DC power flow (not OPF).
 
@@ -159,7 +159,7 @@ This uses the formula from matrix perturbation theory (RandomizedSwitching patte
 - `state`: DCPowerFlowState containing the solved power flow
 
 # Returns
-`DCPFSwitchingSens` with:
+NamedTuple with:
 - `dva_dz`: Jacobian ∂va/∂z (n × m) - voltage angles w.r.t. switching
 - `df_dz`: Jacobian ∂f/∂z (m × m) - flows w.r.t. switching
 """
@@ -216,11 +216,11 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
         df_dz[e_prime, e_prime] += -net.b[e_prime] * dot(net.A[e_prime, :], state.θ)
     end
 
-    return DCPFSwitchingSens(dva_dz, df_dz)
+    return (dva_dz=dva_dz, df_dz=df_dz)
 end
 
 """
-    calc_sensitivity_demand(state::DCPowerFlowState) → DCPFDemandSens
+    calc_sensitivity_demand(state::DCPowerFlowState) → NamedTuple
 
 Compute demand sensitivity for DC power flow (not OPF).
 
@@ -234,7 +234,7 @@ since p = g - d and ∂p/∂d = -I.
 - `state`: DCPowerFlowState containing the solved power flow
 
 # Returns
-`DCPFDemandSens` with:
+NamedTuple with:
 - `dva_dd`: Jacobian ∂va/∂d (n × n) - voltage angles w.r.t. demand
 - `df_dd`: Jacobian ∂f/∂d (m × n) - flows w.r.t. demand
 """
@@ -249,5 +249,5 @@ function calc_sensitivity_demand(state::DCPowerFlowState)
     W = Diagonal(-net.b .* net.z)
     df_dd = W * net.A * dva_dd
 
-    return DCPFDemandSens(dva_dd, df_dd)
+    return (dva_dd=dva_dd, df_dd=df_dd)
 end

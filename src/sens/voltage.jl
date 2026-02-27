@@ -8,9 +8,6 @@
 # of Node Voltages and Line Currents in Unbalanced Radial Electrical
 # Distribution Networks", IEEE Trans. Smart Grid, vol. 4, no. 2, pp. 741-750, 2013.
 
-using LinearAlgebra
-using SparseArrays
-
 # =============================================================================
 # Voltage-Power Sensitivity
 # =============================================================================
@@ -57,7 +54,7 @@ function calc_voltage_power_sensitivities(
     ∂v_∂p, ∂vm_∂p = calc_voltage_active_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
     ∂v_∂q, ∂vm_∂q = calc_voltage_reactive_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
 
-    return VoltagePowerSensitivity(∂v_∂p, ∂v_∂q, ∂vm_∂p, ∂vm_∂q)
+    return (dv_dp=∂v_∂p, dv_dq=∂v_∂q, dvm_dp=∂vm_∂p, dvm_dq=∂vm_∂q)
 end
 
 """

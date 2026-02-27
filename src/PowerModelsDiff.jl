@@ -2,8 +2,6 @@ module PowerModelsDiff
 
 using LinearAlgebra
 using SparseArrays
-using Statistics
-using Random
 using JuMP
 using Clarabel
 using Ipopt
@@ -26,14 +24,13 @@ include("types/dc_network.jl")      # DCNetwork, DCPowerFlowState, DCOPFSolution
 include("types/dc_opf_problem.jl")  # DCOPFProblem + constructors
 include("types/ac_network.jl")      # ACNetwork, ACPowerFlowState
 include("types/ac_opf_problem.jl")  # ACOPFProblem, ACOPFSolution + constructors
-include("types/sensitivities.jl")   # Sensitivity{T} and DC power flow bundled types
+include("types/sensitivities.jl")   # Sensitivity{T} (public API wrapper)
 
 # =============================================================================
 # Power flow and graph utilities
 # =============================================================================
 include("pf/admittance_matrix.jl")
 include("graphs/laplacian.jl")
-include("pf/bus_injection.jl")
 include("pf/pf_eqns.jl")
 
 # =============================================================================
@@ -128,9 +125,11 @@ export VectorizedAdmittanceMatrix, vectorize_laplacian_weights
 export laplacian, full_incidence_matrix, calc_incidence_matrix
 
 # Power Flow Equations
-export NetworkTopology, PowerFlowEquations
 export p, q, vm, vm2, pf_eqns
 export p_polar, q_polar
 export branch_flow, p_flow, q_flow
+
+# Deprecated types (kept for backwards compatibility; emit depwarn on construction)
+export NetworkTopology, PowerFlowEquations
 
 end # module PowerModelsDiff

@@ -676,7 +676,7 @@ function _get_ac_dx_ds!(prob::ACOPFProblem)::Matrix{Float64}
 end
 
 """
-    calc_sensitivity_switching(prob::ACOPFProblem) → ACOPFSwitchingSens
+    calc_sensitivity_switching(prob::ACOPFProblem) → NamedTuple
 
 Compute sensitivities of AC OPF solution with respect to switching variables.
 
@@ -684,7 +684,7 @@ Uses cached KKT derivatives for efficiency — multiple calls with different
 operands share the same expensive Jacobian computation.
 
 # Returns
-`ACOPFSwitchingSens` containing Jacobians of solution variables w.r.t. switching:
+NamedTuple containing Jacobians of solution variables w.r.t. switching:
 - `dvm_dz`: ∂vm/∂z (n × m) - voltage magnitudes w.r.t. switching
 - `dva_dz`: ∂va/∂z (n × m) - voltage angles w.r.t. switching
 - `dpg_dz`: ∂pg/∂z (k × m) - active generation w.r.t. switching
@@ -694,10 +694,10 @@ function calc_sensitivity_switching(prob::ACOPFProblem)
     dx_ds = _get_ac_dx_ds!(prob)
     idx = ac_kkt_indices(prob)
 
-    dva_ds = dx_ds[idx.va, :]
-    dvm_ds = dx_ds[idx.vm, :]
-    dpg_ds = dx_ds[idx.pg, :]
-    dqg_ds = dx_ds[idx.qg, :]
-
-    return ACOPFSwitchingSens(dvm_ds, dva_ds, dpg_ds, dqg_ds)
+    return (
+        dvm_dz = dx_ds[idx.vm, :],
+        dva_dz = dx_ds[idx.va, :],
+        dpg_dz = dx_ds[idx.pg, :],
+        dqg_dz = dx_ds[idx.qg, :],
+    )
 end

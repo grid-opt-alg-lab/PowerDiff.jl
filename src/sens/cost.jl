@@ -5,9 +5,6 @@
 # KKT system in kkt_dc_opf.jl. This file contains the KKT Jacobian functions
 # for cost parameters.
 
-using LinearAlgebra
-using SparseArrays
-
 """
     calc_kkt_jacobian_cost_linear(net::DCNetwork)
 

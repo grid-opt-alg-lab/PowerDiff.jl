@@ -5,11 +5,6 @@
 # Provides differentiable power flow equations using vectorized admittance
 # representation. Equations are parameterized by G (conductance) and B (susceptance)
 # vectors rather than a full Y matrix, enabling efficient implicit differentiation.
-#
-# NOTE: NetworkTopology and PowerFlowEquations structs have been deprecated
-# in favor of ACNetwork which provides the same functionality with a cleaner
-# Julian design (separate state and method). See src/deprecated/pf_structs.jl
-# for backwards compatibility.
 
 # =============================================================================
 # Power Flow Equations - Complex Voltage Form
@@ -194,9 +189,3 @@ q_flow(v, G, B) = imag.(branch_flow(v, G, B))
 
 """Jacobian ∂Q/∂v_im (reactive power w.r.t. imaginary voltage)"""
 ∂q∂v_im(v_re, v_im, G, B) = ForwardDiff.jacobian(v_im -> q(v_re, v_im, G, B), v_im)
-
-# =============================================================================
-# Deprecated: NetworkTopology and PowerFlowEquations
-# =============================================================================
-# These types are now in src/deprecated/pf_structs.jl for backwards compatibility.
-# Use ACNetwork instead for new code.

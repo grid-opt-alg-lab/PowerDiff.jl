@@ -8,9 +8,6 @@
 # of Node Voltages and Line Currents in Unbalanced Radial Electrical
 # Distribution Networks", IEEE Trans. Smart Grid, vol. 4, no. 2, pp. 741-750, 2013.
 
-using LinearAlgebra
-using SparseArrays
-
 # =============================================================================
 # Current-Power Sensitivity
 # =============================================================================
@@ -97,7 +94,7 @@ function calc_current_power_sensitivities(
         end
     end
 
-    return CurrentPowerSensitivity(∂I_∂p, ∂I_∂q, ∂Im_∂p, ∂Im_∂q)
+    return (dI_dp=∂I_∂p, dI_dq=∂I_∂q, dIm_dp=∂Im_∂p, dIm_dq=∂Im_∂q)
 end
 
 """
@@ -131,36 +128,3 @@ function calc_current_power_sensitivities(state::ACPowerFlowState; full::Bool=tr
     return calc_current_power_sensitivities(state.v, state.Y, state.branch_data; idx_slack=state.idx_slack, full=full)
 end
 
-# =============================================================================
-# Convenience Functions
-# =============================================================================
-
-"""
-    calc_current_magnitude_active_power_sensitivity(v, Y, branch_data; kwargs...)
-
-Compute only ∂|I|/∂p (current magnitude sensitivity to active power).
-"""
-function calc_current_magnitude_active_power_sensitivity(
-    v::AbstractVector{ComplexF64},
-    Y::AbstractMatrix{ComplexF64},
-    branch_data::Dict{String,<:Any};
-    kwargs...
-)
-    sens = calc_current_power_sensitivities(v, Y, branch_data; kwargs...)
-    return sens.∂Im_∂p
-end
-
-"""
-    calc_current_magnitude_reactive_power_sensitivity(v, Y, branch_data; kwargs...)
-
-Compute only ∂|I|/∂q (current magnitude sensitivity to reactive power).
-"""
-function calc_current_magnitude_reactive_power_sensitivity(
-    v::AbstractVector{ComplexF64},
-    Y::AbstractMatrix{ComplexF64},
-    branch_data::Dict{String,<:Any};
-    kwargs...
-)
-    sens = calc_current_power_sensitivities(v, Y, branch_data; kwargs...)
-    return sens.∂Im_∂q
-end

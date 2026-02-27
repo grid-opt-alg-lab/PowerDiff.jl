@@ -4,9 +4,6 @@
 # Note: For DCOPFProblem, demand sensitivities are computed via the cached
 # KKT system in kkt_dc_opf.jl. The functions here provide convenience wrappers.
 
-using LinearAlgebra
-using SparseArrays
-
 """
     calc_generation_participation_factors(prob::DCOPFProblem)
 

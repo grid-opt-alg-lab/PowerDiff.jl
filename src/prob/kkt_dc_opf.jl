@@ -642,11 +642,5 @@ function update_switching!(prob::DCOPFProblem, s::AbstractVector)
     # Update network switching state
     prob.network.z .= s
 
-    # Rebuild the susceptance matrix and update constraints
-    W = Diagonal(-prob.network.b .* prob.network.z)
-    B_mat = sparse(prob.network.A' * W * prob.network.A)
-
-    # Note: Full problem rebuild would be needed for JuMP model update
-    # For now, this updates the network parameters; re-solve will use new values
     return prob
 end

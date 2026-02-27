@@ -5,9 +5,6 @@
 # KKT system in kkt_dc_opf.jl. This file contains the KKT Jacobian function
 # for susceptance parameters.
 
-using LinearAlgebra
-using SparseArrays
-
 """
     calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
 
@@ -47,7 +44,6 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
 
     # Network parameters
     z = net.z
-    b = net.b
     A = net.A
 
     J_b = spzeros(dim, m)

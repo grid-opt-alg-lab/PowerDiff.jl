@@ -90,12 +90,3 @@ function calc_energy_component(sol::DCOPFSolution, net::DCNetwork)
     return sol.ν_bal .- calc_congestion_component(sol, net)
 end
 
-"""
-    calc_marginal_loss_component(sol::DCOPFSolution, net::DCNetwork)
-
-For DC OPF, there are no losses (lossless model).
-Returns zeros for API compatibility with AC formulations.
-"""
-function calc_marginal_loss_component(sol::DCOPFSolution, net::DCNetwork)
-    return zeros(net.n)
-end

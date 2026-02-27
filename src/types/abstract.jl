@@ -63,29 +63,3 @@ Concrete subtypes:
 - `ACOPFProblem`: AC OPF problem (polar formulation)
 """
 abstract type AbstractOPFProblem end
-
-# =============================================================================
-# Level 4: Abstract Sensitivity Types
-# =============================================================================
-
-"""
-    AbstractSensitivity
-
-Abstract base type for sensitivity analysis results.
-"""
-abstract type AbstractSensitivity end
-
-"""
-    AbstractSensitivityPower <: AbstractSensitivity
-
-Sensitivity with respect to power injections (P, Q).
-"""
-abstract type AbstractSensitivityPower <: AbstractSensitivity end
-
-"""
-    AbstractSensitivityTopology <: AbstractSensitivity
-
-Sensitivity with respect to network topology/parameters (z, b, g).
-"""
-abstract type AbstractSensitivityTopology <: AbstractSensitivity end
-
