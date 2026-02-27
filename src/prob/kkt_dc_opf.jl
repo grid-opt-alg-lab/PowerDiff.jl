@@ -16,7 +16,7 @@ If not yet solved, calls solve!(prob) and caches the result.
 """
 function _ensure_solved!(prob::DCOPFProblem)::DCOPFSolution
     if isnothing(prob.cache.solution)
-        solve!(prob)
+        prob.cache.solution = solve!(prob)
     end
     return prob.cache.solution
 end
@@ -306,7 +306,7 @@ Evaluate the KKT conditions for the B-θ DC OPF problem.
 
 The KKT system for DC OPF:
 ```
-min  (1/2) g' Cq g + cl' g + (τ²/2) ||f||²
+min  g' Cq g + cl' g + (τ²/2) ||f||²
 s.t. G_inc * g - d = B * θ     (ν_bal)
      f = W * A * θ              (ν_flow)
      f ≥ -fmax                  (λ_lb)
@@ -319,7 +319,7 @@ s.t. G_inc * g - d = B * θ     (ν_bal)
 # Returns
 Vector of KKT residuals (should be zero at optimum):
 1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + e_ref * η_ref = 0
-2. Stationarity w.r.t. g: Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub = 0
+2. Stationarity w.r.t. g: 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub = 0
 3. Stationarity w.r.t. f: τ² * f - ν_flow - λ_lb + λ_ub = 0
 4. Complementary slackness for flow bounds
 5. Complementary slackness for gen bounds
@@ -356,7 +356,8 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     K_θ = B_mat' * ν_bal + WA' * ν_flow + e_ref * η_ref
 
     # 2. Stationarity w.r.t. g
-    K_g = Diagonal(net.cq) * g + net.cl - net.G_inc' * ν_bal - ρ_lb + ρ_ub
+    # Objective is cq_i * g_i^2 + cl_i * g_i, so ∂obj/∂g_i = 2*cq_i*g_i + cl_i
+    K_g = 2 * Diagonal(net.cq) * g + net.cl - net.G_inc' * ν_bal - ρ_lb + ρ_ub
 
     # 3. Stationarity w.r.t. f
     K_f = net.τ^2 * f - ν_flow - λ_lb + λ_ub
@@ -438,8 +439,8 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     J[idx.θ, idx.η] = e_ref
 
     # ∂K_g/∂... (row block 2: indices n+1:n+k)
-    # K_g = Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub
-    J[idx.g, idx.g] = sparse(Diagonal(net.cq))
+    # K_g = 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub
+    J[idx.g, idx.g] = 2 * sparse(Diagonal(net.cq))
     J[idx.g, idx.ρ_lb] = -sparse(I, k, k)
     J[idx.g, idx.ρ_ub] = sparse(I, k, k)
     J[idx.g, idx.ν_bal] = -net.G_inc'

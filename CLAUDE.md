@@ -23,6 +23,10 @@ julia --project=. test/unified/test_interface.jl
 
 # Run MWE (minimum working example)
 julia --project=. test/mwe_unified.jl
+
+# Build documentation
+julia --project=docs -e 'using Pkg; Pkg.instantiate()'
+julia --project=docs docs/make.jl
 ```
 
 **Test Data**: Tests use PowerModels' built-in MATPOWER cases (case5.m, case14.m, etc.) located at:
@@ -197,10 +201,24 @@ src/
 test/
 ├── runtests.jl                 # Main test runner
 ├── test_ac_opf_sens.jl         # AC OPF sensitivity tests
+├── test_sensitivity_coverage.jl # Exhaustive (operand, parameter) coverage tests
+├── test_dc_opf_verification.jl # DC OPF finite-difference verification
 ├── unified/
-│   ├── test_interface.jl       # Unified API tests (singleton types)
+│   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
 │   └── test_sensitivity_verification.jl  # ForwardDiff verification
 └── mwe_unified.jl              # Minimum working example (symbol API)
+
+docs/
+├── Project.toml                # Documenter.jl dependencies
+├── make.jl                     # Documenter build script
+└── src/
+    ├── index.md                # Landing page
+    ├── getting-started.md      # DC PF → DC OPF → AC PF → AC OPF walkthrough
+    ├── sensitivity-api.md      # Operand/parameter tables, valid combinations
+    ├── math.md                 # B-theta, KKT, implicit differentiation
+    ├── advanced.md             # Type hierarchy, caching, solver config
+    ├── api.md                  # Auto-generated API reference
+    └── assets/                 # Logo files
 ```
 
 ## Important Conventions
@@ -223,5 +241,6 @@ test/
 - Override: `DCOPFProblem(net, d; optimizer=Ipopt.Optimizer)`
 
 **Sensitivity Verification**
-- All sensitivities are verified against ForwardDiff in tests
-- Run `test/unified/test_sensitivity_verification.jl` to check numerical correctness
+- All sensitivities are verified against ForwardDiff or finite differences in tests
+- `test/unified/test_sensitivity_verification.jl`: DC PF (ForwardDiff), DC OPF demand/switching (FD), AC PF
+- `test/test_dc_opf_verification.jl`: DC OPF for cost, flow limit, susceptance, and remaining combos

@@ -185,13 +185,8 @@ end
 
 function _calc_sensitivity_matrix(state::DCPowerFlowState, op::Symbol, param::Symbol)
     if param === :d
-        if op === :va
-            return -state.L_pinv
-        else  # :f
-            net = state.net
-            W = Diagonal(-net.b .* net.z)
-            return W * net.A * (-state.L_pinv)
-        end
+        sens = calc_sensitivity_demand(state)
+        return op === :va ? sens.dva_dd : sens.df_dd
     else  # :z
         sens = calc_sensitivity_switching(state)
         if op === :va

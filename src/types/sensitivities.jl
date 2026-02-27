@@ -114,7 +114,7 @@ end
     DCPFDemandSens
 
 Bundled DC power flow demand sensitivity matrices.
-Used by DCPowerFlowState (not DCOPFProblem).
+Used by calc_sensitivity dispatch for DCPowerFlowState.
 """
 struct DCPFDemandSens <: AbstractSensitivity
     dva_dd::Matrix{Float64}
