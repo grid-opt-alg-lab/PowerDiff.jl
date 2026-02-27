@@ -5,6 +5,162 @@
 # Implements KKT conditions for implicit differentiation of DC OPF solutions.
 
 # =============================================================================
+# Cached Solution and KKT Factorization Access
+# =============================================================================
+
+"""
+    _ensure_solved!(prob::DCOPFProblem) → DCOPFSolution
+
+Ensure the problem is solved and return the cached solution.
+If not yet solved, calls solve!(prob) and caches the result.
+"""
+function _ensure_solved!(prob::DCOPFProblem)::DCOPFSolution
+    if isnothing(prob.cache.solution)
+        solve!(prob)
+    end
+    return prob.cache.solution
+end
+
+"""
+    _ensure_kkt_factor!(prob::DCOPFProblem) → LU
+
+Ensure the KKT Jacobian factorization is computed and cached.
+Returns the LU factorization for efficient repeated solves.
+"""
+function _ensure_kkt_factor!(prob::DCOPFProblem)::LinearAlgebra.LU
+    if isnothing(prob.cache.kkt_factor)
+        sol = _ensure_solved!(prob)
+        J_z = calc_kkt_jacobian(prob; sol=sol)
+        prob.cache.kkt_factor = lu(Matrix(J_z))
+    end
+    return prob.cache.kkt_factor
+end
+
+# =============================================================================
+# Cached Derivative Computation Functions
+# =============================================================================
+
+"""
+    _get_dz_dd!(prob::DCOPFProblem) → Matrix{Float64}
+
+Get or compute the full KKT derivative matrix w.r.t. demand.
+Uses cached value if available, otherwise computes and caches.
+"""
+function _get_dz_dd!(prob::DCOPFProblem)::Matrix{Float64}
+    if isnothing(prob.cache.dz_dd)
+        kkt_lu = _ensure_kkt_factor!(prob)
+        J_d = calc_kkt_jacobian_demand(prob.network)
+        prob.cache.dz_dd = -(kkt_lu \ Matrix(J_d))
+    end
+    return prob.cache.dz_dd
+end
+
+"""
+    _get_dz_dcl!(prob::DCOPFProblem) → Matrix{Float64}
+
+Get or compute the full KKT derivative matrix w.r.t. linear cost.
+"""
+function _get_dz_dcl!(prob::DCOPFProblem)::Matrix{Float64}
+    if isnothing(prob.cache.dz_dcl)
+        kkt_lu = _ensure_kkt_factor!(prob)
+        J_cl = calc_kkt_jacobian_cost_linear(prob.network)
+        prob.cache.dz_dcl = -(kkt_lu \ Matrix(J_cl))
+    end
+    return prob.cache.dz_dcl
+end
+
+"""
+    _get_dz_dcq!(prob::DCOPFProblem) → Matrix{Float64}
+
+Get or compute the full KKT derivative matrix w.r.t. quadratic cost.
+"""
+function _get_dz_dcq!(prob::DCOPFProblem)::Matrix{Float64}
+    if isnothing(prob.cache.dz_dcq)
+        kkt_lu = _ensure_kkt_factor!(prob)
+        sol = _ensure_solved!(prob)
+        J_cq = calc_kkt_jacobian_cost_quadratic(prob, sol)
+        prob.cache.dz_dcq = -(kkt_lu \ Matrix(J_cq))
+    end
+    return prob.cache.dz_dcq
+end
+
+"""
+    _get_dz_dz!(prob::DCOPFProblem) → Matrix{Float64}
+
+Get or compute the full KKT derivative matrix w.r.t. switching.
+"""
+function _get_dz_dz!(prob::DCOPFProblem)::Matrix{Float64}
+    if isnothing(prob.cache.dz_dz)
+        kkt_lu = _ensure_kkt_factor!(prob)
+        sol = _ensure_solved!(prob)
+        J_s = calc_kkt_jacobian_switching(prob, sol)
+        prob.cache.dz_dz = -(kkt_lu \ Matrix(J_s))
+    end
+    return prob.cache.dz_dz
+end
+
+"""
+    _get_dz_dfmax!(prob::DCOPFProblem) → Matrix{Float64}
+
+Get or compute the full KKT derivative matrix w.r.t. flow limits.
+"""
+function _get_dz_dfmax!(prob::DCOPFProblem)::Matrix{Float64}
+    if isnothing(prob.cache.dz_dfmax)
+        kkt_lu = _ensure_kkt_factor!(prob)
+        sol = _ensure_solved!(prob)
+        J_fmax = calc_kkt_jacobian_flowlimit(prob, sol)
+        prob.cache.dz_dfmax = -(kkt_lu \ Matrix(J_fmax))
+    end
+    return prob.cache.dz_dfmax
+end
+
+"""
+    _get_dz_db!(prob::DCOPFProblem) → Matrix{Float64}
+
+Get or compute the full KKT derivative matrix w.r.t. susceptances.
+"""
+function _get_dz_db!(prob::DCOPFProblem)::Matrix{Float64}
+    if isnothing(prob.cache.dz_db)
+        kkt_lu = _ensure_kkt_factor!(prob)
+        sol = _ensure_solved!(prob)
+        J_b = calc_kkt_jacobian_susceptance(prob, sol)
+        prob.cache.dz_db = -(kkt_lu \ Matrix(J_b))
+    end
+    return prob.cache.dz_db
+end
+
+# =============================================================================
+# Single-Matrix Extraction Functions
+# =============================================================================
+
+"""
+    _extract_sensitivity(prob::DCOPFProblem, dz_dp::Matrix, operand::Symbol) → Matrix{Float64}
+
+Extract a single sensitivity matrix from the full KKT derivative.
+
+# Arguments
+- `prob`: The DC OPF problem
+- `dz_dp`: Full derivative matrix from KKT system
+- `operand`: Which operand to extract (:va, :pg, :f, :lmp)
+"""
+function _extract_sensitivity(prob::DCOPFProblem, dz_dp::Matrix{Float64}, operand::Symbol)::Matrix{Float64}
+    idx = kkt_indices(prob)
+
+    if operand === :va || operand === :θ
+        return Matrix(dz_dp[idx.θ, :])
+    elseif operand === :pg || operand === :g
+        return Matrix(dz_dp[idx.g, :])
+    elseif operand === :f
+        return Matrix(dz_dp[idx.f, :])
+    elseif operand === :lmp || operand === :ν_bal
+        # LMP = ν_bal in B-θ formulation
+        return Matrix(dz_dp[idx.ν_bal, :])
+    else
+        throw(ArgumentError("Unknown operand: $operand"))
+    end
+end
+
+# =============================================================================
 # Dimension Calculations
 # =============================================================================
 
@@ -461,68 +617,26 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
 end
 
 """
-    calc_sensitivity_switching(prob::DCOPFProblem) → OPFSwitchingSens
-
-Compute sensitivities of DC OPF solution with respect to switching variables.
-
-Uses the implicit function theorem on KKT conditions:
-∂z/∂s = -(∂K/∂z)⁻¹ · (∂K/∂s)
-
-where z is the flattened primal-dual variable vector.
-
-# Returns
-`OPFSwitchingSens` containing Jacobians of solution variables w.r.t. switching:
-- `dva_dz`: ∂va/∂z (n × m) - voltage angles w.r.t. switching
-- `dg_dz`: ∂g/∂z (k × m) - generation w.r.t. switching
-- `df_dz`: ∂f/∂z (m × m) - flows w.r.t. switching
-- `dlmp_dz`: ∂LMP/∂z (n × m) - LMP w.r.t. switching
-"""
-function calc_sensitivity_switching(prob::DCOPFProblem)
-    net = prob.network
-    n, m, k = net.n, net.m, net.k
-
-    # Solve the problem once
-    sol = solve!(prob)
-
-    # Compute Jacobians (pass solution to avoid re-solving)
-    J_z = calc_kkt_jacobian(prob; sol=sol)  # ∂K/∂z
-    J_s = calc_kkt_jacobian_switching(prob, sol)  # ∂K/∂s
-
-    # Implicit function theorem: ∂z/∂s = -(∂K/∂z)⁻¹ · (∂K/∂s)
-    dz_ds = -Matrix(J_z) \ Matrix(J_s)
-
-    # Extract sensitivities using centralized indices
-    idx = kkt_indices(n, m, k)
-
-    dva_ds = dz_ds[idx.θ, :]
-    dg_ds = dz_ds[idx.g, :]
-    df_ds = dz_ds[idx.f, :]
-    dν_ds = dz_ds[idx.ν_bal, :]  # For LMP sensitivity
-
-    # LMP sensitivity: LMP_i = ν_i - Σₑ (A[e,i] · bₑ · sₑ · (λ_ub_e - λ_lb_e))
-    # This requires chain rule accounting for both ν and constraint duals
-    # For simplicity, use ν_bal as primary LMP component
-    dlmp_ds = dν_ds  # Simplified: assumes congestion terms don't dominate
-
-    return OPFSwitchingSens(dva_ds, dg_ds, df_ds, dlmp_ds)
-end
-
-"""
     update_switching!(prob::DCOPFProblem, s::AbstractVector)
 
-Update the switching state in the network and rebuild the optimization problem.
+Update the network switching state and invalidate the sensitivity cache.
 
 # Arguments
 - `prob`: DCOPFProblem to update
 - `s`: New switching state vector (length m), values in [0,1]
 
 # Note
-This modifies the network's switching state and requires re-solving.
+This modifies `prob.network.z` and invalidates cached sensitivities.
+The JuMP model is not rebuilt; re-solving will use the new switching state
+for KKT-based sensitivity analysis.
 """
 function update_switching!(prob::DCOPFProblem, s::AbstractVector)
     m = prob.network.m
     @assert length(s) == m "Switching vector length must match number of branches"
     @assert all(0 .<= s .<= 1) "Switching values must be in [0,1]"
+
+    # Invalidate sensitivity cache since parameters changed
+    invalidate!(prob.cache)
 
     # Update network switching state
     prob.network.z .= s

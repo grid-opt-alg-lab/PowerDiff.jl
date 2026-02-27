@@ -4,6 +4,82 @@
 #
 # B-θ formulation of DC OPF wrapped around a JuMP model.
 
+# =============================================================================
+# Sensitivity Cache
+# =============================================================================
+
+"""
+    DCSensitivityCache
+
+Mutable cache for DC OPF sensitivity data to avoid redundant KKT solves.
+
+DC OPF supports 6 parameter types (`:d`, `:z`, `:cl`, `:cq`, `:fmax`, `:b`),
+each producing a separate `dz_d*` full-derivative matrix. All share one KKT LU
+factorization (`kkt_factor`), so after the first parameter type is queried the
+factorization is reused for subsequent parameters. Different operand queries
+(e.g. `:va` vs `:pg` vs `:lmp`) for the *same* parameter type all extract
+rows from the same cached `dz_d*` matrix — no recomputation needed.
+
+By contrast, `ACSensitivityCache` only needs 2 fields because AC OPF currently
+supports only switching (`:z`) as a parameter, and `dx_ds` already contains all
+operand rows. Power flow states (`DCPowerFlowState`, `ACPowerFlowState`) have no
+cache at all because their sensitivities are cheap direct algebra (pseudoinverse
+or Jacobian factorization is precomputed at construction time).
+
+# Fields
+- `solution`: Cached DCOPFSolution (or nothing if not yet solved)
+- `kkt_factor`: Cached LU factorization of KKT Jacobian (or nothing)
+- `dz_dd`: Full KKT derivative w.r.t. demand (or nothing)
+- `dz_dcl`: Full KKT derivative w.r.t. linear cost (or nothing)
+- `dz_dcq`: Full KKT derivative w.r.t. quadratic cost (or nothing)
+- `dz_dz`: Full KKT derivative w.r.t. switching (or nothing)
+- `dz_dfmax`: Full KKT derivative w.r.t. flow limits (or nothing)
+- `dz_db`: Full KKT derivative w.r.t. susceptances (or nothing)
+"""
+mutable struct DCSensitivityCache
+    solution::Union{Nothing,DCOPFSolution}
+    kkt_factor::Union{Nothing,LinearAlgebra.LU}
+    dz_dd::Union{Nothing,Matrix{Float64}}
+    dz_dcl::Union{Nothing,Matrix{Float64}}
+    dz_dcq::Union{Nothing,Matrix{Float64}}
+    dz_dz::Union{Nothing,Matrix{Float64}}
+    dz_dfmax::Union{Nothing,Matrix{Float64}}
+    dz_db::Union{Nothing,Matrix{Float64}}
+end
+
+# Deprecation alias
+const SensitivityCache = DCSensitivityCache
+
+"""
+    DCSensitivityCache()
+
+Create an empty sensitivity cache with all fields set to nothing.
+"""
+function DCSensitivityCache()
+    return DCSensitivityCache(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
+end
+
+"""
+    invalidate!(cache::DCSensitivityCache)
+
+Clear all cached sensitivity data. Called when problem parameters change.
+"""
+function invalidate!(cache::DCSensitivityCache)
+    cache.solution = nothing
+    cache.kkt_factor = nothing
+    cache.dz_dd = nothing
+    cache.dz_dcl = nothing
+    cache.dz_dcq = nothing
+    cache.dz_dz = nothing
+    cache.dz_dfmax = nothing
+    cache.dz_db = nothing
+    return nothing
+end
+
+# =============================================================================
+# DCOPFProblem
+# =============================================================================
+
 """
     DCOPFProblem <: AbstractOPFProblem
 
@@ -15,6 +91,7 @@ B-θ formulation of DC OPF wrapped around a JuMP model.
 - `θ`, `g`, `f`: Variable references for phase angles, generation, flows
 - `d`: Demand parameter (can be updated for sensitivity analysis)
 - `cons`: Named tuple of constraint references
+- `cache`: Mutable sensitivity cache for avoiding redundant KKT solves
 """
 mutable struct DCOPFProblem <: AbstractOPFProblem
     model::JuMP.Model
@@ -24,6 +101,7 @@ mutable struct DCOPFProblem <: AbstractOPFProblem
     f::Vector{VariableRef}
     d::Vector{Float64}
     cons::NamedTuple
+    cache::DCSensitivityCache
 end
 
 # =============================================================================
@@ -104,7 +182,7 @@ function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.
         phase_diff = phase_diff
     )
 
-    return DCOPFProblem(model, network, θ, g, f, Float64.(d), cons)
+    return DCOPFProblem(model, network, θ, g, f, Float64.(d), cons, DCSensitivityCache())
 end
 
 """

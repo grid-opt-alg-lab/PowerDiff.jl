@@ -4,7 +4,7 @@
 #
 # Provides a unified type structure for multiple dispatch across:
 # - DC power flow and DC OPF
-# - AC power flow (and future AC OPF)
+# - AC power flow and AC OPF
 # - Sensitivity analysis with parameter-based dispatch
 
 # =============================================================================
@@ -45,7 +45,7 @@ Abstract type for optimal power flow solutions with dual variables.
 
 Concrete subtypes:
 - `DCOPFSolution`: DC OPF with generation dispatch and duals
-- `ACOPFSolution`: (Future) AC OPF with duals
+- `ACOPFSolution`: AC OPF with voltages, generation, and duals
 """
 abstract type AbstractOPFSolution <: AbstractPowerFlowState end
 
@@ -60,7 +60,7 @@ Abstract base type for OPF problem wrappers (JuMP models).
 
 Concrete subtypes:
 - `DCOPFProblem`: DC OPF problem (B-θ formulation)
-- `ACOPFProblem`: (Future) AC OPF problem
+- `ACOPFProblem`: AC OPF problem (polar formulation)
 """
 abstract type AbstractOPFProblem end
 
@@ -88,3 +88,36 @@ abstract type AbstractSensitivityPower <: AbstractSensitivity end
 Sensitivity with respect to network topology/parameters (z, b, g).
 """
 abstract type AbstractSensitivityTopology <: AbstractSensitivity end
+
+# =============================================================================
+# Level 5: Singleton Type Tag Hierarchy (for Sensitivity{F,O,P})
+# =============================================================================
+
+"""
+    AbstractFormulation
+
+Abstract base type for formulation tags (DCOPF, ACOPF, DCPF, ACPF).
+
+Used as a type parameter in `Sensitivity{F,O,P}` for dispatch.
+"""
+abstract type AbstractFormulation end
+
+"""
+    AbstractOperand
+
+Abstract base type for operand tags (VA, VM, PG, QG, F, LMP, etc.).
+
+Operands are what we differentiate (the "output" of the sensitivity).
+Used as a type parameter in `Sensitivity{F,O,P}` for dispatch.
+"""
+abstract type AbstractOperand end
+
+"""
+    AbstractParameter
+
+Abstract base type for parameter tags (D, Z, CQ, CL, FMAX, B, P, Q).
+
+Parameters are what we differentiate with respect to (the "input").
+Used as a type parameter in `Sensitivity{F,O,P}` for dispatch.
+"""
+abstract type AbstractParameter end

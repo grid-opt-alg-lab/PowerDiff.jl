@@ -2,22 +2,160 @@
 # Sensitivity Result Types
 # =============================================================================
 #
-# State-specific sensitivity result types for DC power flow, DC OPF, and AC power flow.
-# Each state type has its own result type containing only the relevant fields.
+# Main sensitivity type with type parameters for dispatch:
+#   Sensitivity{F <: AbstractFormulation, O <: AbstractOperand, P <: AbstractParameter}
+#
+# DC OPF sensitivities use cached KKT derivatives for efficiency.
+# AC power flow types are kept for voltage/current sensitivity functions.
 
 # =============================================================================
-# DC Power Flow Sensitivity Types (no generation dispatch, no LMPs)
+# Main Parameterized Sensitivity Type
 # =============================================================================
 
 """
-    DCPFDemandSens <: AbstractSensitivity
+    Sensitivity{F, O, P, T} <: AbstractMatrix{T}
 
-Sensitivity of DC power flow solution with respect to nodal demand.
-Only contains angle and flow sensitivities (no generation or LMP - those don't exist for PF).
+Sensitivity matrix with type parameters enabling dispatch on formulation,
+operand, and parameter.
+
+Implements the AbstractMatrix interface for seamless matrix operations while
+providing bidirectional index mappings between internal indices and element IDs.
+
+# Type Parameters
+- `F <: AbstractFormulation`: Formulation tag (DCOPF, ACOPF, DCPF, ACPF)
+- `O <: AbstractOperand`: Operand tag (VoltageAngle, VoltageMagnitude, Generation, LMP, Flow, etc.)
+- `P <: AbstractParameter`: Parameter tag (Demand, Switching, QuadraticCost, LinearCost, FlowLimit, Susceptance, etc.)
+- `T <: Number`: Element type (Float64, ComplexF64)
 
 # Fields
-- `dva_dd`: Jacobian d(va)/dd (n x n) - voltage angles w.r.t. demand
-- `df_dd`: Jacobian df/dd (m x n) - branch flows w.r.t. demand
+- `matrix::Matrix{T}`: The sensitivity matrix data
+- `row_to_id::Vector{Int}`: Maps internal row index → external element ID
+- `id_to_row::Dict{Int,Int}`: Maps external element ID → internal row index
+- `col_to_id::Vector{Int}`: Maps internal col index → external element ID
+- `id_to_col::Dict{Int,Int}`: Maps external element ID → internal col index
+
+# Examples
+```julia
+# Get a typed sensitivity result
+sens = calc_sensitivity(prob, LMP(), Demand())  # Returns Sensitivity{DCOPF, LMP, Demand, Float64}
+
+# Use like a normal matrix
+size(sens)          # (n, n)
+sens[2, 3]          # Access element
+Matrix(sens)        # Get raw matrix
+
+# Index mapping (PowerModels-style)
+sens.row_to_id[2]   # External bus ID for row 2
+sens.id_to_row[14]  # Internal row index for bus 14
+
+# Dispatch on type (3-parameter matching still works)
+process(s::Sensitivity{DCOPF, LMP, Demand}) = "DC OPF LMP-demand sensitivity"
+process(s::Sensitivity{F, LMP, Demand}) where F = "Any formulation LMP-demand"
+process(s::Sensitivity{F, O, Switching}) where {F, O} = "Any switching sensitivity"
+
+# Complex voltage phasor sensitivity
+dv_dp = calc_sensitivity(ac_state, :v, :p)  # Sensitivity{ACPF, Voltage, ActivePower, ComplexF64}
+```
+"""
+struct Sensitivity{F <: AbstractFormulation,
+                   O <: AbstractOperand,
+                   P <: AbstractParameter,
+                   T <: Number} <: AbstractMatrix{T}
+    matrix::Matrix{T}
+    row_to_id::Vector{Int}
+    id_to_row::Dict{Int,Int}
+    col_to_id::Vector{Int}
+    id_to_col::Dict{Int,Int}
+end
+
+# Convenience constructor from mappings tuple — infers T from matrix element type
+function Sensitivity{F, O, P}(
+    matrix::Matrix{T},
+    row_mapping::Tuple{Vector{Int}, Dict{Int,Int}},
+    col_mapping::Tuple{Vector{Int}, Dict{Int,Int}}
+) where {F <: AbstractFormulation, O <: AbstractOperand, P <: AbstractParameter, T <: Number}
+    row_to_id, id_to_row = row_mapping
+    col_to_id, id_to_col = col_mapping
+    return Sensitivity{F, O, P, T}(matrix, row_to_id, id_to_row, col_to_id, id_to_col)
+end
+
+# =============================================================================
+# AbstractMatrix Interface
+# =============================================================================
+
+Base.size(s::Sensitivity) = size(s.matrix)
+Base.size(s::Sensitivity, d::Integer) = size(s.matrix, d)
+Base.getindex(s::Sensitivity, i::Int) = s.matrix[i]
+Base.getindex(s::Sensitivity, i::Int, j::Int) = s.matrix[i, j]
+Base.getindex(s::Sensitivity, I...) = s.matrix[I...]
+
+# Enable matrix arithmetic
+Base.Matrix(s::Sensitivity) = s.matrix
+Base.:*(a::Number, s::Sensitivity) = a * s.matrix
+Base.:*(s::Sensitivity, a::Number) = s.matrix * a
+Base.:*(s::Sensitivity, v::AbstractVector) = s.matrix * v
+Base.:*(m::AbstractMatrix, s::Sensitivity) = m * s.matrix
+
+# Pretty printing
+function Base.show(io::IO, ::MIME"text/plain", s::Sensitivity{F, O, P, T}) where {F, O, P, T}
+    if T === Float64
+        print(io, "Sensitivity{$F, $O, $P}")
+    else
+        print(io, "Sensitivity{$F, $O, $P, $T}")
+    end
+    println(io, " $(size(s, 1))×$(size(s, 2)):")
+    Base.print_matrix(io, s.matrix)
+end
+
+function Base.show(io::IO, s::Sensitivity{F, O, P, T}) where {F, O, P, T}
+    if T === Float64
+        print(io, "Sensitivity{$F, $O, $P}($(size(s, 1))×$(size(s, 2)))")
+    else
+        print(io, "Sensitivity{$F, $O, $P, $T}($(size(s, 1))×$(size(s, 2)))")
+    end
+end
+
+# =============================================================================
+# Type Accessors
+# =============================================================================
+
+"""
+    formulation(::Sensitivity{F,O,P}) where {F,O,P} → F
+
+Get the formulation type parameter.
+"""
+formulation(::Sensitivity{F,O,P}) where {F,O,P} = F
+
+"""
+    operand(::Sensitivity{F,O,P}) where {F,O,P} → O
+
+Get the operand type parameter.
+"""
+operand(::Sensitivity{F,O,P}) where {F,O,P} = O
+
+"""
+    parameter(::Sensitivity{F,O,P}) where {F,O,P} → P
+
+Get the parameter type parameter.
+"""
+parameter(::Sensitivity{F,O,P}) where {F,O,P} = P
+
+"""
+    eltype(::Sensitivity{F,O,P,T}) where {F,O,P,T} → T
+
+Get the element type.
+"""
+Base.eltype(::Type{<:Sensitivity{F,O,P,T}}) where {F,O,P,T} = T
+
+# =============================================================================
+# DC Power Flow Bundled Types (kept for DCPowerFlowState which doesn't use OPF cache)
+# =============================================================================
+
+"""
+    DCPFDemandSens
+
+Bundled DC power flow demand sensitivity matrices.
+Used by DCPowerFlowState (not DCOPFProblem).
 """
 struct DCPFDemandSens <: AbstractSensitivity
     dva_dd::Matrix{Float64}
@@ -25,196 +163,31 @@ struct DCPFDemandSens <: AbstractSensitivity
 end
 
 """
-    DCPFSwitchingSens <: AbstractSensitivity
+    DCPFSwitchingSens
 
-Sensitivity of DC power flow solution with respect to switching states.
-Only contains angle and flow sensitivities (no generation or LMP - those don't exist for PF).
-
-# Fields
-- `dva_dz`: Jacobian d(va)/dz (n x m) - voltage angles w.r.t. switching
-- `df_dz`: Jacobian df/dz (m x m) - branch flows w.r.t. switching
+Bundled DC power flow switching sensitivity matrices.
+Used by DCPowerFlowState (not DCOPFProblem).
 """
 struct DCPFSwitchingSens <: AbstractSensitivity
     dva_dz::Matrix{Float64}
     df_dz::Matrix{Float64}
 end
 
-# =============================================================================
-# DC OPF Sensitivity Types (has generation dispatch and LMPs)
-# =============================================================================
-
 """
-    OPFDemandSens <: AbstractSensitivity
+    ACOPFSwitchingSens
 
-Sensitivity of DC OPF solution with respect to nodal demand.
-Contains all sensitivities including generation and LMP (from dual variables).
-
-# Fields
-- `dva_dd`: Jacobian d(va)/dd (n x n)
-- `dg_dd`: Jacobian dg/dd (k x n) - generation w.r.t. demand
-- `df_dd`: Jacobian df/dd (m x n)
-- `dlmp_dd`: Jacobian dLMP/dd (n x n) - locational marginal prices w.r.t. demand
+Bundled AC OPF switching sensitivity matrices.
+Used by calc_sensitivity_switching(::ACOPFProblem).
 """
-struct OPFDemandSens <: AbstractSensitivity
-    dva_dd::Matrix{Float64}
-    dg_dd::Matrix{Float64}
-    df_dd::Matrix{Float64}
-    dlmp_dd::Matrix{Float64}
-end
-
-"""
-    OPFSwitchingSens <: AbstractSensitivity
-
-Sensitivity of DC OPF solution with respect to switching states.
-
-# Fields
-- `dva_dz`: Jacobian d(va)/dz (n x m)
-- `dg_dz`: Jacobian dg/dz (k x m)
-- `df_dz`: Jacobian df/dz (m x m)
-- `dlmp_dz`: Jacobian dLMP/dz (n x m)
-"""
-struct OPFSwitchingSens <: AbstractSensitivity
+struct ACOPFSwitchingSens <: AbstractSensitivity
+    dvm_dz::Matrix{Float64}
     dva_dz::Matrix{Float64}
-    dg_dz::Matrix{Float64}
-    df_dz::Matrix{Float64}
-    dlmp_dz::Matrix{Float64}
-end
-
-"""
-    OPFCostSens <: AbstractSensitivity
-
-Sensitivity of DC OPF solution with respect to cost coefficients.
-
-# Fields
-- `dg_dcq`: Jacobian dg/dcq (k x k) - generation w.r.t. quadratic cost
-- `dg_dcl`: Jacobian dg/dcl (k x k) - generation w.r.t. linear cost
-- `dlmp_dcq`: Jacobian dLMP/dcq (n x k)
-- `dlmp_dcl`: Jacobian dLMP/dcl (n x k)
-"""
-struct OPFCostSens <: AbstractSensitivity
-    dg_dcq::Matrix{Float64}
-    dg_dcl::Matrix{Float64}
-    dlmp_dcq::Matrix{Float64}
-    dlmp_dcl::Matrix{Float64}
-end
-
-"""
-    OPFFlowLimitSens <: AbstractSensitivity
-
-Sensitivity of DC OPF solution with respect to line flow limits.
-
-# Fields
-- `dva_dfmax`: Jacobian d(va)/dfmax (n x m)
-- `dg_dfmax`: Jacobian dg/dfmax (k x m)
-- `df_dfmax`: Jacobian df/dfmax (m x m)
-- `dlmp_dfmax`: Jacobian dLMP/dfmax (n x m)
-"""
-struct OPFFlowLimitSens <: AbstractSensitivity
-    dva_dfmax::Matrix{Float64}
-    dg_dfmax::Matrix{Float64}
-    df_dfmax::Matrix{Float64}
-    dlmp_dfmax::Matrix{Float64}
-end
-
-"""
-    OPFSusceptanceSens <: AbstractSensitivity
-
-Sensitivity of DC OPF solution with respect to branch susceptances.
-
-# Fields
-- `dva_db`: Jacobian d(va)/db (n x m)
-- `dg_db`: Jacobian dg/db (k x m)
-- `df_db`: Jacobian df/db (m x m)
-- `dlmp_db`: Jacobian dLMP/db (n x m)
-"""
-struct OPFSusceptanceSens <: AbstractSensitivity
-    dva_db::Matrix{Float64}
-    dg_db::Matrix{Float64}
-    df_db::Matrix{Float64}
-    dlmp_db::Matrix{Float64}
+    dpg_dz::Matrix{Float64}
+    dqg_dz::Matrix{Float64}
 end
 
 # =============================================================================
-# Legacy DC Sensitivity Types (Deprecated)
-# =============================================================================
-
-"""
-    DemandSensitivity <: AbstractSensitivity
-
-DEPRECATED: Use `DCPFDemandSens` for power flow or `OPFDemandSens` for OPF instead.
-
-Generic sensitivity of DC OPF/power flow solution with respect to nodal demand.
-This type has fields that may not be meaningful for all state types.
-"""
-struct DemandSensitivity <: AbstractSensitivity
-    dθ_dd::Matrix{Float64}
-    dg_dd::Matrix{Float64}
-    df_dd::Matrix{Float64}
-    dlmp_dd::Matrix{Float64}
-end
-
-"""
-    CostSensitivity <: AbstractSensitivity
-
-DEPRECATED: Use `OPFCostSens` instead.
-"""
-struct CostSensitivity <: AbstractSensitivity
-    dg_dcq::Matrix{Float64}
-    dg_dcl::Matrix{Float64}
-    dlmp_dcq::Matrix{Float64}
-    dlmp_dcl::Matrix{Float64}
-end
-
-"""
-    FlowLimitSensitivity <: AbstractSensitivity
-
-DEPRECATED: Use `OPFFlowLimitSens` instead.
-"""
-struct FlowLimitSensitivity <: AbstractSensitivity
-    dθ_dfmax::Matrix{Float64}
-    dg_dfmax::Matrix{Float64}
-    df_dfmax::Matrix{Float64}
-    dlmp_dfmax::Matrix{Float64}
-end
-
-"""
-    SusceptanceSensitivity <: AbstractSensitivity
-
-DEPRECATED: Use `OPFSusceptanceSens` instead.
-"""
-struct SusceptanceSensitivity <: AbstractSensitivity
-    dθ_db::Matrix{Float64}
-    dg_db::Matrix{Float64}
-    df_db::Matrix{Float64}
-    dlmp_db::Matrix{Float64}
-end
-
-"""
-    SwitchingSensitivity <: AbstractSensitivityTopology
-
-DEPRECATED: Use `DCPFSwitchingSens` for power flow or `OPFSwitchingSens` for OPF instead.
-"""
-struct SwitchingSensitivity <: AbstractSensitivityTopology
-    dθ_dz::Matrix{Float64}
-    dg_dz::Matrix{Float64}
-    df_dz::Matrix{Float64}
-    dlmp_dz::Matrix{Float64}
-end
-
-"""
-    SwitchingSensitivity(dθ_dz, df_dz)
-
-DEPRECATED convenience constructor for power flow.
-"""
-function SwitchingSensitivity(dθ_dz::Matrix{Float64}, df_dz::Matrix{Float64})
-    n, m = size(dθ_dz)
-    dg_dz = zeros(0, m)
-    dlmp_dz = zeros(n, m)
-    SwitchingSensitivity(dθ_dz, dg_dz, df_dz, dlmp_dz)
-end
-
-# =============================================================================
-# AC Voltage Sensitivity Types
+# AC Power Flow Sensitivity Types (kept for voltage/current sensitivity functions)
 # =============================================================================
 
 """
@@ -235,6 +208,21 @@ struct VoltagePowerSensitivity <: AbstractSensitivityPower
     ∂vm_∂q::Matrix{Float64}
 end
 
+# Non-unicode accessors for VoltagePowerSensitivity
+function Base.getproperty(s::VoltagePowerSensitivity, name::Symbol)
+    if name === :dvm_dp
+        return getfield(s, :∂vm_∂p)
+    elseif name === :dvm_dq
+        return getfield(s, :∂vm_∂q)
+    elseif name === :dv_dp
+        return getfield(s, :∂v_∂p)
+    elseif name === :dv_dq
+        return getfield(s, :∂v_∂q)
+    else
+        return getfield(s, name)
+    end
+end
+
 """
     VoltageTopologySensitivity <: AbstractSensitivityTopology
 
@@ -249,9 +237,16 @@ struct VoltageTopologySensitivity <: AbstractSensitivityTopology
     ∂vm_∂b::Matrix{Float64}
 end
 
-# =============================================================================
-# AC Current Sensitivity Types
-# =============================================================================
+# Non-unicode accessors for VoltageTopologySensitivity
+function Base.getproperty(s::VoltageTopologySensitivity, name::Symbol)
+    if name === :dvm_dg
+        return getfield(s, :∂vm_∂g)
+    elseif name === :dvm_db
+        return getfield(s, :∂vm_∂b)
+    else
+        return getfield(s, name)
+    end
+end
 
 """
     CurrentPowerSensitivity <: AbstractSensitivityPower
@@ -271,6 +266,21 @@ struct CurrentPowerSensitivity <: AbstractSensitivityPower
     ∂Im_∂q::Matrix{Float64}
 end
 
+# Non-unicode accessors for CurrentPowerSensitivity
+function Base.getproperty(s::CurrentPowerSensitivity, name::Symbol)
+    if name === :dIm_dp
+        return getfield(s, :∂Im_∂p)
+    elseif name === :dIm_dq
+        return getfield(s, :∂Im_∂q)
+    elseif name === :dI_dp
+        return getfield(s, :∂I_∂p)
+    elseif name === :dI_dq
+        return getfield(s, :∂I_∂q)
+    else
+        return getfield(s, name)
+    end
+end
+
 """
     CurrentTopologySensitivity <: AbstractSensitivityTopology
 
@@ -284,3 +294,15 @@ struct CurrentTopologySensitivity <: AbstractSensitivityTopology
     ∂Im_∂g::Matrix{Float64}
     ∂Im_∂b::Matrix{Float64}
 end
+
+# Non-unicode accessors for CurrentTopologySensitivity
+function Base.getproperty(s::CurrentTopologySensitivity, name::Symbol)
+    if name === :dIm_dg
+        return getfield(s, :∂Im_∂g)
+    elseif name === :dIm_db
+        return getfield(s, :∂Im_∂b)
+    else
+        return getfield(s, name)
+    end
+end
+

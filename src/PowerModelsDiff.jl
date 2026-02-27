@@ -15,10 +15,10 @@ const PM = PowerModels
 const MOI = JuMP.MOI
 
 # =============================================================================
-# Abstract type hierarchy and parameter types
+# Abstract type hierarchy and singleton tags
 # =============================================================================
 include("types/abstract.jl")
-include("types/parameters.jl")
+include("types/tags.jl")
 
 # =============================================================================
 # Core type definitions (modular structure)
@@ -26,7 +26,8 @@ include("types/parameters.jl")
 include("types/dc_network.jl")      # DCNetwork, DCPowerFlowState, DCOPFSolution + constructors
 include("types/dc_opf_problem.jl")  # DCOPFProblem + constructors
 include("types/ac_network.jl")      # ACNetwork, ACPowerFlowState
-include("types/sensitivities.jl")   # All sensitivity result types
+include("types/ac_opf_problem.jl")  # ACOPFProblem, ACOPFSolution + constructors
+include("types/sensitivities.jl")   # Sensitivity{F,O,P} and DC power flow bundled types
 
 # =============================================================================
 # Power flow and graph utilities
@@ -43,14 +44,21 @@ include("deprecated/pf_structs.jl")
 include("deprecated/measurements.jl")
 
 # =============================================================================
-# DC OPF (B-θ formulation) - solving and KKT conditions
+# DC OPF (B-theta formulation) - solving and KKT conditions
 # =============================================================================
 include("prob/dc_opf.jl")
 include("prob/kkt_dc_opf.jl")
 
 # =============================================================================
+# AC OPF (Polar formulation) - solving and KKT conditions
+# =============================================================================
+include("prob/ac_opf_solve.jl")
+include("prob/kkt_ac_opf.jl")
+
+# =============================================================================
 # Sensitivity analysis
 # =============================================================================
+include("sens/index_mapping.jl")
 include("sens/topology.jl")
 include("sens/lmp.jl")
 include("sens/demand.jl")
@@ -70,16 +78,26 @@ include("sens/interface.jl")
 # -----------------------------------------------------------------------------
 export AbstractPowerNetwork, AbstractPowerFlowState, AbstractOPFSolution
 export AbstractOPFProblem
-export AbstractSensitivity, AbstractSensitivityPower, AbstractSensitivityTopology
 
 # -----------------------------------------------------------------------------
-# Sensitivity Parameter Types (for unified dispatch)
+# Singleton Type Tags (for Sensitivity{F,O,P} dispatch)
 # -----------------------------------------------------------------------------
-export AbstractSensitivityParameter
-export DemandParameter, GenerationParameter, CostParameter
-export FlowLimitParameter, SusceptanceParameter, SwitchingParameter
-export PowerInjectionParameter, TopologyParameter
-export DEMAND, GENERATION, COST, FLOWLIMIT, SUSCEPTANCE, SWITCHING, POWER, TOPOLOGY
+export AbstractFormulation, AbstractOperand, AbstractParameter
+# Formulation tags
+export DCOPF, ACOPF, DCPF, ACPF
+# Operand tags
+export VoltageAngle, VoltageMagnitude, Generation, ReactiveGeneration
+export Flow, LMP, CurrentMagnitude, Voltage
+# Parameter tags
+export Demand, Switching, QuadraticCost, LinearCost
+export FlowLimit, Susceptance, ActivePower, ReactivePower
+
+# -----------------------------------------------------------------------------
+# Unified Sensitivity Interface (primary API)
+# -----------------------------------------------------------------------------
+export calc_sensitivity
+export Sensitivity
+export formulation, operand, parameter
 
 # -----------------------------------------------------------------------------
 # DC Power Flow Types
@@ -90,24 +108,13 @@ export DCNetwork, DCPowerFlowState
 # DC OPF Types and Functions
 # -----------------------------------------------------------------------------
 export DCOPFProblem, DCOPFSolution
+export DCSensitivityCache, invalidate!
 export solve!, update_demand!
 export calc_demand_vector, calc_susceptance_matrix
 
-# DC Sensitivity Types (state-specific)
-export DCPFDemandSens, DCPFSwitchingSens   # DC Power Flow
-export OPFDemandSens, OPFSwitchingSens     # DC OPF
-export OPFCostSens, OPFFlowLimitSens, OPFSusceptanceSens
-
-# DC Sensitivity Types (legacy, deprecated)
-export DemandSensitivity, CostSensitivity, SwitchingSensitivity
-export FlowLimitSensitivity, SusceptanceSensitivity
-
-# DC Sensitivity Functions
-export calc_sensitivity_demand, calc_sensitivity_demand_primal
+# DC Sensitivity Functions (convenience wrappers)
 export calc_generation_participation_factors, calc_ptdf_from_sensitivity
-export calc_sensitivity_switching, update_switching!
-export calc_sensitivity_cost
-export calc_sensitivity_flowlimit, calc_sensitivity_susceptance
+export update_switching!
 
 # LMP Functions
 export calc_lmp, calc_congestion_component, calc_energy_component
@@ -117,23 +124,17 @@ export kkt, kkt_dims, kkt_indices, calc_kkt_jacobian
 export flatten_variables, unflatten_variables
 
 # -----------------------------------------------------------------------------
+# AC OPF Types and Functions
+# -----------------------------------------------------------------------------
+export ACOPFProblem, ACOPFSolution, ACSensitivityCache
+export ac_kkt_dims, ac_kkt_indices, ac_flatten_variables, ac_unflatten_variables
+export calc_ac_kkt_jacobian, ac_kkt
+
+# -----------------------------------------------------------------------------
 # AC Power Flow Types and Functions
 # -----------------------------------------------------------------------------
 export ACNetwork, ACPowerFlowState
 export admittance_matrix, branch_current, branch_power
-
-# AC Sensitivity Types
-export VoltagePowerSensitivity, VoltageTopologySensitivity
-export CurrentPowerSensitivity, CurrentTopologySensitivity
-
-# AC Voltage Sensitivity Functions
-export calc_voltage_power_sensitivities
-export calc_voltage_active_power_sensitivities, calc_voltage_reactive_power_sensitivities
-export voltage_topology_sensitivities
-
-# AC Current Sensitivity Functions
-export calc_current_power_sensitivities
-export calc_current_magnitude_active_power_sensitivity, calc_current_magnitude_reactive_power_sensitivity
 
 # -----------------------------------------------------------------------------
 # Graph Utilities
@@ -146,10 +147,5 @@ export NetworkTopology, PowerFlowEquations
 export p, q, vm, vm2, pf_eqns
 export p_polar, q_polar
 export branch_flow, p_flow, q_flow
-
-# -----------------------------------------------------------------------------
-# Unified Sensitivity Interface
-# -----------------------------------------------------------------------------
-export calc_sensitivity, calc_voltage_sensitivity
 
 end # module PowerModelsDiff

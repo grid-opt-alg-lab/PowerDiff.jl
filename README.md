@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/src/assets/logo.svg" width="200" alt="PowerModelsDiff.jl">
+</p>
+
 # PowerModelsDiff.jl
 
 A Julia package for differentiable power system analysis. Provides automatic differentiation capabilities for the power flow equations, optimal power flow (OPF) problems, and sensitivity analysis of power networks.
@@ -66,6 +70,16 @@ ac_state = ACPowerFlowState(net)
 # Voltage-power sensitivities
 dvm_dp = calc_sensitivity(ac_state, :vm, :p)   # d|V|/dp (n×n)
 dvm_dq = calc_sensitivity(ac_state, :vm, :q)   # d|V|/dq (n×n)
+
+# =============================================================================
+# AC OPF
+# =============================================================================
+ac_prob = ACOPFProblem(net)
+solve!(ac_prob)
+
+# Switching sensitivities via implicit differentiation
+dvm_dz = calc_sensitivity(ac_prob, :vm, :z)    # d|V|/dz (n×m)
+dpg_dz = calc_sensitivity(ac_prob, :pg, :z)    # dpg/dz (k×m)
 ```
 
 ## Type Hierarchy
@@ -79,10 +93,12 @@ AbstractPowerFlowState
 ├── DCPowerFlowState    # DC power flow (theta = L+ * p)
 ├── ACPowerFlowState    # AC power flow (complex voltages)
 └── AbstractOPFSolution
-    └── DCOPFSolution   # DC OPF with duals
+    ├── DCOPFSolution   # DC OPF with duals
+    └── ACOPFSolution   # AC OPF with duals
 
 AbstractOPFProblem
-└── DCOPFProblem        # JuMP-based DC OPF
+├── DCOPFProblem        # JuMP-based DC OPF
+└── ACOPFProblem        # JuMP-based AC OPF (Ipopt)
 ```
 
 ## Sensitivity API
@@ -96,24 +112,50 @@ calc_sensitivity(state, :operand, :parameter) → Matrix
 **Operand symbols** (what we differentiate):
 | Symbol | Description | Works with |
 |--------|-------------|------------|
-| `:va` | Voltage phase angles | DCPowerFlowState, DCOPFProblem |
+| `:va` | Voltage phase angles | DCPowerFlowState, DCOPFProblem, ACOPFProblem |
 | `:f` | Branch flows | DCPowerFlowState, DCOPFProblem |
-| `:pg` / `:g` | Generator power | DCOPFProblem |
+| `:pg` / `:g` | Generator active power | DCOPFProblem, ACOPFProblem |
+| `:qg` | Generator reactive power | ACOPFProblem |
 | `:lmp` | Locational marginal prices | DCOPFProblem |
-| `:vm` | Voltage magnitude | ACPowerFlowState |
+| `:vm` | Voltage magnitude | ACPowerFlowState, ACOPFProblem |
 | `:im` | Current magnitude | ACPowerFlowState |
 
 **Parameter symbols** (what we differentiate w.r.t.):
 | Symbol | Description | Works with |
 |--------|-------------|------------|
 | `:d` / `:pd` | Demand | DCPowerFlowState, DCOPFProblem |
-| `:z` | Switching states | DCPowerFlowState, DCOPFProblem |
+| `:z` | Switching states | DCPowerFlowState, DCOPFProblem, ACOPFProblem |
 | `:cq`, `:cl` | Cost coefficients | DCOPFProblem |
 | `:fmax` | Flow limits | DCOPFProblem |
 | `:b` | Susceptances | DCOPFProblem |
 | `:p`, `:q` | Power injections | ACPowerFlowState |
 
 Invalid operand/parameter combinations throw `ArgumentError`.
+
+## Matrix Indexing
+
+All sensitivity matrices use **sequential 1-based indexing** matching PowerModels string keys:
+
+```
+S[i,j] = ∂(operand element i) / ∂(parameter element j)
+```
+
+- **Buses** `1:n` → `net["bus"]["1"]` through `net["bus"]["$n"]`
+- **Branches** `1:m` → `net["branch"]["1"]` through `net["branch"]["$m"]`
+- **Generators** `1:k` → `net["gen"]["1"]` through `net["gen"]["$k"]`
+
+To find which bus a generator is at: `net["gen"]["$i"]["gen_bus"]`
+To find branch endpoints: `net["branch"]["$j"]["f_bus"]` and `net["branch"]["$j"]["t_bus"]`
+
+The `Sensitivity{F,O,P}` return type also carries bidirectional index mappings:
+
+```julia
+sens = calc_sensitivity(prob, :lmp, :d)
+sens[2, 3]                # ∂(LMP at bus 2) / ∂(demand at bus 3)
+sens.row_to_id[2]         # External bus ID for row 2
+sens.id_to_row[14]        # Internal row index for bus 14
+Matrix(sens)              # Extract raw matrix
+```
 
 ## Core Types
 
@@ -147,19 +189,27 @@ end
 
 ### Sensitivity Results
 
-The symbol-based API returns raw matrices. For bundled results, state-specific types are available:
+The API returns `Sensitivity{F,O,P}` which acts as a matrix with type tags for dispatch:
 
 ```julia
-# DC Power Flow sensitivities
+sens = calc_sensitivity(prob, :lmp, :d)
+typeof(sens)  # Sensitivity{DCOPF, LMP, Demand}
+size(sens)    # (n, n)
+sens * v      # Matrix operations work
+
+# Type-based dispatch
+process(s::Sensitivity{DCOPF, LMP, Demand}) = "DC OPF LMP-demand"
+process(s::Sensitivity{F, O, Switching}) where {F, O} = "Any switching"
+```
+
+Bundled sensitivity types for internal use:
+
+```julia
 DCPFDemandSens         # dva_dd, df_dd
 DCPFSwitchingSens      # dva_dz, df_dz
+ACOPFSwitchingSens     # dvm_dz, dva_dz, dpg_dz, dqg_dz
 
-# DC OPF sensitivities (includes duals)
-OPFDemandSens          # dva_dd, dg_dd, df_dd, dlmp_dd
-OPFSwitchingSens       # dva_dz, dg_dz, df_dz, dlmp_dz
-OPFCostSens            # dg_dcq, dg_dcl, dlmp_dcq, dlmp_dcl
-
-# AC sensitivities
+# AC power flow (legacy)
 VoltagePowerSensitivity    # dvm_dp, dvm_dq
 CurrentPowerSensitivity    # dim_dp, dim_dq
 ```
