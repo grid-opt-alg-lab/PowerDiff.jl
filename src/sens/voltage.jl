@@ -125,8 +125,8 @@ function calc_voltage_active_power_sensitivities(
             x = A \ b
 
             # Convert to voltage sensitivities
-            # x = [∂v_re; ∂v_im], so ∂v = ∂v_re - im*∂v_im (conjugate convention)
-            ∂v_∂p[:, k] = x[1:d] - im * x[d+1:2d]
+            # x = [∂v_re; ∂v_im], so ∂v = ∂v_re + j*∂v_im (true complex derivative)
+            ∂v_∂p[:, k] = x[1:d] + im * x[d+1:2d]
 
             # Magnitude sensitivity: ∂|v|/∂p = Re(∂v/∂p · conj(v)) / |v|
             ∂vm_∂p[:, k] = real.(∂v_∂p[:, k] .* conj.(v_)) ./ abs.(v_)
@@ -184,7 +184,8 @@ function calc_voltage_reactive_power_sensitivities(
             x = A \ b
 
             # Convert to voltage sensitivities
-            ∂v_∂q[:, k] = x[1:d] - im * x[d+1:2d]
+            # x = [∂v_re; ∂v_im], so ∂v = ∂v_re + j*∂v_im (true complex derivative)
+            ∂v_∂q[:, k] = x[1:d] + im * x[d+1:2d]
 
             # Magnitude sensitivity
             ∂vm_∂q[:, k] = real.(∂v_∂q[:, k] .* conj.(v_)) ./ abs.(v_)

@@ -98,6 +98,8 @@ using Test
         prob = ACOPFProblem(pm_data; silent=true)
         dvm_dz = calc_sensitivity(prob, :vm, :z)
         dpg_dz = calc_sensitivity(prob, :pg, :z)
+        dva_dz = calc_sensitivity(prob, :va, :z)
+        dqg_dz = calc_sensitivity(prob, :qg, :z)
         sol_base = prob.cache.solution
 
         ε = 1e-5
@@ -110,6 +112,8 @@ using Test
 
             fd_dvm = (sol_base.vm - sol_pert.vm) / ε
             fd_dpg = (sol_base.pg - sol_pert.pg) / ε
+            fd_dva = (sol_base.va - sol_pert.va) / ε
+            fd_dqg = (sol_base.qg - sol_pert.qg) / ε
 
             # Verify voltage magnitude sensitivities
             if norm(fd_dvm) > 1e-10
@@ -120,6 +124,18 @@ using Test
             # Verify generation sensitivities
             if norm(fd_dpg) > 1e-10
                 rel_error = norm(Matrix(dpg_dz)[:, e] - fd_dpg) / norm(fd_dpg)
+                @test rel_error < 1e-3
+            end
+
+            # Verify voltage angle sensitivities
+            if norm(fd_dva) > 1e-10
+                rel_error = norm(Matrix(dva_dz)[:, e] - fd_dva) / norm(fd_dva)
+                @test rel_error < 1e-3
+            end
+
+            # Verify reactive generation sensitivities
+            if norm(fd_dqg) > 1e-10
+                rel_error = norm(Matrix(dqg_dz)[:, e] - fd_dqg) / norm(fd_dqg)
                 @test rel_error < 1e-3
             end
         end

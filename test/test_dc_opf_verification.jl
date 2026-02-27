@@ -259,5 +259,53 @@ end
             end
         end
 
+        # -----------------------------------------------------------------
+        # LMP w.r.t. :fmax — perturb flow limit of a branch
+        # -----------------------------------------------------------------
+        @testset "LMP w.r.t. :fmax" begin
+            dlmp_dfmax = calc_sensitivity(prob_base, :lmp, :fmax)
+
+            # Pick the branch with the most binding flow constraint
+            flow_ratio = abs.(sol_base.f) ./ dc_net.fmax
+            branch_idx = argmax(flow_ratio)
+
+            net_pert = load_test_case("case5.m")
+            dc_net_pert = DCNetwork(net_pert)
+            dc_net_pert.fmax[branch_idx] += delta
+            prob_pert = DCOPFProblem(dc_net_pert, d)
+            sol_pert = solve!(prob_pert)
+            lmp_pert = calc_lmp(sol_pert, dc_net_pert)
+
+            fd_lmp = (lmp_pert - lmp_base) / delta
+            if norm(fd_lmp) > 1e-10
+                rel_err = norm(Matrix(dlmp_dfmax)[:, branch_idx] - fd_lmp) / norm(fd_lmp)
+                @test rel_err < lmp_tol
+            end
+        end
+
+        # -----------------------------------------------------------------
+        # LMP w.r.t. :b — perturb susceptance of a branch
+        # -----------------------------------------------------------------
+        @testset "LMP w.r.t. :b" begin
+            dlmp_db = calc_sensitivity(prob_base, :lmp, :b)
+
+            # Perturb susceptance of branch 1
+            branch_idx = 1
+            net_pert = load_test_case("case5.m")
+            # Perturb the reactance to change susceptance: b = -x/(r² + x²)
+            # Easier to rebuild DCNetwork with direct b perturbation
+            dc_net_pert = DCNetwork(net_pert)
+            dc_net_pert.b[branch_idx] += delta
+            prob_pert = DCOPFProblem(dc_net_pert, d)
+            sol_pert = solve!(prob_pert)
+            lmp_pert = calc_lmp(sol_pert, dc_net_pert)
+
+            fd_lmp = (lmp_pert - lmp_base) / delta
+            if norm(fd_lmp) > 1e-10
+                rel_err = norm(Matrix(dlmp_db)[:, branch_idx] - fd_lmp) / norm(fd_lmp)
+                @test rel_err < lmp_tol
+            end
+        end
+
     end
 end

@@ -580,9 +580,113 @@ end
 # TODO: Fix vectorize_laplacian_weights for general MATPOWER cases
 
 # =============================================================================
+# Physics Property Tests
+# =============================================================================
+
+@testset "PTDF Row Conservation (Kirchhoff)" begin
+    net = load_test_case("case5.m")
+    if isnothing(net)
+        @test_skip false
+    else
+        dc_net = DCNetwork(net)
+        d = calc_demand_vector(net)
+        pf = DCPowerFlowState(dc_net, d)
+
+        # PTDF: ∂f/∂d, rows are branches, cols are buses
+        df_dd = calc_sensitivity(pf, :f, :d)
+
+        # For DC PF, the sum of PTDF entries along each row (for a given branch)
+        # should be approximately 0 for a lossless network.
+        # This reflects that a uniform load increase doesn't change flows (balanced by slack).
+        for ℓ in 1:dc_net.m
+            row_sum = sum(Matrix(df_dd)[ℓ, :])
+            @test abs(row_sum) < 1e-6
+        end
+    end
+end
+
+@testset "Energy Component Sanity" begin
+    # Verify the energy component is well-defined and the LMP decomposition identity
+    # holds across different network configurations.
+    # Note: energy component uniformity is a theoretical property of ideal LP with no
+    # degenerate constraints. In practice, numerical decomposition via L⁺ can introduce
+    # variation, so we only check basic sanity here.
+    net = load_test_case("case5.m")
+    if isnothing(net)
+        @test_skip false
+    else
+        dc_net = DCNetwork(net)
+        d = calc_demand_vector(net)
+        prob = DCOPFProblem(dc_net, d)
+        sol = solve!(prob)
+
+        energy = calc_energy_component(sol, dc_net)
+        congestion = calc_congestion_component(sol, dc_net)
+        lmp = calc_lmp(sol, dc_net)
+
+        @test !any(isnan, energy)
+        @test !any(isinf, energy)
+
+        # Decomposition identity: LMP = energy + congestion
+        @test isapprox(lmp, energy .+ congestion, atol=1e-6)
+
+        # Energy component should be positive for typical networks with positive costs
+        @test mean(energy) > 0
+    end
+end
+
+@testset "case14 Basic Validation" begin
+    net = load_test_case("case14.m")
+    if isnothing(net)
+        @info "Skipping case14 tests - PowerModels test data not found"
+        @test_skip false
+    else
+        # DC OPF on case14
+        dc_net = DCNetwork(net)
+        d = calc_demand_vector(net)
+        prob = DCOPFProblem(dc_net, d)
+        sol = solve!(prob)
+
+        @test all(isfinite, sol.θ)
+        @test all(isfinite, sol.g)
+        @test all(isfinite, sol.f)
+        @test abs(sum(sol.g) - sum(d)) < 1e-4  # Power balance
+
+        # Sensitivities should all be finite
+        for (op, param) in [(:va, :d), (:pg, :d), (:f, :d), (:lmp, :d),
+                            (:va, :z), (:pg, :z), (:f, :z), (:lmp, :z)]
+            S = calc_sensitivity(prob, op, param)
+            @test all(isfinite, Matrix(S))
+        end
+
+        # Participation factors sum to 1
+        dg_dd = calc_sensitivity(prob, :pg, :d)
+        for i in 1:dc_net.n
+            @test abs(sum(Matrix(dg_dd)[:, i]) - 1.0) < 0.01
+        end
+
+        # AC power flow on case14
+        pf_data = deepcopy(net)
+        PowerModels.compute_ac_pf!(pf_data)
+        state = ACPowerFlowState(pf_data)
+
+        dvm_dp = calc_sensitivity(state, :vm, :p)
+        dvm_dq = calc_sensitivity(state, :vm, :q)
+        @test all(isfinite, Matrix(dvm_dp))
+        @test all(isfinite, Matrix(dvm_dq))
+
+        # Slack bus sensitivity should be zero
+        slack = state.idx_slack
+        @test maximum(abs.(Matrix(dvm_dp)[slack, :])) < 1e-10
+        @test maximum(abs.(Matrix(dvm_dq)[slack, :])) < 1e-10
+    end
+end
+
+# =============================================================================
 # Unified Architecture Tests
 # =============================================================================
 include("unified/test_interface.jl")
 include("test_ac_opf_sens.jl")
 include("test_sensitivity_coverage.jl")
 include("test_dc_opf_verification.jl")
+include("test_ac_pf_verification.jl")
