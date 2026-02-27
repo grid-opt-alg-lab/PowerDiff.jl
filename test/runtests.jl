@@ -584,3 +584,4 @@ end
 # =============================================================================
 include("unified/test_interface.jl")
 include("test_ac_opf_sens.jl")
+include("test_sensitivity_coverage.jl")

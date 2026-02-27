@@ -2,6 +2,7 @@
 
 using PowerModelsDiff
 using PowerModels
+using LinearAlgebra
 using Test
 
 @testset "AC OPF Switching Sensitivity" begin
@@ -32,27 +33,27 @@ using Test
         @test all(sol.vm .>= 0.9)
         @test all(sol.vm .<= 1.1)
 
-        println("AC OPF solved successfully, objective = $(round(sol.objective, digits=2))")
     end
 
     @testset "Switching sensitivity computation" begin
         prob = ACOPFProblem(pm_data; silent=true)
-        sens = PowerModelsDiff.calc_sensitivity_switching(prob)
 
-        @test sens isa ACOPFSwitchingSens
-        @test size(sens.dvm_dz) == (5, 7)
-        @test size(sens.dva_dz) == (5, 7)
-        @test size(sens.dpg_dz) == (5, 7)
-        @test size(sens.dqg_dz) == (5, 7)
+        dvm_dz = calc_sensitivity(prob, :vm, :z)
+        dva_dz = calc_sensitivity(prob, :va, :z)
+        dpg_dz = calc_sensitivity(prob, :pg, :z)
+        dqg_dz = calc_sensitivity(prob, :qg, :z)
+
+        @test size(dvm_dz) == (5, 7)
+        @test size(dva_dz) == (5, 7)
+        @test size(dpg_dz) == (5, 7)
+        @test size(dqg_dz) == (5, 7)
 
         # Sensitivities should be finite
-        @test all(isfinite.(sens.dvm_dz))
-        @test all(isfinite.(sens.dva_dz))
-        @test all(isfinite.(sens.dpg_dz))
-        @test all(isfinite.(sens.dqg_dz))
+        @test all(isfinite.(Matrix(dvm_dz)))
+        @test all(isfinite.(Matrix(dva_dz)))
+        @test all(isfinite.(Matrix(dpg_dz)))
+        @test all(isfinite.(Matrix(dqg_dz)))
 
-        println("Switching sensitivities computed successfully")
-        println("Sample dvm/dz[1,:] = $(round.(sens.dvm_dz[1, :], digits=4))")
     end
 
     @testset "Symbol-based API" begin
@@ -70,8 +71,74 @@ using Test
         dqg_dz = calc_sensitivity(prob, :qg, :z)
         @test size(dqg_dz) == (5, 7)
 
-        println("Symbol-based API works correctly")
+    end
+
+    @testset "KKT residual at optimum" begin
+        prob = ACOPFProblem(pm_data; silent=true)
+        sol = solve!(prob)
+        z0 = ac_flatten_variables(sol, prob)
+        K = ac_kkt(z0, prob)
+        @test length(K) == ac_kkt_dims(prob)
+
+        # Full KKT residual should be small (bounded by solver tolerance)
+        @test norm(K) < 1e-2
+
+        # Individual components
+        idx = ac_kkt_indices(prob)
+        @test norm(K[idx.va]) < 1e-2          # va stationarity
+        @test norm(K[idx.vm]) < 1e-2          # vm stationarity
+        @test norm(K[idx.pg]) < 1e-6          # pg stationarity (exact: linear)
+        @test norm(K[idx.qg]) < 1e-6          # qg stationarity (exact: linear)
+        @test norm(K[idx.ν_p_bal]) < 1e-6     # power balance
+        @test norm(K[idx.ν_q_bal]) < 1e-6     # reactive balance
+        @test norm(K[idx.ν_ref_bus]) < 1e-6   # reference bus
+    end
+
+    @testset "Finite-difference verification" begin
+        prob = ACOPFProblem(pm_data; silent=true)
+        dvm_dz = calc_sensitivity(prob, :vm, :z)
+        dpg_dz = calc_sensitivity(prob, :pg, :z)
+        sol_base = prob.cache.solution
+
+        ε = 1e-5
+        for e in 1:min(3, prob.network.m)
+            # Build perturbed problem with z[e] -= ε baked into JuMP model
+            net_pert = ACNetwork(pm_data)
+            net_pert.z[e] -= ε
+            prob_pert = ACOPFProblem(net_pert, pm_data; silent=true)
+            sol_pert = solve!(prob_pert)
+
+            fd_dvm = (sol_base.vm - sol_pert.vm) / ε
+            fd_dpg = (sol_base.pg - sol_pert.pg) / ε
+
+            # Verify voltage magnitude sensitivities
+            if norm(fd_dvm) > 1e-10
+                rel_error = norm(Matrix(dvm_dz)[:, e] - fd_dvm) / norm(fd_dvm)
+                @test rel_error < 1e-3
+            end
+
+            # Verify generation sensitivities
+            if norm(fd_dpg) > 1e-10
+                rel_error = norm(Matrix(dpg_dz)[:, e] - fd_dpg) / norm(fd_dpg)
+                @test rel_error < 1e-3
+            end
+        end
+    end
+
+    @testset "Cache reuse across operands" begin
+        prob = ACOPFProblem(pm_data; silent=true)
+
+        # First call computes and caches
+        dvm_dz = calc_sensitivity(prob, :vm, :z)
+        @test size(dvm_dz) == (5, 7)
+        @test !isnothing(prob.cache.dx_ds)
+
+        # Subsequent calls reuse cache (no re-solve)
+        dva_dz = calc_sensitivity(prob, :va, :z)
+        dpg_dz = calc_sensitivity(prob, :pg, :z)
+        dqg_dz = calc_sensitivity(prob, :qg, :z)
+        @test size(dva_dz) == (5, 7)
+        @test size(dpg_dz) == (5, 7)
+        @test size(dqg_dz) == (5, 7)
     end
 end
-
-println("\n✓ All AC OPF sensitivity tests passed!")

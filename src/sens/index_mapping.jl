@@ -5,7 +5,33 @@
 # Provides bidirectional index mappings between internal matrix indices
 # and external element IDs (bus numbers, branch indices, generator indices).
 #
+# Design note: All mappings are currently identity (1:n → 1:n) because
+# make_basic_network() guarantees sequential 1-based indexing. The mapping
+# infrastructure exists so that Sensitivity{F,O,P} exposes row_to_id/col_to_id
+# as public API. Supporting non-basic networks in the future would only
+# require implementing non-identity versions of _bus_mapping(), _branch_mapping(),
+# and _gen_mapping() — no changes to the Sensitivity type or interface.jl needed.
+#
 # Following PowerModels' AdmittanceMatrix pattern for consistent indexing.
+# Uses a module-level cache for identity mappings to avoid repeated allocation.
+
+# Module-level cache: dimension → (idx_to_id, id_to_idx)
+const _IDENTITY_MAPPING_CACHE = Dict{Int, Tuple{Vector{Int}, Dict{Int,Int}}}()
+
+"""
+    _identity_mapping(n::Int) → (idx_to_id, id_to_idx)
+
+Get or create a cached identity mapping for dimension `n`.
+Since `make_basic_network()` produces sequential 1-based indexing,
+all mappings are identity (i → i).
+"""
+function _identity_mapping(n::Int)
+    get!(_IDENTITY_MAPPING_CACHE, n) do
+        idx_to_id = collect(1:n)
+        id_to_idx = Dict(i => i for i in 1:n)
+        (idx_to_id, id_to_idx)
+    end
+end
 
 """
     _bus_mapping(state) → (idx_to_id, id_to_idx)
@@ -16,33 +42,10 @@ Returns:
 - `idx_to_id::Vector{Int}`: Internal row/col index → external bus ID
 - `id_to_idx::Dict{Int,Int}`: External bus ID → internal row/col index
 """
-function _bus_mapping(state::DCPowerFlowState)
-    n = state.net.n
-    idx_to_id = collect(1:n)  # DC formulation uses 1:n indexing
-    id_to_idx = Dict(i => i for i in 1:n)
-    return idx_to_id, id_to_idx
-end
-
-function _bus_mapping(prob::DCOPFProblem)
-    n = prob.network.n
-    idx_to_id = collect(1:n)
-    id_to_idx = Dict(i => i for i in 1:n)
-    return idx_to_id, id_to_idx
-end
-
-function _bus_mapping(state::ACPowerFlowState)
-    n = state.n
-    idx_to_id = collect(1:n)
-    id_to_idx = Dict(i => i for i in 1:n)
-    return idx_to_id, id_to_idx
-end
-
-function _bus_mapping(prob::ACOPFProblem)
-    n = prob.network.n
-    idx_to_id = collect(1:n)
-    id_to_idx = Dict(i => i for i in 1:n)
-    return idx_to_id, id_to_idx
-end
+_bus_mapping(state::DCPowerFlowState) = _identity_mapping(state.net.n)
+_bus_mapping(prob::DCOPFProblem) = _identity_mapping(prob.network.n)
+_bus_mapping(state::ACPowerFlowState) = _identity_mapping(state.n)
+_bus_mapping(prob::ACOPFProblem) = _identity_mapping(prob.network.n)
 
 """
     _branch_mapping(state) → (idx_to_id, id_to_idx)
@@ -53,33 +56,10 @@ Returns:
 - `idx_to_id::Vector{Int}`: Internal row/col index → external branch ID
 - `id_to_idx::Dict{Int,Int}`: External branch ID → internal row/col index
 """
-function _branch_mapping(state::DCPowerFlowState)
-    m = state.net.m
-    idx_to_id = collect(1:m)
-    id_to_idx = Dict(i => i for i in 1:m)
-    return idx_to_id, id_to_idx
-end
-
-function _branch_mapping(prob::DCOPFProblem)
-    m = prob.network.m
-    idx_to_id = collect(1:m)
-    id_to_idx = Dict(i => i for i in 1:m)
-    return idx_to_id, id_to_idx
-end
-
-function _branch_mapping(state::ACPowerFlowState)
-    m = state.m
-    idx_to_id = collect(1:m)
-    id_to_idx = Dict(i => i for i in 1:m)
-    return idx_to_id, id_to_idx
-end
-
-function _branch_mapping(prob::ACOPFProblem)
-    m = prob.network.m
-    idx_to_id = collect(1:m)
-    id_to_idx = Dict(i => i for i in 1:m)
-    return idx_to_id, id_to_idx
-end
+_branch_mapping(state::DCPowerFlowState) = _identity_mapping(state.net.m)
+_branch_mapping(prob::DCOPFProblem) = _identity_mapping(prob.network.m)
+_branch_mapping(state::ACPowerFlowState) = _identity_mapping(state.m)
+_branch_mapping(prob::ACOPFProblem) = _identity_mapping(prob.network.m)
 
 """
     _gen_mapping(state) → (idx_to_id, id_to_idx)
@@ -90,19 +70,8 @@ Returns:
 - `idx_to_id::Vector{Int}`: Internal row/col index → external generator ID
 - `id_to_idx::Dict{Int,Int}`: External generator ID → internal row/col index
 """
-function _gen_mapping(prob::DCOPFProblem)
-    k = prob.network.k
-    idx_to_id = collect(1:k)
-    id_to_idx = Dict(i => i for i in 1:k)
-    return idx_to_id, id_to_idx
-end
-
-function _gen_mapping(prob::ACOPFProblem)
-    k = prob.n_gen
-    idx_to_id = collect(1:k)
-    id_to_idx = Dict(i => i for i in 1:k)
-    return idx_to_id, id_to_idx
-end
+_gen_mapping(prob::DCOPFProblem) = _identity_mapping(prob.network.k)
+_gen_mapping(prob::ACOPFProblem) = _identity_mapping(prob.n_gen)
 
 # Power flow states don't have generator-level dispatch
 function _gen_mapping(::DCPowerFlowState)

@@ -24,13 +24,14 @@ Returns a `Sensitivity{F, O, P}` typed result that:
 Invalid combinations throw ArgumentError.
 
 # Operand Types
-- `VoltageAngle()`: Voltage phase angles (DC)
-- `Flow()`: Branch flows (DC)
-- `Generation()`: Generator real power (DC OPF only)
+- `VoltageAngle()`: Voltage phase angles (DC PF, DC OPF, AC OPF)
+- `Flow()`: Branch flows (DC PF, DC OPF)
+- `Generation()`: Generator active power (DC OPF, AC OPF)
+- `ReactiveGeneration()`: Generator reactive power (AC OPF)
 - `LMP()`: Locational marginal prices (DC OPF only)
-- `VoltageMagnitude()`: Voltage magnitude (AC)
-- `CurrentMagnitude()`: Current magnitude (AC)
-- `Voltage()`: Complex voltage phasor (AC)
+- `VoltageMagnitude()`: Voltage magnitude (AC PF, AC OPF)
+- `CurrentMagnitude()`: Current magnitude (AC PF)
+- `Voltage()`: Complex voltage phasor (AC PF) — returns ComplexF64 elements
 
 # Parameter Types
 - `Demand()`: Demand
@@ -161,19 +162,47 @@ function calc_sensitivity(state, op::O, param::P) where {O <: AbstractOperand, P
     row_mapping = _element_mapping(state, row_element)
     col_mapping = _element_mapping(state, col_element)
 
-    return Sensitivity{F_type, O, P}(Matrix(matrix), row_mapping, col_mapping)
+    mat = Matrix(matrix)
+    return Sensitivity{F_type, O, P}(mat, row_mapping, col_mapping)
 end
 
 # =============================================================================
 # Internal Implementation Dispatch
 # =============================================================================
 
-# Fallback: invalid combination
+# Fallback: invalid combination with actionable error message
 function _calc_sensitivity_impl(state, op::O, param::P) where {O <: AbstractOperand, P <: AbstractParameter}
-    throw(ArgumentError(
-        "calc_sensitivity($(typeof(state)), $(typeof(op))(), $(typeof(param))()) is not defined. " *
-        "See ?calc_sensitivity for valid operand/parameter combinations."
-    ))
+    state_name = _state_display_name(typeof(state))
+    valid = _valid_combinations(typeof(state))
+    msg = "calc_sensitivity($state_name, $(nameof(O))(), $(nameof(P))()) is not defined."
+    if !isempty(valid)
+        msg *= "\nValid combinations for $state_name:\n"
+        msg *= join(["  :$(o) w.r.t. :$(p)" for (o, p) in valid], "\n")
+    end
+    throw(ArgumentError(msg))
+end
+
+_state_display_name(::Type{<:DCPowerFlowState}) = "DCPowerFlowState"
+_state_display_name(::Type{<:DCOPFProblem}) = "DCOPFProblem"
+_state_display_name(::Type{<:ACPowerFlowState}) = "ACPowerFlowState"
+_state_display_name(::Type{<:ACOPFProblem}) = "ACOPFProblem"
+_state_display_name(T::Type) = string(T)
+
+# Auto-discover valid (operand, parameter) combinations from the method table.
+# This avoids manually maintaining lists that can drift from implementations.
+function _valid_combinations(::Type{T}) where T
+    combos = Tuple{Symbol,Symbol}[]
+    for (op_sym, op) in _OPERAND_MAP
+        op_sym === :g && continue  # skip alias (:g is alias for :pg)
+        op_sym === :pd && continue # skip alias (:pd is alias for :d)
+        for (p_sym, param) in _PARAMETER_MAP
+            p_sym === :pd && continue # skip alias
+            if hasmethod(_calc_sensitivity_impl, Tuple{T, typeof(op), typeof(param)})
+                push!(combos, (op_sym, p_sym))
+            end
+        end
+    end
+    return unique(combos)
 end
 
 # =============================================================================
@@ -220,11 +249,23 @@ _calc_sensitivity_impl(prob::DCOPFProblem, ::LMP, ::Demand) =
     _extract_sensitivity(prob, _get_dz_dd!(prob), :lmp)
 
 # Cost sensitivities (via cached KKT system)
+_calc_sensitivity_impl(prob::DCOPFProblem, ::VoltageAngle, ::QuadraticCost) =
+    _extract_sensitivity(prob, _get_dz_dcq!(prob), :va)
+
+_calc_sensitivity_impl(prob::DCOPFProblem, ::VoltageAngle, ::LinearCost) =
+    _extract_sensitivity(prob, _get_dz_dcl!(prob), :va)
+
 _calc_sensitivity_impl(prob::DCOPFProblem, ::Generation, ::QuadraticCost) =
     _extract_sensitivity(prob, _get_dz_dcq!(prob), :pg)
 
 _calc_sensitivity_impl(prob::DCOPFProblem, ::Generation, ::LinearCost) =
     _extract_sensitivity(prob, _get_dz_dcl!(prob), :pg)
+
+_calc_sensitivity_impl(prob::DCOPFProblem, ::Flow, ::QuadraticCost) =
+    _extract_sensitivity(prob, _get_dz_dcq!(prob), :f)
+
+_calc_sensitivity_impl(prob::DCOPFProblem, ::Flow, ::LinearCost) =
+    _extract_sensitivity(prob, _get_dz_dcl!(prob), :f)
 
 _calc_sensitivity_impl(prob::DCOPFProblem, ::LMP, ::QuadraticCost) =
     _extract_sensitivity(prob, _get_dz_dcq!(prob), :lmp)
@@ -302,21 +343,33 @@ function _calc_sensitivity_impl(state::ACPowerFlowState, ::CurrentMagnitude, ::R
 end
 
 # =============================================================================
-# AC OPF: Implementation
+# AC OPF: Implementation (uses cached KKT derivatives)
 # =============================================================================
 
 # Voltage magnitude sensitivities w.r.t. switching
-_calc_sensitivity_impl(prob::ACOPFProblem, ::VoltageMagnitude, ::Switching) =
-    calc_sensitivity_switching(prob).dvm_dz
+function _calc_sensitivity_impl(prob::ACOPFProblem, ::VoltageMagnitude, ::Switching)
+    dx_ds = _get_ac_dx_ds!(prob)
+    idx = ac_kkt_indices(prob)
+    return dx_ds[idx.vm, :]
+end
 
 # Voltage angle sensitivities w.r.t. switching
-_calc_sensitivity_impl(prob::ACOPFProblem, ::VoltageAngle, ::Switching) =
-    calc_sensitivity_switching(prob).dva_dz
+function _calc_sensitivity_impl(prob::ACOPFProblem, ::VoltageAngle, ::Switching)
+    dx_ds = _get_ac_dx_ds!(prob)
+    idx = ac_kkt_indices(prob)
+    return dx_ds[idx.va, :]
+end
 
 # Active generation sensitivities w.r.t. switching
-_calc_sensitivity_impl(prob::ACOPFProblem, ::Generation, ::Switching) =
-    calc_sensitivity_switching(prob).dpg_dz
+function _calc_sensitivity_impl(prob::ACOPFProblem, ::Generation, ::Switching)
+    dx_ds = _get_ac_dx_ds!(prob)
+    idx = ac_kkt_indices(prob)
+    return dx_ds[idx.pg, :]
+end
 
 # Reactive generation sensitivities w.r.t. switching
-_calc_sensitivity_impl(prob::ACOPFProblem, ::ReactiveGeneration, ::Switching) =
-    calc_sensitivity_switching(prob).dqg_dz
+function _calc_sensitivity_impl(prob::ACOPFProblem, ::ReactiveGeneration, ::Switching)
+    dx_ds = _get_ac_dx_ds!(prob)
+    idx = ac_kkt_indices(prob)
+    return dx_ds[idx.qg, :]
+end

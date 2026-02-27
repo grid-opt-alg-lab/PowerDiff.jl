@@ -619,16 +619,16 @@ end
 """
     update_switching!(prob::DCOPFProblem, s::AbstractVector)
 
-Update the switching state in the network and rebuild the optimization problem.
-
-Invalidates the sensitivity cache since parameters have changed.
+Update the network switching state and invalidate the sensitivity cache.
 
 # Arguments
 - `prob`: DCOPFProblem to update
 - `s`: New switching state vector (length m), values in [0,1]
 
 # Note
-This modifies the network's switching state and requires re-solving.
+This modifies `prob.network.z` and invalidates cached sensitivities.
+The JuMP model is not rebuilt; re-solving will use the new switching state
+for KKT-based sensitivity analysis.
 """
 function update_switching!(prob::DCOPFProblem, s::AbstractVector)
     m = prob.network.m

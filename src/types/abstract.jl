@@ -4,7 +4,7 @@
 #
 # Provides a unified type structure for multiple dispatch across:
 # - DC power flow and DC OPF
-# - AC power flow (and future AC OPF)
+# - AC power flow and AC OPF
 # - Sensitivity analysis with parameter-based dispatch
 
 # =============================================================================
@@ -45,7 +45,7 @@ Abstract type for optimal power flow solutions with dual variables.
 
 Concrete subtypes:
 - `DCOPFSolution`: DC OPF with generation dispatch and duals
-- `ACOPFSolution`: (Future) AC OPF with duals
+- `ACOPFSolution`: AC OPF with voltages, generation, and duals
 """
 abstract type AbstractOPFSolution <: AbstractPowerFlowState end
 
@@ -60,7 +60,7 @@ Abstract base type for OPF problem wrappers (JuMP models).
 
 Concrete subtypes:
 - `DCOPFProblem`: DC OPF problem (B-θ formulation)
-- `ACOPFProblem`: (Future) AC OPF problem
+- `ACOPFProblem`: AC OPF problem (polar formulation)
 """
 abstract type AbstractOPFProblem end
 

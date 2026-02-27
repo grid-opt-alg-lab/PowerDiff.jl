@@ -9,13 +9,22 @@
 # =============================================================================
 
 """
-    SensitivityCache
+    DCSensitivityCache
 
-Mutable cache for storing computed sensitivity data to avoid redundant KKT solves.
+Mutable cache for DC OPF sensitivity data to avoid redundant KKT solves.
 
-The cache stores the full derivative matrices `dz_d*` for each parameter type,
-allowing efficient extraction of individual operand sensitivities without
-recomputing the expensive KKT factorization.
+DC OPF supports 6 parameter types (`:d`, `:z`, `:cl`, `:cq`, `:fmax`, `:b`),
+each producing a separate `dz_d*` full-derivative matrix. All share one KKT LU
+factorization (`kkt_factor`), so after the first parameter type is queried the
+factorization is reused for subsequent parameters. Different operand queries
+(e.g. `:va` vs `:pg` vs `:lmp`) for the *same* parameter type all extract
+rows from the same cached `dz_d*` matrix — no recomputation needed.
+
+By contrast, `ACSensitivityCache` only needs 2 fields because AC OPF currently
+supports only switching (`:z`) as a parameter, and `dx_ds` already contains all
+operand rows. Power flow states (`DCPowerFlowState`, `ACPowerFlowState`) have no
+cache at all because their sensitivities are cheap direct algebra (pseudoinverse
+or Jacobian factorization is precomputed at construction time).
 
 # Fields
 - `solution`: Cached DCOPFSolution (or nothing if not yet solved)
@@ -27,7 +36,7 @@ recomputing the expensive KKT factorization.
 - `dz_dfmax`: Full KKT derivative w.r.t. flow limits (or nothing)
 - `dz_db`: Full KKT derivative w.r.t. susceptances (or nothing)
 """
-mutable struct SensitivityCache
+mutable struct DCSensitivityCache
     solution::Union{Nothing,DCOPFSolution}
     kkt_factor::Union{Nothing,LinearAlgebra.LU}
     dz_dd::Union{Nothing,Matrix{Float64}}
@@ -38,21 +47,24 @@ mutable struct SensitivityCache
     dz_db::Union{Nothing,Matrix{Float64}}
 end
 
+# Deprecation alias
+const SensitivityCache = DCSensitivityCache
+
 """
-    SensitivityCache()
+    DCSensitivityCache()
 
 Create an empty sensitivity cache with all fields set to nothing.
 """
-function SensitivityCache()
-    return SensitivityCache(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
+function DCSensitivityCache()
+    return DCSensitivityCache(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
 """
-    invalidate!(cache::SensitivityCache)
+    invalidate!(cache::DCSensitivityCache)
 
 Clear all cached sensitivity data. Called when problem parameters change.
 """
-function invalidate!(cache::SensitivityCache)
+function invalidate!(cache::DCSensitivityCache)
     cache.solution = nothing
     cache.kkt_factor = nothing
     cache.dz_dd = nothing
@@ -89,7 +101,7 @@ mutable struct DCOPFProblem <: AbstractOPFProblem
     f::Vector{VariableRef}
     d::Vector{Float64}
     cons::NamedTuple
-    cache::SensitivityCache
+    cache::DCSensitivityCache
 end
 
 # =============================================================================
@@ -170,7 +182,7 @@ function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.
         phase_diff = phase_diff
     )
 
-    return DCOPFProblem(model, network, θ, g, f, Float64.(d), cons, SensitivityCache())
+    return DCOPFProblem(model, network, θ, g, f, Float64.(d), cons, DCSensitivityCache())
 end
 
 """

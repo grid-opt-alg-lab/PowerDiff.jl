@@ -175,20 +175,18 @@ using Test
         PowerModels.compute_ac_pf!(net_data)
         state = ACPowerFlowState(net_data)
 
-        # Voltage-power sensitivities
-        sens = calc_voltage_power_sensitivities(state)
-        @test sens isa VoltagePowerSensitivity
-        @test size(sens.∂vm_∂p) == (state.n, state.n)
-        @test size(sens.∂vm_∂q) == (state.n, state.n)
-
-        # Test non-unicode accessors
-        @test sens.dvm_dp == sens.∂vm_∂p
-        @test sens.dvm_dq == sens.∂vm_∂q
-
         # Type-based interface
         dvm_dp = calc_sensitivity(state, VoltageMagnitude(), ActivePower())
         @test dvm_dp isa Sensitivity{ACPF, VoltageMagnitude, ActivePower}
-        @test Matrix(dvm_dp) == sens.∂vm_∂p
+        @test size(dvm_dp) == (state.n, state.n)
+
+        dvm_dq = calc_sensitivity(state, VoltageMagnitude(), ReactivePower())
+        @test dvm_dq isa Sensitivity{ACPF, VoltageMagnitude, ReactivePower}
+        @test size(dvm_dq) == (state.n, state.n)
+
+        # Sensitivities should be real and finite
+        @test all(isfinite, Matrix(dvm_dp))
+        @test all(isfinite, Matrix(dvm_dq))
     end
 
     @testset "Sensitivity Type Dispatch" begin

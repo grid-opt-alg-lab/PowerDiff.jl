@@ -6,37 +6,6 @@
 # Design mirrors DCOPFProblem for API consistency.
 
 """
-    ACOPFProblem <: AbstractOPFProblem
-
-Polar coordinate AC OPF wrapped around a JuMP model.
-
-# Fields
-- `model`: JuMP Model
-- `network`: ACNetwork data
-- `va`, `vm`: Variable references for voltage angles and magnitudes
-- `pg`, `qg`: Variable references for active and reactive generation
-- `p`, `q`: Dict of branch flow variable references (keyed by arc tuple)
-- `cons`: Named tuple of constraint references
-- `ref`: PowerModels-style reference dictionary
-- `gen_buses`: Generator bus indices (maps generator index to bus index)
-- `n_gen`: Number of generators
-"""
-mutable struct ACOPFProblem <: AbstractOPFProblem
-    model::JuMP.Model
-    network::ACNetwork
-    va::Vector{VariableRef}
-    vm::Vector{VariableRef}
-    pg::Vector{VariableRef}
-    qg::Vector{VariableRef}
-    p::Dict{Tuple{Int,Int,Int}, VariableRef}
-    q::Dict{Tuple{Int,Int,Int}, VariableRef}
-    cons::NamedTuple
-    ref::Dict{Symbol, Any}
-    gen_buses::Vector{Int}
-    n_gen::Int
-end
-
-"""
     ACOPFSolution <: AbstractOPFSolution
 
 Solution container for AC OPF problem, storing primal and dual variables.
@@ -53,14 +22,20 @@ Solution container for AC OPF problem, storing primal and dual variables.
 ## Dual Variables (Equality Constraints)
 - `ν_p_bal`: Active power balance duals (n) - used for LMP
 - `ν_q_bal`: Reactive power balance duals (n)
-- `ν_p_fr`, `ν_p_to`: Active flow constraint duals (m each)
-- `ν_q_fr`, `ν_q_to`: Reactive flow constraint duals (m each)
+- `ν_ref_bus`: Reference bus constraint duals (n_ref, usually 1)
+- `ν_p_fr`, `ν_p_to`: Active flow definition duals (m each)
+- `ν_q_fr`, `ν_q_to`: Reactive flow definition duals (m each)
 
 ## Dual Variables (Inequality Constraints)
 - `λ_thermal_fr`, `λ_thermal_to`: Thermal limit duals (m each)
+- `λ_angle_lb`, `λ_angle_ub`: Angle difference limit duals (m each)
 - `μ_vm_lb`, `μ_vm_ub`: Voltage magnitude bound duals (n each)
 - `ρ_pg_lb`, `ρ_pg_ub`: Active gen bound duals (k each)
 - `ρ_qg_lb`, `ρ_qg_ub`: Reactive gen bound duals (k each)
+- `σ_p_fr_lb`, `σ_p_fr_ub`: From-side active flow bound duals (m each)
+- `σ_q_fr_lb`, `σ_q_fr_ub`: From-side reactive flow bound duals (m each)
+- `σ_p_to_lb`, `σ_p_to_ub`: To-side active flow bound duals (m each)
+- `σ_q_to_lb`, `σ_q_to_ub`: To-side reactive flow bound duals (m each)
 
 ## Objective
 - `objective`: Optimal objective value
@@ -78,32 +53,122 @@ struct ACOPFSolution <: AbstractOPFSolution
     p::Dict{Tuple{Int,Int,Int}, Float64}
     q::Dict{Tuple{Int,Int,Int}, Float64}
 
-    # Dual - power balance
+    # Dual - power balance (equality)
     ν_p_bal::Vector{Float64}
     ν_q_bal::Vector{Float64}
 
-    # Dual - flow equations
+    # Dual - reference bus (equality)
+    ν_ref_bus::Vector{Float64}
+
+    # Dual - flow definition equations (equality, used in full-space stationarity)
     ν_p_fr::Vector{Float64}
     ν_p_to::Vector{Float64}
     ν_q_fr::Vector{Float64}
     ν_q_to::Vector{Float64}
 
-    # Dual - thermal limits
+    # Dual - thermal limits (inequality)
     λ_thermal_fr::Vector{Float64}
     λ_thermal_to::Vector{Float64}
 
-    # Dual - voltage bounds
+    # Dual - angle difference limits (inequality)
+    λ_angle_lb::Vector{Float64}
+    λ_angle_ub::Vector{Float64}
+
+    # Dual - voltage bounds (inequality)
     μ_vm_lb::Vector{Float64}
     μ_vm_ub::Vector{Float64}
 
-    # Dual - generation bounds
+    # Dual - generation bounds (inequality)
     ρ_pg_lb::Vector{Float64}
     ρ_pg_ub::Vector{Float64}
     ρ_qg_lb::Vector{Float64}
     ρ_qg_ub::Vector{Float64}
 
+    # Dual - flow variable bounds (inequality, reduced-space)
+    σ_p_fr_lb::Vector{Float64}
+    σ_p_fr_ub::Vector{Float64}
+    σ_q_fr_lb::Vector{Float64}
+    σ_q_fr_ub::Vector{Float64}
+    σ_p_to_lb::Vector{Float64}
+    σ_p_to_ub::Vector{Float64}
+    σ_q_to_lb::Vector{Float64}
+    σ_q_to_ub::Vector{Float64}
+
     # Objective
     objective::Float64
+end
+
+# =============================================================================
+# ACSensitivityCache
+# =============================================================================
+
+"""
+    ACSensitivityCache
+
+Mutable cache for storing computed AC OPF sensitivity data to avoid redundant
+KKT solves and ForwardDiff Jacobian evaluations.
+
+# Fields
+- `solution`: Cached ACOPFSolution (or nothing if not yet solved)
+- `dx_ds`: Full ∂x/∂s derivative matrix w.r.t. switching (or nothing)
+"""
+mutable struct ACSensitivityCache
+    solution::Union{Nothing, ACOPFSolution}
+    dx_ds::Union{Nothing, Matrix{Float64}}
+end
+
+"""
+    ACSensitivityCache()
+
+Create an empty AC sensitivity cache with all fields set to nothing.
+"""
+ACSensitivityCache() = ACSensitivityCache(nothing, nothing)
+
+"""
+    invalidate!(cache::ACSensitivityCache)
+
+Clear all cached AC sensitivity data. Called when problem parameters change.
+"""
+function invalidate!(cache::ACSensitivityCache)
+    cache.solution = nothing
+    cache.dx_ds = nothing
+end
+
+# =============================================================================
+# ACOPFProblem
+# =============================================================================
+
+"""
+    ACOPFProblem <: AbstractOPFProblem
+
+Polar coordinate AC OPF wrapped around a JuMP model.
+
+# Fields
+- `model`: JuMP Model
+- `network`: ACNetwork data
+- `va`, `vm`: Variable references for voltage angles and magnitudes
+- `pg`, `qg`: Variable references for active and reactive generation
+- `p`, `q`: Dict of branch flow variable references (keyed by arc tuple)
+- `cons`: Named tuple of constraint references
+- `ref`: PowerModels-style reference dictionary
+- `gen_buses`: Generator bus indices (maps generator index to bus index)
+- `n_gen`: Number of generators
+- `cache`: ACSensitivityCache for caching KKT derivatives
+"""
+mutable struct ACOPFProblem <: AbstractOPFProblem
+    model::JuMP.Model
+    network::ACNetwork
+    va::Vector{VariableRef}
+    vm::Vector{VariableRef}
+    pg::Vector{VariableRef}
+    qg::Vector{VariableRef}
+    p::Dict{Tuple{Int,Int,Int}, VariableRef}
+    q::Dict{Tuple{Int,Int,Int}, VariableRef}
+    cons::NamedTuple
+    ref::Dict{Symbol, Any}
+    gen_buses::Vector{Int}
+    n_gen::Int
+    cache::ACSensitivityCache
 end
 
 # =============================================================================
@@ -314,7 +379,7 @@ function ACOPFProblem(
     )
 
     return ACOPFProblem(model, network, collect(va), collect(vm), collect(pg), collect(qg),
-                        p, q, cons, ref_sym, gen_buses, n_gen)
+                        p, q, cons, ref_sym, gen_buses, n_gen, ACSensitivityCache())
 end
 
 """

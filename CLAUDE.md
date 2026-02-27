@@ -116,15 +116,19 @@ process(s::Sensitivity{DCOPF, LMP, Demand}) = "DC OPF LMP-demand"
 process(s::Sensitivity{F, O, Switching}) where {F, O} = "Any switching sensitivity"
 ```
 
-### Sensitivity{F,O,P} Return Type
+### Sensitivity{F,O,P,T} Return Type
 
-`Sensitivity{F,O,P} <: AbstractMatrix{Float64}` — acts like a matrix with type tags:
+`Sensitivity{F,O,P,T} <: AbstractMatrix{T}` — acts like a matrix with type tags:
 - `F <: AbstractFormulation`: DCOPF, ACOPF, DCPF, ACPF
 - `O <: AbstractOperand`: VoltageAngle, VoltageMagnitude, Generation, LMP, Flow, etc.
 - `P <: AbstractParameter`: Demand, Switching, QuadraticCost, LinearCost, etc.
+- `T <: Number`: Element type (Float64 for most, ComplexF64 for `:v` operand)
+
+The 4th parameter `T` is inferred automatically. Three-parameter matching still works:
+`Sensitivity{DCOPF, LMP, Demand}` matches `Sensitivity{DCOPF, LMP, Demand, Float64}`.
 
 Fields:
-- `matrix`: The sensitivity data
+- `matrix`: The sensitivity data (Matrix{T})
 - `row_to_id`, `id_to_row`: Row index ↔ element ID
 - `col_to_id`, `id_to_col`: Column index ↔ element ID
 
@@ -148,15 +152,16 @@ Example: `dg_dz[i,j]` = ∂(generation at generator i) / ∂(switching state of 
 Uses susceptance-weighted Laplacian `L = A' * Diagonal(-b .* z) * A`:
 
 - `DCNetwork`: Network data (topology `A`, susceptances `b`, switching `z`, limits, costs)
-- `DCOPFProblem`: JuMP optimization wrapper with `SensitivityCache` for efficient KKT reuse
+- `DCOPFProblem`: JuMP optimization wrapper with `DCSensitivityCache` for efficient KKT reuse
 - `DCOPFSolution`: Primal (θ, g, f) and dual variables (ν_bal for LMPs)
 - `DCPowerFlowState`: Non-OPF power flow (θ = L⁺ * p, no optimization)
 
 ### AC OPF - Polar Formulation
 
-- `ACOPFProblem`: Full nonlinear AC OPF via Ipopt
+- `ACOPFProblem`: Full nonlinear AC OPF via Ipopt, with `ACSensitivityCache` for efficient KKT reuse
 - `ACOPFSolution`: Primal (va, vm, pg, qg) and dual variables
 - Switching sensitivity via KKT implicit differentiation with ForwardDiff
+- Multiple operands (`:vm`, `:va`, `:pg`, `:qg`) share a single cached `dx_ds` computation
 
 ### KKT Systems
 
@@ -182,17 +187,17 @@ src/
 │   ├── abstract.jl             # Abstract type hierarchy + singleton tag bases
 │   ├── tags.jl                 # Singleton type tags (DCOPF, LMP, Demand, etc.)
 │   ├── dc_network.jl           # DCNetwork, DCPowerFlowState, DCOPFSolution + constructors
-│   ├── dc_opf_problem.jl       # DCOPFProblem, SensitivityCache + constructors
+│   ├── dc_opf_problem.jl       # DCOPFProblem, DCSensitivityCache + constructors
 │   ├── ac_network.jl           # ACNetwork, ACPowerFlowState
-│   ├── ac_opf_problem.jl       # ACOPFProblem, ACOPFSolution + constructors
-│   └── sensitivities.jl        # Sensitivity{F,O,P}, bundled types (DCPFSwitchingSens, ACOPFSwitchingSens)
+│   ├── ac_opf_problem.jl       # ACOPFProblem, ACOPFSolution, ACSensitivityCache + constructors
+│   └── sensitivities.jl        # Sensitivity{F,O,P,T}, bundled types (DCPFSwitchingSens, ACOPFSwitchingSens)
 ├── prob/
 │   ├── dc_opf.jl               # DC OPF solve!, update_demand!
 │   ├── kkt_dc_opf.jl           # DC KKT system, Jacobians, cached parameter derivatives
 │   ├── ac_opf_solve.jl         # AC OPF solve!, update_switching!
-│   └── kkt_ac_opf.jl           # AC KKT system, ForwardDiff Jacobians, switching sensitivity
+│   └── kkt_ac_opf.jl           # AC KKT system, ForwardDiff Jacobians, cached switching sensitivity
 ├── sens/
-│   ├── interface.jl            # Symbol dispatch + singleton dispatch → Sensitivity{F,O,P}
+│   ├── interface.jl            # Symbol dispatch + singleton dispatch → Sensitivity{F,O,P,T}
 │   ├── index_mapping.jl        # Bidirectional index mappings (bus/branch/gen)
 │   ├── topology.jl             # DC PF switching/demand sensitivity
 │   ├── demand.jl               # DC OPF demand sensitivity (cached)

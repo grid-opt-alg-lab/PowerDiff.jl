@@ -18,11 +18,11 @@ using Test
         # Solve DC power flow
         pf_state = DCPowerFlowState(net, d)
 
-        # Get analytical sensitivity
-        sens = calc_sensitivity_switching(pf_state)
+        # Get analytical sensitivity via new API
+        dva_dz = calc_sensitivity(pf_state, :va, :z)
+        df_dz = calc_sensitivity(pf_state, :f, :z)
 
         # Define a function that computes theta as a function of z
-        # Must match DCPowerFlowState constructor exactly (slack balancing + centering)
         function theta_of_z(z_vec)
             A = net.A
             b = net.b
@@ -42,11 +42,11 @@ using Test
 
         # Compute ForwardDiff Jacobian
         z0 = copy(net.z)
-        fd_dθ_dz = ForwardDiff.jacobian(theta_of_z, z0)
+        fd_dva_dz = ForwardDiff.jacobian(theta_of_z, z0)
 
         # Compare analytical vs ForwardDiff
-        @test size(sens.dθ_dz) == size(fd_dθ_dz)
-        @test maximum(abs.(sens.dθ_dz - fd_dθ_dz)) < 1e-10
+        @test size(dva_dz) == size(fd_dva_dz)
+        @test maximum(abs.(Matrix(dva_dz) - fd_dva_dz)) < 1e-10
 
         # Also verify flow sensitivity
         function flow_of_z(z_vec)
@@ -58,11 +58,8 @@ using Test
         end
 
         fd_df_dz = ForwardDiff.jacobian(flow_of_z, z0)
-        @test size(sens.df_dz) == size(fd_df_dz)
-        @test maximum(abs.(sens.df_dz - fd_df_dz)) < 1e-10
-
-        println("DC PF Switching Sensitivity: max θ error = ", maximum(abs.(sens.dθ_dz - fd_dθ_dz)))
-        println("DC PF Switching Sensitivity: max f error = ", maximum(abs.(sens.df_dz - fd_df_dz)))
+        @test size(df_dz) == size(fd_df_dz)
+        @test maximum(abs.(Matrix(df_dz) - fd_df_dz)) < 1e-10
     end
 
     @testset "DC Power Flow Demand Sensitivity" begin
@@ -72,8 +69,8 @@ using Test
         # Solve DC power flow
         pf_state = DCPowerFlowState(net, d)
 
-        # Get analytical sensitivity
-        sens = calc_sensitivity_demand(pf_state)
+        # Get analytical sensitivity via new API
+        dva_dd = calc_sensitivity(pf_state, :va, :d)
 
         # Define a function that computes theta as a function of d
         function theta_of_d(d_vec)
@@ -86,13 +83,11 @@ using Test
         end
 
         # Compute ForwardDiff Jacobian
-        fd_dθ_dd = ForwardDiff.jacobian(theta_of_d, d)
+        fd_dva_dd = ForwardDiff.jacobian(theta_of_d, d)
 
         # Compare analytical vs ForwardDiff
-        @test size(sens.dθ_dd) == size(fd_dθ_dd)
-        @test maximum(abs.(sens.dθ_dd - fd_dθ_dd)) < 1e-8
-
-        println("DC PF Demand Sensitivity: max error = ", maximum(abs.(sens.dθ_dd - fd_dθ_dd)))
+        @test size(dva_dd) == size(fd_dva_dd)
+        @test maximum(abs.(Matrix(dva_dd) - fd_dva_dd)) < 1e-8
     end
 
     @testset "DC OPF Demand Sensitivity" begin
@@ -101,33 +96,27 @@ using Test
         prob = DCOPFProblem(net, d)
         sol = solve!(prob)
 
-        # Get analytical sensitivity
-        sens = calc_sensitivity_demand(prob)
+        # Get analytical sensitivity via new API
+        dva_dd = calc_sensitivity(prob, :va, :d)
 
-        # Verify with finite differences (ForwardDiff on JuMP is complex)
+        # Verify with finite differences
         ε = 1e-5
         n = net.n
 
-        # Check a subset of entries using finite differences
         for i in 1:min(3, n)
             d_pert = copy(d)
             d_pert[i] += ε
 
-            # Update demand and re-solve
             update_demand!(prob, d_pert)
             sol_pert = solve!(prob)
 
-            fd_dθ_dd_col = (sol_pert.θ - sol.θ) / ε
+            fd_dva_dd_col = (sol_pert.θ - sol.θ) / ε
 
-            # Compare
-            max_err = maximum(abs.(sens.dθ_dd[:, i] - fd_dθ_dd_col))
-            @test max_err < 1e-3  # Finite difference tolerance
+            max_err = maximum(abs.(Matrix(dva_dd)[:, i] - fd_dva_dd_col))
+            @test max_err < 1e-3
 
-            # Restore
             update_demand!(prob, d)
         end
-
-        println("DC OPF Demand Sensitivity: finite diff verification passed")
     end
 
     @testset "DC OPF Switching Sensitivity" begin
@@ -136,35 +125,28 @@ using Test
         prob = DCOPFProblem(net, d)
         sol = solve!(prob)
 
-        # Get analytical sensitivity
-        sens = calc_sensitivity_switching(prob)
+        # Get analytical sensitivity via new API
+        dva_dz = calc_sensitivity(prob, :va, :z)
 
         # Verify with finite differences (negative perturbation to stay in [0,1])
         ε = 1e-5
         m = net.m
 
-        # Check a subset of entries using finite differences
         for e in 1:min(3, m)
             z_pert = copy(net.z)
-            z_pert[e] -= ε  # Use negative perturbation since z starts at 1.0
+            z_pert[e] -= ε
 
-            # Update switching and re-solve
             update_switching!(prob, z_pert)
             sol_pert = solve!(prob)
 
-            fd_dθ_dz_col = (sol.θ - sol_pert.θ) / ε  # Reversed due to negative ε
+            fd_dva_dz_col = (sol.θ - sol_pert.θ) / ε  # Reversed due to negative ε
 
-            # Compare (larger tolerance for OPF due to active constraint changes)
-            # Note: Finite differences for constrained OPF are less accurate due to
-            # constraint activity changes - the key validation is ForwardDiff on DC PF
-            max_err = maximum(abs.(sens.dθ_dz[:, e] - fd_dθ_dz_col))
-            @test max_err < 0.05  # Larger tolerance for OPF finite differences
+            # Larger tolerance for OPF due to active constraint changes
+            max_err = maximum(abs.(Matrix(dva_dz)[:, e] - fd_dva_dz_col))
+            @test max_err < 0.05
 
-            # Restore
             update_switching!(prob, net.z)
         end
-
-        println("DC OPF Switching Sensitivity: finite diff verification passed")
     end
 
     @testset "AC Voltage-Power Sensitivity" begin
@@ -172,26 +154,22 @@ using Test
         PowerModels.compute_ac_pf!(net_data)
         state = ACPowerFlowState(net_data)
 
-        # Get analytical sensitivity
-        sens = calc_sensitivity(state, POWER)
+        # Get analytical sensitivity via new API
+        dvm_dp = calc_sensitivity(state, :vm, :p)
+        dvm_dq = calc_sensitivity(state, :vm, :q)
 
-        # Verify voltage magnitude sensitivity structure
-        @test size(sens.∂vm_∂p) == (state.n, state.n)
-        @test size(sens.∂vm_∂q) == (state.n, state.n)
+        # Verify structure
+        @test size(dvm_dp) == (state.n, state.n)
+        @test size(dvm_dq) == (state.n, state.n)
 
         # Basic sanity: sensitivities should be real and finite
-        @test all(isfinite, sens.∂vm_∂p)
-        @test all(isfinite, sens.∂vm_∂q)
+        @test all(isfinite, Matrix(dvm_dp))
+        @test all(isfinite, Matrix(dvm_dq))
 
         # Slack bus voltage should have zero sensitivity
-        # (slack bus voltage is fixed, so d|v_slack|/dp = 0)
         slack_idx = state.idx_slack
-        @test maximum(abs.(sens.∂vm_∂p[slack_idx, :])) < 1e-10
-        @test maximum(abs.(sens.∂vm_∂q[slack_idx, :])) < 1e-10
-
-        println("AC Voltage-Power Sensitivity: sanity checks passed")
+        @test maximum(abs.(Matrix(dvm_dp)[slack_idx, :])) < 1e-10
+        @test maximum(abs.(Matrix(dvm_dq)[slack_idx, :])) < 1e-10
     end
 
 end
-
-println("\nAll sensitivity verification tests passed!")
