@@ -23,7 +23,7 @@ Arguments
 
 Returns
 -------
-`VoltageSensitivityTopology` whose fields `p` and `q` store the Jacobians
+NamedTuple with fields `dvm_dg` and `dvm_db` storing the Jacobians
 ∂|V|/∂G and ∂|V|/∂B respectively, matching the ordering produced by
 `vectorize_laplacian_weights(net; full_nodes, full_edges)`.
 """
@@ -63,7 +63,7 @@ function voltage_topology_sensitivities(
     sensitivities_g = _vm_projection(vm, v_re, v_im, Δstate_g)
     sensitivities_b = _vm_projection(vm, v_re, v_im, Δstate_b)
 
-    return VoltageTopologySensitivity(sensitivities_g, sensitivities_b)
+    return (dvm_dg=sensitivities_g, dvm_db=sensitivities_b)
 end
 
 function _assert_pf_solution(
@@ -143,15 +143,15 @@ end
 # =============================================================================
 
 """
-    calc_sensitivity_switching(state::DCPowerFlowState) → DCPFSwitchingSens
+    calc_sensitivity_switching(state::DCPowerFlowState) → NamedTuple
 
 Compute switching sensitivity for DC power flow (not OPF).
 
-For DC power flow θ = L(z)⁺ p, the sensitivity of angles w.r.t. switching is:
+For DC power flow θ = L(sw)⁺ p, the sensitivity of angles w.r.t. switching is:
 
-    ∂θ/∂zₑ = -L⁺ · (∂L/∂zₑ) · θ
+    ∂θ/∂swₑ = -L⁺ · (∂L/∂swₑ) · θ
 
-where ∂L/∂zₑ = -bₑ · (aₑ · aₑ') is the rank-1 outer product of incidence column.
+where ∂L/∂swₑ = -bₑ · (aₑ · aₑ') is the rank-1 outer product of incidence column.
 
 This uses the formula from matrix perturbation theory (RandomizedSwitching pattern).
 
@@ -159,9 +159,9 @@ This uses the formula from matrix perturbation theory (RandomizedSwitching patte
 - `state`: DCPowerFlowState containing the solved power flow
 
 # Returns
-`DCPFSwitchingSens` with:
-- `dva_dz`: Jacobian ∂va/∂z (n × m) - voltage angles w.r.t. switching
-- `df_dz`: Jacobian ∂f/∂z (m × m) - flows w.r.t. switching
+NamedTuple with:
+- `dva_dsw`: Jacobian ∂va/∂sw (n × m) - voltage angles w.r.t. switching
+- `df_dsw`: Jacobian ∂f/∂sw (m × m) - flows w.r.t. switching
 """
 function calc_sensitivity_switching(state::DCPowerFlowState)
     net = state.net
@@ -179,52 +179,52 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
     θ_raw = L_pinv * p_balanced
 
     # Preallocate
-    dva_dz = zeros(n, m)
+    dva_dsw = zeros(n, m)
 
-    # For each edge e, compute ∂va/∂zₑ
+    # For each edge e, compute ∂va/∂swₑ
     for e in 1:m
         # Get incidence column for edge e: a_e = A[e, :]
         # Note: A is m × n, so we get the e-th row
         aₑ = Vector(net.A[e, :])
 
-        # ∂L/∂zₑ = -bₑ · (aₑ · aₑ')
+        # ∂L/∂swₑ = -bₑ · (aₑ · aₑ')
         # This is a rank-1 matrix
-        ∂L_∂zₑ = -net.b[e] * (aₑ * aₑ')
+        ∂L_∂swₑ = -net.b[e] * (aₑ * aₑ')
 
-        # ∂va_raw/∂zₑ = -L⁺ · ∂L/∂zₑ · va_raw
-        dva_raw_dzₑ = -L_pinv * ∂L_∂zₑ * θ_raw
+        # ∂va_raw/∂swₑ = -L⁺ · ∂L/∂swₑ · va_raw
+        dva_raw_dswₑ = -L_pinv * ∂L_∂swₑ * θ_raw
 
         # Account for centering: va = va_raw - va_raw[ref]
-        # So ∂va/∂zₑ = ∂va_raw/∂zₑ - (∂va_raw/∂zₑ)[ref] · 1
-        dva_dz[:, e] = dva_raw_dzₑ .- dva_raw_dzₑ[ref]
+        # So ∂va/∂swₑ = ∂va_raw/∂swₑ - (∂va_raw/∂swₑ)[ref] · 1
+        dva_dsw[:, e] = dva_raw_dswₑ .- dva_raw_dswₑ[ref]
     end
 
-    # Flow sensitivity: f = W · A · va where W = Diag(-b ⊙ z)
-    # fₑ = -bₑ · zₑ · (A[e,:] · va)
+    # Flow sensitivity: f = W · A · va where W = Diag(-b ⊙ sw)
+    # fₑ = -bₑ · swₑ · (A[e,:] · va)
     #
-    # ∂fₑ/∂zₑ' has two components:
-    # 1. Direct effect (if e' = e): ∂fₑ/∂zₑ = -bₑ · (A[e,:] · va)
-    # 2. Indirect effect via va: ∂fₑ/∂zₑ' = -bₑ · zₑ · (A[e,:] · ∂va/∂zₑ')
-    df_dz = zeros(m, m)
+    # ∂fₑ/∂swₑ' has two components:
+    # 1. Direct effect (if e' = e): ∂fₑ/∂swₑ = -bₑ · (A[e,:] · va)
+    # 2. Indirect effect via va: ∂fₑ/∂swₑ' = -bₑ · swₑ · (A[e,:] · ∂va/∂swₑ')
+    df_dsw = zeros(m, m)
 
-    W = Diagonal(-net.b .* net.z)
+    W = Diagonal(-net.b .* net.sw)
     for e_prime in 1:m
         # Indirect effect: all edges feel the change in va
-        df_dz[:, e_prime] = W * net.A * dva_dz[:, e_prime]
+        df_dsw[:, e_prime] = W * net.A * dva_dsw[:, e_prime]
 
         # Direct effect: only edge e_prime
-        df_dz[e_prime, e_prime] += -net.b[e_prime] * dot(net.A[e_prime, :], state.θ)
+        df_dsw[e_prime, e_prime] += -net.b[e_prime] * dot(net.A[e_prime, :], state.θ)
     end
 
-    return DCPFSwitchingSens(dva_dz, df_dz)
+    return (dva_dsw=dva_dsw, df_dsw=df_dsw)
 end
 
 """
-    calc_sensitivity_demand(state::DCPowerFlowState) → DCPFDemandSens
+    calc_sensitivity_demand(state::DCPowerFlowState) → NamedTuple
 
 Compute demand sensitivity for DC power flow (not OPF).
 
-For DC power flow va = L(z)⁺ p, the sensitivity of angles w.r.t. demand is:
+For DC power flow va = L(sw)⁺ p, the sensitivity of angles w.r.t. demand is:
 
     ∂va/∂d = -L⁺
 
@@ -234,7 +234,7 @@ since p = g - d and ∂p/∂d = -I.
 - `state`: DCPowerFlowState containing the solved power flow
 
 # Returns
-`DCPFDemandSens` with:
+NamedTuple with:
 - `dva_dd`: Jacobian ∂va/∂d (n × n) - voltage angles w.r.t. demand
 - `df_dd`: Jacobian ∂f/∂d (m × n) - flows w.r.t. demand
 """
@@ -246,8 +246,8 @@ function calc_sensitivity_demand(state::DCPowerFlowState)
     dva_dd = -state.L_pinv
 
     # ∂f/∂d = W · A · ∂va/∂d
-    W = Diagonal(-net.b .* net.z)
+    W = Diagonal(-net.b .* net.sw)
     df_dd = W * net.A * dva_dd
 
-    return DCPFDemandSens(dva_dd, df_dd)
+    return (dva_dd=dva_dd, df_dd=df_dd)
 end

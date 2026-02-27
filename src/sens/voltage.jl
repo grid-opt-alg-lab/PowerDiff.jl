@@ -8,9 +8,6 @@
 # of Node Voltages and Line Currents in Unbalanced Radial Electrical
 # Distribution Networks", IEEE Trans. Smart Grid, vol. 4, no. 2, pp. 741-750, 2013.
 
-using LinearAlgebra
-using SparseArrays
-
 # =============================================================================
 # Voltage-Power Sensitivity
 # =============================================================================
@@ -57,7 +54,7 @@ function calc_voltage_power_sensitivities(
     ∂v_∂p, ∂vm_∂p = calc_voltage_active_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
     ∂v_∂q, ∂vm_∂q = calc_voltage_reactive_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
 
-    return VoltagePowerSensitivity(∂v_∂p, ∂v_∂q, ∂vm_∂p, ∂vm_∂q)
+    return (dv_dp=∂v_∂p, dv_dq=∂v_∂q, dvm_dp=∂vm_∂p, dvm_dq=∂vm_∂q)
 end
 
 """
@@ -125,8 +122,8 @@ function calc_voltage_active_power_sensitivities(
             x = A \ b
 
             # Convert to voltage sensitivities
-            # x = [∂v_re; ∂v_im], so ∂v = ∂v_re - im*∂v_im (conjugate convention)
-            ∂v_∂p[:, k] = x[1:d] - im * x[d+1:2d]
+            # x = [∂v_re; ∂v_im], so ∂v = ∂v_re + j*∂v_im (true complex derivative)
+            ∂v_∂p[:, k] = x[1:d] + im * x[d+1:2d]
 
             # Magnitude sensitivity: ∂|v|/∂p = Re(∂v/∂p · conj(v)) / |v|
             ∂vm_∂p[:, k] = real.(∂v_∂p[:, k] .* conj.(v_)) ./ abs.(v_)
@@ -175,16 +172,15 @@ function calc_voltage_reactive_power_sensitivities(
     for k in 1:d
         if abs(v_[k]) > 1e-6
             # Right-hand side: unit perturbation in reactive power at bus k
-            # Note: power flow equation is p + jq = conj(v) * Y * v
-            # Derivative w.r.t. q has opposite sign in imaginary part
             b = zeros(2d)
-            b[d + k] = -1.0  # Note the negative sign
+            b[d + k] = 1.0
 
             # Solve the linear system
             x = A \ b
 
             # Convert to voltage sensitivities
-            ∂v_∂q[:, k] = x[1:d] - im * x[d+1:2d]
+            # x = [∂v_re; ∂v_im], so ∂v = ∂v_re + j*∂v_im (true complex derivative)
+            ∂v_∂q[:, k] = x[1:d] + im * x[d+1:2d]
 
             # Magnitude sensitivity
             ∂vm_∂q[:, k] = real.(∂v_∂q[:, k] .* conj.(v_)) ./ abs.(v_)
@@ -213,13 +209,16 @@ end
 Build the linearized system matrix A for voltage-power sensitivity computation.
 
 The matrix A relates perturbations in (v_re, v_im) to perturbations in (p, q)
-based on the power flow equations:
-    p = Re(conj(v) * (Y * v))
-    q = Im(conj(v) * (Y * v))
+based on the standard-convention power flow equations:
+
+    p + jq = V · conj(Y · V) = conj(conj(V) · Y · V)
+    p = Re(conj(V) · Y · V)
+    q = -Im(conj(V) · Y · V)   [standard convention]
 
 The matrix has structure:
-    A = [∂p/∂v_re  ∂p/∂v_im]
-        [∂q/∂v_re  ∂q/∂v_im]
+
+    A = [∂P/∂v_re   ∂P/∂v_im]
+        [∂Q/∂v_re   ∂Q/∂v_im]
 
 evaluated at the operating point (v, Y).
 """
@@ -247,16 +246,18 @@ function _build_voltage_sensitivity_matrix(
         for j in 1:d
             if i == j
                 # Diagonal blocks include current injection terms
+                # Top block: ∂P/∂(v_re, v_im) — unchanged
                 A[i, j] = real(I[i]) + real(H[i, j])
-                A[d+i, j] = imag(I[i]) + imag(H[i, j])
                 A[i, d+j] = imag(I[i]) - imag(H[i, j])
-                A[d+i, d+j] = real(H[i, j]) - real(I[i])
+                # Bottom block: ∂Q/∂(v_re, v_im) — negated from Im(conj(V)·Y·V)
+                A[d+i, j] = -(imag(I[i]) + imag(H[i, j]))
+                A[d+i, d+j] = -(real(H[i, j]) - real(I[i]))
             else
                 # Off-diagonal blocks
                 A[i, j] = real(H[i, j])
-                A[d+i, j] = imag(H[i, j])
                 A[i, d+j] = -imag(H[i, j])
-                A[d+i, d+j] = real(H[i, j])
+                A[d+i, j] = -imag(H[i, j])
+                A[d+i, d+j] = -real(H[i, j])
             end
         end
     end

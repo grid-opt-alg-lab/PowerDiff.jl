@@ -193,8 +193,8 @@ function calc_ac_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothi
     end
 
     z0 = ac_flatten_variables(sol, prob)
-    z_switch = prob.network.z
-    J = ForwardDiff.jacobian(z -> ac_kkt(z, prob, z_switch), z0)
+    sw = prob.network.sw
+    J = ForwardDiff.jacobian(z -> ac_kkt(z, prob, sw), z0)
 
     return J
 end
@@ -207,12 +207,12 @@ end
 Compute all branch flows given voltage state and switching state.
 Returns vectors of p_fr, q_fr, p_to, q_to indexed by branch number.
 
-The switching variable z_l multiplies each flow, so z_l=0 means the branch
-contributes zero flow (open), z_l=1 means full flow (closed).
+The switching variable sw_l multiplies each flow, so sw_l=0 means the branch
+contributes zero flow (open), sw_l=1 means full flow (closed).
 """
-function _compute_branch_flows(va, vm, net::ACNetwork, ref, z_switch)
+function _compute_branch_flows(va, vm, net::ACNetwork, ref, sw)
     m = net.m
-    T = promote_type(eltype(va), eltype(vm), eltype(z_switch))
+    T = promote_type(eltype(va), eltype(vm), eltype(sw))
     p_fr = zeros(T, m)
     q_fr = zeros(T, m)
     p_to = zeros(T, m)
@@ -230,7 +230,7 @@ function _compute_branch_flows(va, vm, net::ACNetwork, ref, z_switch)
         b_to_shunt = branch["b_to"]
         tm = branch["tap"]^2
 
-        z_l = z_switch[l]
+        sw_l = sw[l]
 
         vm_fr = vm[f_bus]
         vm_to = vm[t_bus]
@@ -238,20 +238,20 @@ function _compute_branch_flows(va, vm, net::ACNetwork, ref, z_switch)
         va_to = va[t_bus]
 
         # From side
-        p_fr[l] = z_l * ((g_br + g_fr_shunt)/tm * vm_fr^2 +
+        p_fr[l] = sw_l *((g_br + g_fr_shunt)/tm * vm_fr^2 +
                   (-g_br*tr + b_br*ti)/tm * (vm_fr * vm_to * cos(va_fr - va_to)) +
                   (-b_br*tr - g_br*ti)/tm * (vm_fr * vm_to * sin(va_fr - va_to)))
 
-        q_fr[l] = z_l * (-(b_br + b_fr_shunt)/tm * vm_fr^2 -
+        q_fr[l] = sw_l * (-(b_br + b_fr_shunt)/tm * vm_fr^2 -
                   (-b_br*tr - g_br*ti)/tm * (vm_fr * vm_to * cos(va_fr - va_to)) +
                   (-g_br*tr + b_br*ti)/tm * (vm_fr * vm_to * sin(va_fr - va_to)))
 
         # To side
-        p_to[l] = z_l * ((g_br + g_to_shunt) * vm_to^2 +
+        p_to[l] = sw_l * ((g_br + g_to_shunt) * vm_to^2 +
                   (-g_br*tr - b_br*ti)/tm * (vm_to * vm_fr * cos(va_to - va_fr)) +
                   (-b_br*tr + g_br*ti)/tm * (vm_to * vm_fr * sin(va_to - va_fr)))
 
-        q_to[l] = z_l * (-(b_br + b_to_shunt) * vm_to^2 -
+        q_to[l] = sw_l * (-(b_br + b_to_shunt) * vm_to^2 -
                   (-b_br*tr + g_br*ti)/tm * (vm_to * vm_fr * cos(va_fr - va_to)) +
                   (-g_br*tr - b_br*ti)/tm * (vm_to * vm_fr * sin(va_to - va_fr)))
     end
@@ -264,7 +264,7 @@ end
 # =============================================================================
 
 """
-Compute the reduced-space Lagrangian L(va, vm, pg, qg; duals, z_switch).
+Compute the reduced-space Lagrangian L(va, vm, pg, qg; duals, sw).
 
 In the reduced space, flows are functions of (va, vm), not separate variables.
 ForwardDiff.gradient of this function w.r.t. [va; vm; pg; qg] gives the
@@ -275,7 +275,7 @@ Uses the JuMP/MOI dual sign convention:
     L = f(x) - Σ dual_i * normalized_residual_i
 where normalized_residual = constraint_function - set_value.
 """
-function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, z_switch)
+function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw)
     net = prob.network
     ref = prob.ref
     n, m, k = net.n, net.m, prob.n_gen
@@ -286,10 +286,10 @@ function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, z_switch)
     qg = x_primal[2n+k+1:2n+2k]
 
     # Compute reduced-space flows
-    p_fr, q_fr, p_to, q_to = _compute_branch_flows(va, vm, net, ref, z_switch)
+    p_fr, q_fr, p_to, q_to = _compute_branch_flows(va, vm, net, ref, sw)
 
     # Use widest type from computed flows, which captures both inner (x_primal) and
-    # outer (z_switch) ForwardDiff dual types in the nested differentiation.
+    # outer (sw) ForwardDiff dual types in the nested differentiation.
     T = eltype(p_fr)
     L = zero(T)
 
@@ -457,11 +457,11 @@ end
 # =============================================================================
 
 """
-    ac_kkt(z::AbstractVector, prob::ACOPFProblem, z_switch::AbstractVector)
+    ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
 
 Evaluate the KKT conditions for AC OPF at the given variable vector.
 
-The switching state z_switch is passed as a separate parameter to enable
+The switching state sw is passed as a separate parameter to enable
 differentiation with respect to switching using ForwardDiff.
 
 Returns a vector of KKT residuals (should be zero at optimum).
@@ -471,7 +471,7 @@ Returns a vector of KKT residuals (should be zero at optimum).
 2. Primal feasibility: power balance, reference bus
 3. Complementary slackness for all inequality constraints
 """
-function ac_kkt(z::AbstractVector, prob::ACOPFProblem, z_switch::AbstractVector)
+function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
     vars = ac_unflatten_variables(z, prob)
     net = prob.network
     ref = prob.ref
@@ -480,10 +480,10 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, z_switch::AbstractVector)
     va, vm = vars.va, vars.vm
     pg, qg = vars.pg, vars.qg
 
-    T = promote_type(eltype(z), eltype(z_switch))
+    T = promote_type(eltype(z), eltype(sw))
 
     # Compute branch flows as functions of voltages
-    p_fr, q_fr, p_to, q_to = _compute_branch_flows(va, vm, net, ref, z_switch)
+    p_fr, q_fr, p_to, q_to = _compute_branch_flows(va, vm, net, ref, sw)
 
     # Build KKT residual vector
     K = T[]
@@ -493,7 +493,7 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, z_switch::AbstractVector)
     # =========================================================================
     x_primal = vcat(va, vm, pg, qg)
     grad = ForwardDiff.gradient(
-        x -> _reduced_lagrangian(x, vars, prob, z_switch),
+        x -> _reduced_lagrangian(x, vars, prob, sw),
         x_primal
     )
     # grad = [∂L/∂va; ∂L/∂vm; ∂L/∂pg; ∂L/∂qg]
@@ -604,7 +604,7 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, z_switch::AbstractVector)
 end
 
 # Convenience method using prob's switching state
-ac_kkt(z::AbstractVector, prob::ACOPFProblem) = ac_kkt(z, prob, prob.network.z)
+ac_kkt(z::AbstractVector, prob::ACOPFProblem) = ac_kkt(z, prob, prob.network.sw)
 
 # =============================================================================
 # Switching Sensitivity
@@ -622,8 +622,8 @@ Matrix of size (kkt_dims × m).
 """
 function calc_ac_kkt_jacobian_switching(prob::ACOPFProblem, sol::ACOPFSolution)
     z0 = ac_flatten_variables(sol, prob)
-    z_switch = prob.network.z
-    J_s = ForwardDiff.jacobian(s -> ac_kkt(z0, prob, s), z_switch)
+    sw = prob.network.sw
+    J_s = ForwardDiff.jacobian(s -> ac_kkt(z0, prob, s), sw)
     return J_s
 end
 
@@ -645,38 +645,38 @@ function _ensure_ac_solved!(prob::ACOPFProblem)::ACOPFSolution
 end
 
 """
-    _get_ac_dx_ds!(prob::ACOPFProblem) → Matrix{Float64}
+    _get_ac_dz_dsw!(prob::ACOPFProblem) → Matrix{Float64}
 
 Get or compute the full KKT derivative matrix w.r.t. switching.
 Uses cached value if available, otherwise computes and caches.
 
 Uses the implicit function theorem on KKT conditions:
-∂x/∂s = -(∂K/∂x)⁻¹ · (∂K/∂s)
+∂z/∂sw = -(∂K/∂z)⁻¹ · (∂K/∂sw)
 """
-function _get_ac_dx_ds!(prob::ACOPFProblem)::Matrix{Float64}
-    if isnothing(prob.cache.dx_ds)
+function _get_ac_dz_dsw!(prob::ACOPFProblem)::Matrix{Float64}
+    if isnothing(prob.cache.dz_dsw)
         sol = _ensure_ac_solved!(prob)
 
-        J_x = calc_ac_kkt_jacobian(prob; sol=sol)  # ∂K/∂x
-        J_s = calc_ac_kkt_jacobian_switching(prob, sol)  # ∂K/∂s
+        J_z = calc_ac_kkt_jacobian(prob; sol=sol)   # ∂K/∂z
+        J_sw = calc_ac_kkt_jacobian_switching(prob, sol)  # ∂K/∂sw
 
-        # Implicit function theorem: ∂x/∂s = -(∂K/∂x)⁻¹ · (∂K/∂s)
-        prob.cache.dx_ds = try
-            -J_x \ J_s
+        # Implicit function theorem: ∂z/∂sw = -(∂K/∂z)⁻¹ · (∂K/∂sw)
+        prob.cache.dz_dsw = try
+            -J_z \ J_sw
         catch e
             if e isa LinearAlgebra.SingularException
                 ε = 1e-10
-                -((J_x + ε * I) \ J_s)
+                -((J_z + ε * I) \ J_sw)
             else
                 rethrow(e)
             end
         end
     end
-    return prob.cache.dx_ds
+    return prob.cache.dz_dsw
 end
 
 """
-    calc_sensitivity_switching(prob::ACOPFProblem) → ACOPFSwitchingSens
+    calc_sensitivity_switching(prob::ACOPFProblem) → NamedTuple
 
 Compute sensitivities of AC OPF solution with respect to switching variables.
 
@@ -684,20 +684,20 @@ Uses cached KKT derivatives for efficiency — multiple calls with different
 operands share the same expensive Jacobian computation.
 
 # Returns
-`ACOPFSwitchingSens` containing Jacobians of solution variables w.r.t. switching:
-- `dvm_dz`: ∂vm/∂z (n × m) - voltage magnitudes w.r.t. switching
-- `dva_dz`: ∂va/∂z (n × m) - voltage angles w.r.t. switching
-- `dpg_dz`: ∂pg/∂z (k × m) - active generation w.r.t. switching
-- `dqg_dz`: ∂qg/∂z (k × m) - reactive generation w.r.t. switching
+NamedTuple containing Jacobians of solution variables w.r.t. switching:
+- `dvm_dsw`: ∂vm/∂sw (n × m) - voltage magnitudes w.r.t. switching
+- `dva_dsw`: ∂va/∂sw (n × m) - voltage angles w.r.t. switching
+- `dpg_dsw`: ∂pg/∂sw (k × m) - active generation w.r.t. switching
+- `dqg_dsw`: ∂qg/∂sw (k × m) - reactive generation w.r.t. switching
 """
 function calc_sensitivity_switching(prob::ACOPFProblem)
-    dx_ds = _get_ac_dx_ds!(prob)
+    dz_dsw = _get_ac_dz_dsw!(prob)
     idx = ac_kkt_indices(prob)
 
-    dva_ds = dx_ds[idx.va, :]
-    dvm_ds = dx_ds[idx.vm, :]
-    dpg_ds = dx_ds[idx.pg, :]
-    dqg_ds = dx_ds[idx.qg, :]
-
-    return ACOPFSwitchingSens(dvm_ds, dva_ds, dpg_ds, dqg_ds)
+    return (
+        dvm_dsw = dz_dsw[idx.vm, :],
+        dva_dsw = dz_dsw[idx.va, :],
+        dpg_dsw = dz_dsw[idx.pg, :],
+        dqg_dsw = dz_dsw[idx.qg, :],
+    )
 end

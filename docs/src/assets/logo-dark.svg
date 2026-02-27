@@ -10,7 +10,7 @@
       <stop offset="0%" stop-color="#5A82E6"/>
       <stop offset="100%" stop-color="#B07ACC"/>
     </linearGradient>
-    <linearGradient id="g-pg" x1="216" y1="120" x2="128" y2="193" gradientUnits="userSpaceOnUse">
+    <linearGradient id="g-pg" x1="216" y1="120" x2="128" y2="206" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#B07ACC"/>
       <stop offset="100%" stop-color="#4FB838"/>
     </linearGradient>
@@ -35,15 +35,15 @@
   <!-- Network edges: muted (base topology) -->
   <g stroke="#444" stroke-width="2.5" stroke-linecap="round" fill="none">
     <line x1="128" y1="34" x2="216" y2="120"/>
-    <line x1="40" y1="120" x2="128" y2="193"/>
-    <line x1="128" y1="34" x2="128" y2="193"/>
+    <line x1="40" y1="120" x2="128" y2="206"/>
+    <line x1="128" y1="34" x2="128" y2="206"/>
   </g>
 
   <!-- Network edges: gradient (sensitivity / differentiation flow) -->
   <g stroke-width="3.5" stroke-linecap="round" fill="none">
     <line x1="128" y1="34" x2="40" y2="120" stroke="url(#g-rb)"/>
     <line x1="40" y1="120" x2="216" y2="120" stroke="url(#g-bp)"/>
-    <line x1="216" y1="120" x2="128" y2="193" stroke="url(#g-pg)"/>
+    <line x1="216" y1="120" x2="128" y2="206" stroke="url(#g-pg)"/>
   </g>
 
   <!-- Bus nodes (brightened Julia colors for dark bg) -->
@@ -51,7 +51,7 @@
     <circle cx="128" cy="34" r="16" fill="#E05A52"/>
     <circle cx="40" cy="120" r="16" fill="#5A82E6"/>
     <circle cx="216" cy="120" r="16" fill="#B07ACC"/>
-    <circle cx="128" cy="193" r="16" fill="#4FB838"/>
+    <circle cx="128" cy="206" r="16" fill="#4FB838"/>
   </g>
 
   <!-- Glossy highlights on nodes -->
@@ -59,7 +59,7 @@
     <circle cx="122" cy="28" r="5.5"/>
     <circle cx="34" cy="114" r="5.5"/>
     <circle cx="210" cy="114" r="5.5"/>
-    <circle cx="122" cy="187" r="5.5"/>
+    <circle cx="122" cy="200" r="5.5"/>
   </g>
 
 </svg>

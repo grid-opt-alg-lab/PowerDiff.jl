@@ -1,0 +1,7 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+PowerModelsDiff = "4fa8226c-b122-4e48-8217-6f318ba8ef74"
+PowerModels = "c36e90e8-916a-50a6-bd94-075b64ef4655"
+
+[sources]
+PowerModelsDiff = {path = ".."}

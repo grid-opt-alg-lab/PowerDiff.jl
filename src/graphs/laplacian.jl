@@ -1,5 +1,3 @@
-using BlockArrays
-
 """
 Generic construction of Laplacian matrix with vectorized weights and the full incidence matrix.
 """
@@ -60,7 +58,6 @@ function calc_incidence_matrix(net::Dict;
     full_nodes::Bool=true,full_edges::Bool=false)
 
     num_bus = length(net["bus"])
-    num_branch = length(net["branch"])
     A_branch = PM.calc_basic_incidence_matrix(net)
     
     if full_nodes && !full_edges

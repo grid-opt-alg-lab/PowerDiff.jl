@@ -12,9 +12,6 @@
 # - Constraints are strictly interior (no active inequalities)
 # For binding constraints, consider using regularization or active-set methods.
 
-using LinearAlgebra
-using SparseArrays
-
 """
     calc_kkt_jacobian_flowlimit(prob::DCOPFProblem, sol::DCOPFSolution)
 

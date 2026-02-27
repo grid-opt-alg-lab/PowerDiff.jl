@@ -7,30 +7,24 @@
 #
 # Design note: All mappings are currently identity (1:n → 1:n) because
 # make_basic_network() guarantees sequential 1-based indexing. The mapping
-# infrastructure exists so that Sensitivity{F,O,P} exposes row_to_id/col_to_id
+# infrastructure exists so that Sensitivity{T} exposes row_to_id/col_to_id
 # as public API. Supporting non-basic networks in the future would only
 # require implementing non-identity versions of _bus_mapping(), _branch_mapping(),
 # and _gen_mapping() — no changes to the Sensitivity type or interface.jl needed.
 #
 # Following PowerModels' AdmittanceMatrix pattern for consistent indexing.
-# Uses a module-level cache for identity mappings to avoid repeated allocation.
-
-# Module-level cache: dimension → (idx_to_id, id_to_idx)
-const _IDENTITY_MAPPING_CACHE = Dict{Int, Tuple{Vector{Int}, Dict{Int,Int}}}()
 
 """
     _identity_mapping(n::Int) → (idx_to_id, id_to_idx)
 
-Get or create a cached identity mapping for dimension `n`.
+Create an identity mapping for dimension `n`.
 Since `make_basic_network()` produces sequential 1-based indexing,
 all mappings are identity (i → i).
 """
 function _identity_mapping(n::Int)
-    get!(_IDENTITY_MAPPING_CACHE, n) do
-        idx_to_id = collect(1:n)
-        id_to_idx = Dict(i => i for i in 1:n)
-        (idx_to_id, id_to_idx)
-    end
+    idx_to_id = collect(1:n)
+    id_to_idx = Dict(i => i for i in 1:n)
+    (idx_to_id, id_to_idx)
 end
 
 """

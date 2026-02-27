@@ -18,7 +18,7 @@ The admittance matrix is reconstructed as:
     Y = A' * Diag(g + j*b) * A + Diag(g_shunt + j*b_shunt)
 
 For switching-aware formulation:
-    Y(z) = A' * Diag((g + j*b) .* z) * A + Diag(g_shunt + j*b_shunt)
+    Y(sw) = A' * Diag((g + j*b) .* sw) * A + Diag(g_shunt + j*b_shunt)
 
 # Fields
 - `n`: Number of buses
@@ -29,7 +29,7 @@ For switching-aware formulation:
 - `b`: Branch susceptances (note: typically negative for inductive lines)
 - `g_shunt`: Shunt conductances per bus (from shunts + line charging)
 - `b_shunt`: Shunt susceptances per bus
-- `z`: Branch switching states ∈ [0,1]^m
+- `sw`: Branch switching states ∈ [0,1]^m
 - `is_switchable`: Which branches can be switched
 - `idx_slack`: Slack bus index
 - `vm_min`, `vm_max`: Voltage magnitude limits per bus
@@ -51,7 +51,7 @@ struct ACNetwork <: AbstractPowerNetwork
     b_shunt::Vector{Float64}
 
     # Switching
-    z::Vector{Float64}
+    sw::Vector{Float64}
     is_switchable::BitVector
 
     # Reference
@@ -220,7 +220,7 @@ function ACNetwork(net::Dict{String,<:Any}; idx_slack::Union{Nothing,Int}=nothin
     end
 
     # All branches active by default
-    z = ones(n_branch)
+    sw = ones(n_branch)
     is_switchable = trues(n_branch)
 
     # Find slack bus
@@ -239,7 +239,7 @@ function ACNetwork(net::Dict{String,<:Any}; idx_slack::Union{Nothing,Int}=nothin
         n_bus, n_branch,
         sparse(A), incidences,
         g, b, g_shunt, b_shunt,
-        z, is_switchable,
+        sw, is_switchable,
         idx_slack,
         vm_min, vm_max, i_max
     )
@@ -291,7 +291,7 @@ function ACNetwork(Y::AbstractMatrix{<:Complex}; idx_slack::Int=1)
         b_shunt[j] -= b[e]
     end
 
-    z = ones(m)
+    sw = ones(m)
     is_switchable = trues(m)
     vm_min = fill(0.9, n)
     vm_max = fill(1.1, n)
@@ -301,7 +301,7 @@ function ACNetwork(Y::AbstractMatrix{<:Complex}; idx_slack::Int=1)
         n, m,
         A, edges,
         g, b, g_shunt, b_shunt,
-        z, is_switchable,
+        sw, is_switchable,
         idx_slack,
         vm_min, vm_max, i_max
     )
@@ -336,14 +336,14 @@ function admittance_matrix(net::ACNetwork)
 end
 
 """
-    admittance_matrix(net::ACNetwork, z::AbstractVector) → SparseMatrixCSC{ComplexF64}
+    admittance_matrix(net::ACNetwork, sw::AbstractVector) → SparseMatrixCSC{ComplexF64}
 
 Reconstruct admittance matrix with switching states.
 
-    Y(z) = A' * Diag((g + j*b) .* z) * A + Diag(g_shunt + j*b_shunt)
+    Y(sw) = A' * Diag((g + j*b) .* sw) * A + Diag(g_shunt + j*b_shunt)
 """
-function admittance_matrix(net::ACNetwork, z::AbstractVector)
-    W = Diagonal((net.g .+ im .* net.b) .* z)
+function admittance_matrix(net::ACNetwork, sw::AbstractVector)
+    W = Diagonal((net.g .+ im .* net.b) .* sw)
     return transpose(net.A) * W * net.A + Diagonal(net.g_shunt .+ im .* net.b_shunt)
 end
 

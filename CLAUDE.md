@@ -23,6 +23,10 @@ julia --project=. test/unified/test_interface.jl
 
 # Run MWE (minimum working example)
 julia --project=. test/mwe_unified.jl
+
+# Build documentation
+julia --project=docs -e 'using Pkg; Pkg.instantiate()'
+julia --project=docs docs/make.jl
 ```
 
 **Test Data**: Tests use PowerModels' built-in MATPOWER cases (case5.m, case14.m, etc.) located at:
@@ -56,10 +60,10 @@ AbstractOPFProblem
 The **primary interface** uses symbol dispatch:
 
 ```julia
-calc_sensitivity(state, :operand, :parameter) → Sensitivity{F, O, P}
+calc_sensitivity(state, :operand, :parameter) → Sensitivity{T}
 ```
 
-Returns a `Sensitivity{F,O,P}` typed result that acts like a matrix but carries formulation/operand/parameter type tags and bidirectional index mappings.
+Returns a `Sensitivity{T}` result that acts like a matrix but carries formulation/operand/parameter as symbol fields, plus bidirectional index mappings.
 
 **Operand symbols** (what we differentiate):
 - `:va` - Voltage phase angles (DC PF, DC OPF, AC OPF)
@@ -73,7 +77,7 @@ Returns a `Sensitivity{F,O,P}` typed result that acts like a matrix but carries 
 
 **Parameter symbols** (what we differentiate w.r.t.):
 - `:d` or `:pd` - Demand
-- `:z` - Switching states
+- `:sw` - Switching states
 - `:cq`, `:cl` - Cost coefficients (DC OPF)
 - `:fmax` - Flow limits (DC OPF)
 - `:b` - Susceptances (DC OPF)
@@ -83,52 +87,36 @@ Returns a `Sensitivity{F,O,P}` typed result that acts like a matrix but carries 
 ```julia
 # DC Power Flow
 pf_state = DCPowerFlowState(net, d)
-dva_dd = calc_sensitivity(pf_state, :va, :d)    # Sensitivity{DCPF, VoltageAngle, Demand}
-df_dz = calc_sensitivity(pf_state, :f, :z)      # Sensitivity{DCPF, Flow, Switching}
+dva_dd = calc_sensitivity(pf_state, :va, :d)    # Sensitivity{Float64}, .formulation == :dcpf
+df_dsw = calc_sensitivity(pf_state, :f, :sw)     # Sensitivity{Float64}, .formulation == :dcpf
 
 # DC OPF (has LMP because it has duals)
 prob = DCOPFProblem(net, d)
 solve!(prob)
-dlmp_dd = calc_sensitivity(prob, :lmp, :d)      # Sensitivity{DCOPF, LMP, Demand}
-dpg_dcq = calc_sensitivity(prob, :pg, :cq)      # Sensitivity{DCOPF, Generation, QuadraticCost}
+dlmp_dd = calc_sensitivity(prob, :lmp, :d)      # .formulation == :dcopf, .operand == :lmp
+dpg_dcq = calc_sensitivity(prob, :pg, :cq)      # .formulation == :dcopf, .operand == :pg
 
 # AC Power Flow
-dvm_dp = calc_sensitivity(ac_state, :vm, :p)    # Sensitivity{ACPF, VoltageMagnitude, ActivePower}
+dvm_dp = calc_sensitivity(ac_state, :vm, :p)    # .formulation == :acpf, .operand == :vm
 
 # AC OPF
 ac_prob = ACOPFProblem(pm_data)
-dvm_dz = calc_sensitivity(ac_prob, :vm, :z)     # Sensitivity{ACOPF, VoltageMagnitude, Switching}
+dvm_dsw = calc_sensitivity(ac_prob, :vm, :sw)    # .formulation == :acopf, .operand == :vm
 
 # Invalid combinations throw ArgumentError
 calc_sensitivity(pf_state, :lmp, :d)  # ERROR: no LMP for power flow
 ```
 
-### Singleton Type API (Power Users)
+### Sensitivity{T} Return Type
 
-Symbols map to singleton types internally. Power users can call singletons directly for type dispatch:
-
-```julia
-# Equivalent to calc_sensitivity(prob, :lmp, :d)
-sens = calc_sensitivity(prob, LMP(), Demand())   # Sensitivity{DCOPF, LMP, Demand}
-
-# Dispatch on result type
-process(s::Sensitivity{DCOPF, LMP, Demand}) = "DC OPF LMP-demand"
-process(s::Sensitivity{F, O, Switching}) where {F, O} = "Any switching sensitivity"
-```
-
-### Sensitivity{F,O,P,T} Return Type
-
-`Sensitivity{F,O,P,T} <: AbstractMatrix{T}` — acts like a matrix with type tags:
-- `F <: AbstractFormulation`: DCOPF, ACOPF, DCPF, ACPF
-- `O <: AbstractOperand`: VoltageAngle, VoltageMagnitude, Generation, LMP, Flow, etc.
-- `P <: AbstractParameter`: Demand, Switching, QuadraticCost, LinearCost, etc.
+`Sensitivity{T} <: AbstractMatrix{T}` — acts like a matrix with symbol metadata:
 - `T <: Number`: Element type (Float64 for most, ComplexF64 for `:v` operand)
-
-The 4th parameter `T` is inferred automatically. Three-parameter matching still works:
-`Sensitivity{DCOPF, LMP, Demand}` matches `Sensitivity{DCOPF, LMP, Demand, Float64}`.
 
 Fields:
 - `matrix`: The sensitivity data (Matrix{T})
+- `formulation`: Symbol (:dcpf, :dcopf, :acpf, :acopf)
+- `operand`: Symbol (:va, :vm, :pg, :qg, :f, :lmp, :im, :v)
+- `parameter`: Symbol (:d, :sw, :cq, :cl, :fmax, :b, :p, :q)
 - `row_to_id`, `id_to_row`: Row index ↔ element ID
 - `col_to_id`, `id_to_col`: Column index ↔ element ID
 
@@ -145,13 +133,13 @@ To find connections:
 - Generator i is at bus: `net["gen"]["$i"]["gen_bus"]`
 - Branch j connects: `net["branch"]["$j"]["f_bus"]` → `net["branch"]["$j"]["t_bus"]`
 
-Example: `dg_dz[i,j]` = ∂(generation at generator i) / ∂(switching state of branch j)
+Example: `dg_dsw[i,j]` = ∂(generation at generator i) / ∂(switching state of branch j)
 
 ### DC OPF - B-theta Formulation
 
-Uses susceptance-weighted Laplacian `L = A' * Diagonal(-b .* z) * A`:
+Uses susceptance-weighted Laplacian `L = A' * Diagonal(-b .* sw) * A`:
 
-- `DCNetwork`: Network data (topology `A`, susceptances `b`, switching `z`, limits, costs)
+- `DCNetwork`: Network data (topology `A`, susceptances `b`, switching `sw`, limits, costs)
 - `DCOPFProblem`: JuMP optimization wrapper with `DCSensitivityCache` for efficient KKT reuse
 - `DCOPFSolution`: Primal (θ, g, f) and dual variables (ν_bal for LMPs)
 - `DCPowerFlowState`: Non-OPF power flow (θ = L⁺ * p, no optimization)
@@ -161,7 +149,7 @@ Uses susceptance-weighted Laplacian `L = A' * Diagonal(-b .* z) * A`:
 - `ACOPFProblem`: Full nonlinear AC OPF via Ipopt, with `ACSensitivityCache` for efficient KKT reuse
 - `ACOPFSolution`: Primal (va, vm, pg, qg) and dual variables
 - Switching sensitivity via KKT implicit differentiation with ForwardDiff
-- Multiple operands (`:vm`, `:va`, `:pg`, `:qg`) share a single cached `dx_ds` computation
+- Multiple operands (`:vm`, `:va`, `:pg`, `:qg`) share a single cached `dz_dsw` computation
 
 ### KKT Systems
 
@@ -184,20 +172,19 @@ calc_ac_kkt_jacobian(prob)     # Dense Jacobian via ForwardDiff
 src/
 ├── PowerModelsDiff.jl          # Main module with exports
 ├── types/
-│   ├── abstract.jl             # Abstract type hierarchy + singleton tag bases
-│   ├── tags.jl                 # Singleton type tags (DCOPF, LMP, Demand, etc.)
+│   ├── abstract.jl             # Abstract type hierarchy
 │   ├── dc_network.jl           # DCNetwork, DCPowerFlowState, DCOPFSolution + constructors
 │   ├── dc_opf_problem.jl       # DCOPFProblem, DCSensitivityCache + constructors
 │   ├── ac_network.jl           # ACNetwork, ACPowerFlowState
 │   ├── ac_opf_problem.jl       # ACOPFProblem, ACOPFSolution, ACSensitivityCache + constructors
-│   └── sensitivities.jl        # Sensitivity{F,O,P,T}, bundled types (DCPFSwitchingSens, ACOPFSwitchingSens)
+│   └── sensitivities.jl        # Sensitivity{T} <: AbstractMatrix{T}
 ├── prob/
 │   ├── dc_opf.jl               # DC OPF solve!, update_demand!
 │   ├── kkt_dc_opf.jl           # DC KKT system, Jacobians, cached parameter derivatives
 │   ├── ac_opf_solve.jl         # AC OPF solve!, update_switching!
 │   └── kkt_ac_opf.jl           # AC KKT system, ForwardDiff Jacobians, cached switching sensitivity
 ├── sens/
-│   ├── interface.jl            # Symbol dispatch + singleton dispatch → Sensitivity{F,O,P,T}
+│   ├── interface.jl            # Symbol dispatch → Sensitivity{T}
 │   ├── index_mapping.jl        # Bidirectional index mappings (bus/branch/gen)
 │   ├── topology.jl             # DC PF switching/demand sensitivity
 │   ├── demand.jl               # DC OPF demand sensitivity (cached)
@@ -214,10 +201,26 @@ src/
 test/
 ├── runtests.jl                 # Main test runner
 ├── test_ac_opf_sens.jl         # AC OPF sensitivity tests
+├── test_ac_pf_verification.jl  # AC PF finite-difference verification
+├── test_sensitivity_coverage.jl # Exhaustive (operand, parameter) coverage tests
+├── test_dc_opf_verification.jl # DC OPF finite-difference verification
+├── test_update_switching.jl    # update_switching! correctness tests
 ├── unified/
-│   ├── test_interface.jl       # Unified API tests (singleton types)
+│   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
 │   └── test_sensitivity_verification.jl  # ForwardDiff verification
 └── mwe_unified.jl              # Minimum working example (symbol API)
+
+docs/
+├── Project.toml                # Documenter.jl dependencies
+├── make.jl                     # Documenter build script
+└── src/
+    ├── index.md                # Landing page
+    ├── getting-started.md      # DC PF → DC OPF → AC PF → AC OPF walkthrough
+    ├── sensitivity-api.md      # Operand/parameter tables, valid combinations
+    ├── math.md                 # B-theta, KKT, implicit differentiation
+    ├── advanced.md             # Type hierarchy, caching, solver config
+    ├── api.md                  # Auto-generated API reference
+    └── assets/                 # Logo files
 ```
 
 ## Important Conventions
@@ -229,10 +232,10 @@ test/
 
 **Matrix Orientations**
 - Incidence matrix `A` is (m × n): rows are branches, columns are buses
-- B-theta Laplacian: `L = A' * Diagonal(-b .* z) * A`
+- B-theta Laplacian: `L = A' * Diagonal(-b .* sw) * A`
 
 **Switching Variables**
-- `z` stores switching states in [0,1]; z=1 means branch closed, z=0 means open
+- `sw` stores switching states in [0,1]; sw=1 means branch closed, sw=0 means open
 - Derivatives are continuous (not discrete on/off)
 
 **Default Solver**
@@ -240,5 +243,7 @@ test/
 - Override: `DCOPFProblem(net, d; optimizer=Ipopt.Optimizer)`
 
 **Sensitivity Verification**
-- All sensitivities are verified against ForwardDiff in tests
-- Run `test/unified/test_sensitivity_verification.jl` to check numerical correctness
+- All sensitivities are verified against ForwardDiff or finite differences in tests
+- `test/unified/test_sensitivity_verification.jl`: DC PF (ForwardDiff), DC OPF demand/switching (FD), AC PF
+- `test/test_ac_pf_verification.jl`: AC PF (finite-difference against Newton re-solve)
+- `test/test_dc_opf_verification.jl`: DC OPF for cost, flow limit, susceptance, and remaining combos

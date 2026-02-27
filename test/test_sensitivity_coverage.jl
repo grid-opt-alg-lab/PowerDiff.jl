@@ -21,14 +21,15 @@ using Test
         combos = [
             (:va, :d, (net.n, net.n)),
             (:f,  :d, (net.m, net.n)),
-            (:va, :z, (net.n, net.m)),
-            (:f,  :z, (net.m, net.m)),
+            (:va, :sw, (net.n, net.m)),
+            (:f,  :sw, (net.m, net.m)),
         ]
 
         for (op, param, expected_size) in combos
             @testset "$op w.r.t. $param" begin
                 S = calc_sensitivity(pf, op, param)
-                @test S isa Sensitivity{DCPF}
+                @test S isa Sensitivity
+                @test S.formulation == :dcpf
                 @test size(S) == expected_size
                 @test all(isfinite, Matrix(S))
             end
@@ -40,25 +41,22 @@ using Test
         @test_throws ArgumentError calc_sensitivity(pf, :vm, :d)
     end
 
-    @testset "DC OPF — all 20 combinations" begin
+    @testset "DC OPF — all 24 combinations" begin
         net = DCNetwork(net_data)
         d = calc_demand_vector(net_data)
         prob = DCOPFProblem(net, d)
         solve!(prob)
 
         operands = [:va, :pg, :f, :lmp]
-        params = [:d, :z, :cl, :cq, :fmax, :b]
+        params = [:d, :sw, :cl, :cq, :fmax, :b]
 
         # Expected sizes for each operand
         op_sizes = Dict(:va => net.n, :pg => net.k, :f => net.m, :lmp => net.n)
         # Expected sizes for each parameter
-        param_sizes = Dict(:d => net.n, :z => net.m, :cl => net.k, :cq => net.k,
+        param_sizes = Dict(:d => net.n, :sw => net.m, :cl => net.k, :cq => net.k,
                            :fmax => net.m, :b => net.m)
 
-        # Not all combinations are valid: cost operands only with cost params?
-        # Actually, all 4 operands × 6 params = 24 combos should work.
-        # But :cl and :cq only have :pg and :lmp operands in the implementation.
-        # Let me check what's actually implemented.
+        # 4 operands × 6 parameters = 24 combinations
 
         for op in operands
             for param in params
@@ -66,7 +64,8 @@ using Test
                 expected_cols = param_sizes[param]
                 @testset "$op w.r.t. $param" begin
                     S = calc_sensitivity(prob, op, param)
-                    @test S isa Sensitivity{DCOPF}
+                    @test S isa Sensitivity
+                    @test S.formulation == :dcopf
                     @test size(S) == (expected_rows, expected_cols)
                     @test all(isfinite, Matrix(S))
                 end
@@ -96,7 +95,8 @@ using Test
         for (op, param, expected_size) in combos
             @testset "$op w.r.t. $param" begin
                 S = calc_sensitivity(state, op, param)
-                @test S isa Sensitivity{ACPF}
+                @test S isa Sensitivity
+                @test S.formulation == :acpf
                 @test size(S) == expected_size
                 @test all(isfinite, Matrix(S))
             end
@@ -111,24 +111,25 @@ using Test
         prob = ACOPFProblem(net_data; silent=true)
 
         combos = [
-            (:vm, :z, (prob.network.n, prob.network.m)),
-            (:va, :z, (prob.network.n, prob.network.m)),
-            (:pg, :z, (prob.n_gen, prob.network.m)),
-            (:qg, :z, (prob.n_gen, prob.network.m)),
+            (:vm, :sw, (prob.network.n, prob.network.m)),
+            (:va, :sw, (prob.network.n, prob.network.m)),
+            (:pg, :sw, (prob.n_gen, prob.network.m)),
+            (:qg, :sw, (prob.n_gen, prob.network.m)),
         ]
 
         for (op, param, expected_size) in combos
             @testset "$op w.r.t. $param" begin
                 S = calc_sensitivity(prob, op, param)
-                @test S isa Sensitivity{ACOPF}
+                @test S isa Sensitivity
+                @test S.formulation == :acopf
                 @test size(S) == expected_size
                 @test all(isfinite, Matrix(S))
             end
         end
 
         # Invalid combinations
-        @test_throws ArgumentError calc_sensitivity(prob, :lmp, :z)
-        @test_throws ArgumentError calc_sensitivity(prob, :f, :z)
+        @test_throws ArgumentError calc_sensitivity(prob, :lmp, :sw)
+        @test_throws ArgumentError calc_sensitivity(prob, :f, :sw)
     end
 
     @testset "Symbol aliases" begin

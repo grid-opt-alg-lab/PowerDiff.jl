@@ -67,12 +67,7 @@ function update_demand!(prob::DCOPFProblem, d::AbstractVector)
     # Update stored demand
     prob.d .= d
 
-    # Update constraint RHS: G_inc * g - d = B * θ  →  G_inc * g - B * θ = d
-    # The constraint is stored as: G_inc * g - B * θ - d = 0
-    # We need to update the constant term
-    W = Diagonal(-prob.network.b .* prob.network.z)
-    B_mat = sparse(prob.network.A' * W * prob.network.A)
-
+    # Update constraint RHS
     for i in 1:n
         set_normalized_rhs(prob.cons.power_bal[i], d[i])
     end

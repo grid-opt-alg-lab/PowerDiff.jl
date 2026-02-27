@@ -3,13 +3,13 @@
 # =============================================================================
 #
 # DC network representation for B-theta OPF formulation with susceptance-weighted
-# Laplacian L = A' * Diag(-b .* z) * A.
+# Laplacian L = A' * Diag(-b .* sw) * A.
 
 """
     DCNetwork <: AbstractPowerNetwork
 
 DC network data for B-theta OPF formulation. Uses susceptance-weighted Laplacian
-`B = A' * Diagonal(-b .* z) * A` which preserves graphical structure for
+`B = A' * Diagonal(-b .* sw) * A` which preserves graphical structure for
 topology sensitivity analysis and integration with RandomizedSwitching tools.
 
 # Fields
@@ -17,7 +17,7 @@ topology sensitivity analysis and integration with RandomizedSwitching tools.
 - `A`: Branch-bus incidence matrix (m x n)
 - `G_inc`: Generator-bus incidence matrix (n x k)
 - `b`: Branch susceptances (imaginary part of 1/z)
-- `z`: Branch switching states (1 = closed, 0 = open)
+- `sw`: Branch switching states (1 = closed, 0 = open)
 - `fmax`, `gmax`, `gmin`: Flow and generation limits
 - `Δθ_max`, `Δθ_min`: Phase angle difference limits
 - `cq`, `cl`: Quadratic and linear generation cost coefficients
@@ -31,7 +31,7 @@ struct DCNetwork <: AbstractPowerNetwork
     A::SparseMatrixCSC{Float64,Int}
     G_inc::SparseMatrixCSC{Float64,Int}
     b::Vector{Float64}
-    z::Vector{Float64}
+    sw::Vector{Float64}
     fmax::Vector{Float64}
     gmax::Vector{Float64}
     gmin::Vector{Float64}
@@ -151,7 +151,7 @@ function DCNetwork(net::Dict; τ::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,In
     b = imag.(inv.(z_branch))
 
     # All branches initially active
-    z = ones(m)
+    sw = ones(m)
 
     # Limits
     fmax = [branch[string(i)]["rate_a"] for i in 1:m]
@@ -171,7 +171,7 @@ function DCNetwork(net::Dict; τ::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,In
         ref_bus = _find_reference_bus(net)
     end
 
-    return DCNetwork(n, m, k, A, G_inc, b, z, fmax, gmax, gmin, Δθ_max, Δθ_min, cq, cl, ref_bus, τ)
+    return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, Δθ_max, Δθ_min, cq, cl, ref_bus, τ)
 end
 
 """
@@ -183,7 +183,7 @@ Useful for building networks programmatically.
 function DCNetwork(
     n::Int, m::Int, k::Int,
     A::AbstractMatrix, G_inc::AbstractMatrix, b::AbstractVector;
-    z::AbstractVector=ones(m),
+    sw::AbstractVector=ones(m),
     fmax::AbstractVector=fill(Inf, m),
     gmax::AbstractVector=fill(Inf, k),
     gmin::AbstractVector=zeros(k),
@@ -197,7 +197,7 @@ function DCNetwork(
     return DCNetwork(
         n, m, k,
         sparse(Float64.(A)), sparse(Float64.(G_inc)),
-        Float64.(b), Float64.(z),
+        Float64.(b), Float64.(sw),
         Float64.(fmax), Float64.(gmax), Float64.(gmin),
         Float64.(Δθ_max), Float64.(Δθ_min),
         Float64.(cq), Float64.(cl),
@@ -257,10 +257,10 @@ end
 """
     calc_susceptance_matrix(network::DCNetwork)
 
-Compute the susceptance matrix B = A' * Diagonal(-b .* z) * A.
+Compute the susceptance matrix B = A' * Diagonal(-b .* sw) * A.
 """
 function calc_susceptance_matrix(network::DCNetwork)
-    W = Diagonal(-network.b .* network.z)
+    W = Diagonal(-network.b .* network.sw)
     return sparse(network.A' * W * network.A)
 end
 
@@ -294,7 +294,7 @@ Solve DC power flow for given generation and demand.
 
 Computes phase angles θ by solving the linear system:
     L * θ = p
-where L = A' * Diag(-b ⊙ z) * A is the susceptance-weighted Laplacian
+where L = A' * Diag(-b ⊙ sw) * A is the susceptance-weighted Laplacian
 and p = g - d is the net injection.
 
 The slack bus angle is set to zero, and the pseudoinverse is used for
@@ -338,8 +338,8 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
     # Center around reference bus
     θ = θ .- θ[net.ref_bus]
 
-    # Compute flows: f = W * A * θ where W = Diag(-b ⊙ z)
-    W = Diagonal(-net.b .* net.z)
+    # Compute flows: f = W * A * θ where W = Diag(-b ⊙ sw)
+    W = Diagonal(-net.b .* net.sw)
     f = Vector(W * net.A * θ)
 
     return DCPowerFlowState(net, θ, p, Float64.(g), Float64.(d), f, L_pinv)

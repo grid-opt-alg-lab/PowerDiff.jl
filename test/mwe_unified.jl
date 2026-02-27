@@ -40,11 +40,11 @@ println("dva/dd shape: ", size(dva_dd), "  [1,1] = ", round(dva_dd[1,1], digits=
 df_dd = calc_sensitivity(pf_state, :f, :d)
 println("df/dd shape: ", size(df_dd), "  [1,1] = ", round(df_dd[1,1], digits=6))
 
-dva_dz = calc_sensitivity(pf_state, :va, :z)
-println("dva/dz shape: ", size(dva_dz), "  [1,1] = ", round(dva_dz[1,1], digits=6))
+dva_dsw = calc_sensitivity(pf_state, :va, :sw)
+println("dva/dsw shape: ", size(dva_dsw), "  [1,1] = ", round(dva_dsw[1,1], digits=6))
 
-df_dz = calc_sensitivity(pf_state, :f, :z)
-println("df/dz shape: ", size(df_dz), "  [1,1] = ", round(df_dz[1,1], digits=6))
+df_dsw = calc_sensitivity(pf_state, :f, :sw)
+println("df/dsw shape: ", size(df_dsw), "  [1,1] = ", round(df_dsw[1,1], digits=6))
 
 # Aliases work too
 dva_dd_alias = calc_sensitivity(pf_state, :va, :pd)  # :pd → :d
@@ -95,11 +95,11 @@ dlmp_dcl = calc_sensitivity(prob, :lmp, :cl)
 println("dlmp/dcl shape: ", size(dlmp_dcl))
 
 println("\n--- OPF Switching Sensitivities ---")
-dva_dz_opf = calc_sensitivity(prob, :va, :z)
-println("dva/dz shape: ", size(dva_dz_opf))
+dva_dsw_opf = calc_sensitivity(prob, :va, :sw)
+println("dva/dsw shape: ", size(dva_dsw_opf))
 
-dlmp_dz = calc_sensitivity(prob, :lmp, :z)
-println("dlmp/dz shape: ", size(dlmp_dz))
+dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)
+println("dlmp/dsw shape: ", size(dlmp_dsw))
 
 # =============================================================================
 # AC Power Flow Example

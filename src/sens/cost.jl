@@ -5,9 +5,6 @@
 # KKT system in kkt_dc_opf.jl. This file contains the KKT Jacobian functions
 # for cost parameters.
 
-using LinearAlgebra
-using SparseArrays
-
 """
     calc_kkt_jacobian_cost_linear(net::DCNetwork)
 
@@ -18,7 +15,7 @@ Sparse matrix of size (kkt_dims x k).
 
 # Notes
 Only the stationarity condition for g depends on cl:
-  K_g = Cq * g + cl - G_inc' * nu_bal - rho_lb + rho_ub
+  K_g = 2*Cq * g + cl - G_inc' * nu_bal - rho_lb + rho_ub
   dK_g/dcl = I_k (identity matrix)
 """
 function calc_kkt_jacobian_cost_linear(net::DCNetwork)
@@ -48,10 +45,10 @@ Sparse matrix of size (kkt_dims x k).
 
 # Notes
 Only the stationarity condition for g depends on cq:
-  K_g = Cq * g + cl - G_inc' * nu_bal - rho_lb + rho_ub
-  dK_g/dcq_i = g_i (element i of generation vector)
+  K_g = 2*Cq * g + cl - G_inc' * nu_bal - rho_lb + rho_ub
+  dK_g/dcq_i = 2*g_i (since objective is cq_i * g_i^2, stationarity has 2*cq_i*g_i)
 
-So dK_g/dcq = Diagonal(g) evaluated at the solution.
+So dK_g/dcq = 2*Diagonal(g) evaluated at the solution.
 """
 function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
@@ -63,9 +60,10 @@ function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem, sol::DCOPFSolution
 
     J_cq = spzeros(dim, k)
 
-    # dK_g/dcq = Diagonal(g)
-    # The (i, i) entry is g_i: derivative of cq_i * g_i with respect to cq_i is g_i
-    J_cq[idx.g, :] = sparse(Diagonal(g))
+    # dK_g/dcq = 2*Diagonal(g)
+    # Objective is cq_i * g_i^2, stationarity is 2*cq_i*g_i + cl_i - ...
+    # So ∂(2*cq_i*g_i)/∂cq_i = 2*g_i
+    J_cq[idx.g, :] = 2 * sparse(Diagonal(g))
 
     return J_cq
 end

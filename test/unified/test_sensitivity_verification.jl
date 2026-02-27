@@ -19,14 +19,14 @@ using Test
         pf_state = DCPowerFlowState(net, d)
 
         # Get analytical sensitivity via new API
-        dva_dz = calc_sensitivity(pf_state, :va, :z)
-        df_dz = calc_sensitivity(pf_state, :f, :z)
+        dva_dsw = calc_sensitivity(pf_state, :va, :sw)
+        df_dsw = calc_sensitivity(pf_state, :f, :sw)
 
         # Define a function that computes theta as a function of z
-        function theta_of_z(z_vec)
+        function theta_of_sw(sw_vec)
             A = net.A
             b = net.b
-            L = transpose(A) * Diagonal(-b .* z_vec) * A
+            L = transpose(A) * Diagonal(-b .* sw_vec) * A
             L_pinv = pinv(Matrix(L))
 
             # Balance at slack bus
@@ -41,25 +41,25 @@ using Test
         end
 
         # Compute ForwardDiff Jacobian
-        z0 = copy(net.z)
-        fd_dva_dz = ForwardDiff.jacobian(theta_of_z, z0)
+        sw0 = copy(net.sw)
+        fd_dva_dsw = ForwardDiff.jacobian(theta_of_sw, sw0)
 
         # Compare analytical vs ForwardDiff
-        @test size(dva_dz) == size(fd_dva_dz)
-        @test maximum(abs.(Matrix(dva_dz) - fd_dva_dz)) < 1e-10
+        @test size(dva_dsw) == size(fd_dva_dsw)
+        @test maximum(abs.(Matrix(dva_dsw) - fd_dva_dsw)) < 1e-10
 
         # Also verify flow sensitivity
-        function flow_of_z(z_vec)
+        function flow_of_sw(sw_vec)
             A = net.A
             b = net.b
-            θ = theta_of_z(z_vec)
-            W = Diagonal(-b .* z_vec)
+            θ = theta_of_sw(sw_vec)
+            W = Diagonal(-b .* sw_vec)
             return W * A * θ
         end
 
-        fd_df_dz = ForwardDiff.jacobian(flow_of_z, z0)
-        @test size(df_dz) == size(fd_df_dz)
-        @test maximum(abs.(Matrix(df_dz) - fd_df_dz)) < 1e-10
+        fd_df_dsw = ForwardDiff.jacobian(flow_of_sw, sw0)
+        @test size(df_dsw) == size(fd_df_dsw)
+        @test maximum(abs.(Matrix(df_dsw) - fd_df_dsw)) < 1e-10
     end
 
     @testset "DC Power Flow Demand Sensitivity" begin
@@ -76,7 +76,7 @@ using Test
         function theta_of_d(d_vec)
             A = net.A
             b = net.b
-            L = transpose(A) * Diagonal(-b .* net.z) * A
+            L = transpose(A) * Diagonal(-b .* net.sw) * A
             L_pinv = pinv(Matrix(L))
             p = pf_state.g - d_vec  # Net injection
             return L_pinv * p
@@ -88,6 +88,36 @@ using Test
         # Compare analytical vs ForwardDiff
         @test size(dva_dd) == size(fd_dva_dd)
         @test maximum(abs.(Matrix(dva_dd) - fd_dva_dd)) < 1e-8
+    end
+
+    @testset "DC Power Flow PTDF (∂f/∂d)" begin
+        net = DCNetwork(net_data)
+        d = calc_demand_vector(net_data)
+
+        # Solve DC power flow
+        pf_state = DCPowerFlowState(net, d)
+
+        # Get analytical PTDF via API
+        df_dd = calc_sensitivity(pf_state, :f, :d)
+
+        # Define flow as function of demand: f(d) = W · A · L⁺ · (g - d)
+        function flow_of_d(d_vec)
+            A = net.A
+            b = net.b
+            L = transpose(A) * Diagonal(-b .* net.sw) * A
+            L_pinv = pinv(Matrix(L))
+            p = pf_state.g - d_vec  # Net injection
+            θ = L_pinv * p
+            W = Diagonal(-b .* net.sw)
+            return W * A * θ
+        end
+
+        # Compute ForwardDiff Jacobian
+        fd_df_dd = ForwardDiff.jacobian(flow_of_d, d)
+
+        # Compare analytical vs ForwardDiff
+        @test size(df_dd) == size(fd_df_dd)
+        @test maximum(abs.(Matrix(df_dd) - fd_df_dd)) < 1e-8
     end
 
     @testset "DC OPF Demand Sensitivity" begin
@@ -126,26 +156,71 @@ using Test
         sol = solve!(prob)
 
         # Get analytical sensitivity via new API
-        dva_dz = calc_sensitivity(prob, :va, :z)
+        dva_dsw = calc_sensitivity(prob, :va, :sw)
 
         # Verify with finite differences (negative perturbation to stay in [0,1])
         ε = 1e-5
         m = net.m
 
         for e in 1:min(3, m)
-            z_pert = copy(net.z)
-            z_pert[e] -= ε
+            sw_pert = copy(net.sw)
+            sw_pert[e] -= ε
 
-            update_switching!(prob, z_pert)
-            sol_pert = solve!(prob)
+            net_pert = DCNetwork(net_data)
+            net_pert.sw .= sw_pert
+            prob_pert = DCOPFProblem(net_pert, d)
+            sol_pert = solve!(prob_pert)
 
-            fd_dva_dz_col = (sol.θ - sol_pert.θ) / ε  # Reversed due to negative ε
+            fd_dva_dsw_col = (sol.θ - sol_pert.θ) / ε  # Reversed due to negative ε
 
             # Larger tolerance for OPF due to active constraint changes
-            max_err = maximum(abs.(Matrix(dva_dz)[:, e] - fd_dva_dz_col))
+            max_err = maximum(abs.(Matrix(dva_dsw)[:, e] - fd_dva_dsw_col))
             @test max_err < 0.05
+        end
+    end
 
-            update_switching!(prob, net.z)
+    @testset "DC OPF Switching Sensitivity (∂pg/∂sw, ∂f/∂sw)" begin
+        net = DCNetwork(net_data)
+        d = calc_demand_vector(net_data)
+        prob = DCOPFProblem(net, d)
+        sol = solve!(prob)
+
+        # Get analytical sensitivities via API
+        dpg_dsw = calc_sensitivity(prob, :pg, :sw)
+        df_dsw = calc_sensitivity(prob, :f, :sw)
+
+        # Verify with finite differences (negative perturbation to stay in [0,1])
+        ε = 1e-5
+        m = net.m
+
+        for e in 1:min(3, m)
+            sw_pert = copy(net.sw)
+            sw_pert[e] -= ε
+
+            net_pert = DCNetwork(net_data)
+            net_pert.sw .= sw_pert
+            prob_pert = DCOPFProblem(net_pert, d)
+            sol_pert = solve!(prob_pert)
+
+            # Reversed sign due to negative perturbation
+            fd_dpg_col = (sol.g - sol_pert.g) / ε
+            fd_df_col = (sol.f - sol_pert.f) / ε
+
+            # Check ∂pg/∂sw
+            if norm(fd_dpg_col) > 1e-10
+                rel_err_pg = norm(Matrix(dpg_dsw)[:, e] - fd_dpg_col) / norm(fd_dpg_col)
+                @test rel_err_pg < 0.05
+            else
+                @info "Skipped ∂pg/∂sw FD: near-zero perturbation" branch=e
+            end
+
+            # Check ∂f/∂sw
+            if norm(fd_df_col) > 1e-10
+                rel_err_f = norm(Matrix(df_dsw)[:, e] - fd_df_col) / norm(fd_df_col)
+                @test rel_err_f < 0.05
+            else
+                @info "Skipped ∂f/∂sw FD: near-zero perturbation" branch=e
+            end
         end
     end
 

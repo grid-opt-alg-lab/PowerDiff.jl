@@ -2,7 +2,7 @@
 #
 # In the B-θ DC OPF formulation, the power balance constraint is:
 #     G_inc * g - d = L * θ
-# where L = A' * Diag(w * s) * A is the susceptance-weighted Laplacian.
+# where L = A' * Diag(-b .* sw) * A is the susceptance-weighted Laplacian.
 #
 # The LMP at bus i equals the power balance dual ν_bal[i]. The network topology
 # is embedded in the constraint through L, so ν_bal already incorporates both
@@ -11,7 +11,7 @@
 # LMP Decomposition (for analysis):
 #     LMP = ν_bal = energy_component + congestion_component
 # where:
-#     congestion_component = L⁺ A' Diag(w*s) (λ_ub_std - λ_lb_std)
+#     congestion_component = L⁺ A' Diag(-b .* sw) (λ_ub_std - λ_lb_std)
 #     energy_component = ν_bal - congestion_component  (uniform for connected network)
 #
 # Sign conventions:
@@ -72,7 +72,7 @@ function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork)
     # Convert JuMP duals to standard convention: λ_ub_std = -λ_ub_jmp
     λ_ub_std = -sol.λ_ub
     λ_lb_std = sol.λ_lb
-    return L_pinv * net.A' * Diagonal(w .* net.z) * (λ_ub_std - λ_lb_std)
+    return L_pinv * net.A' * Diagonal(w .* net.sw) * (λ_ub_std - λ_lb_std)
 end
 
 """
@@ -90,12 +90,3 @@ function calc_energy_component(sol::DCOPFSolution, net::DCNetwork)
     return sol.ν_bal .- calc_congestion_component(sol, net)
 end
 
-"""
-    calc_marginal_loss_component(sol::DCOPFSolution, net::DCNetwork)
-
-For DC OPF, there are no losses (lossless model).
-Returns zeros for API compatibility with AC formulations.
-"""
-function calc_marginal_loss_component(sol::DCOPFSolution, net::DCNetwork)
-    return zeros(net.n)
-end

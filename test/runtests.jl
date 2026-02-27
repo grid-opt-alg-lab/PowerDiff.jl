@@ -6,7 +6,9 @@ using PowerModelsDiff
 using PowerModels
 using ForwardDiff
 using Ipopt
-using JuMP: MOI
+using JuMP: MOI, optimizer_with_attributes
+
+PowerModels.silence()
 
 # Use PowerModels' built-in test cases
 const PM_DATA_DIR = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
@@ -151,10 +153,10 @@ end
         solve!(prob)
 
         # Use the type-based interface
-        dva_dd = calc_sensitivity(prob, VoltageAngle(), Demand())
-        dg_dd = calc_sensitivity(prob, Generation(), Demand())
-        df_dd = calc_sensitivity(prob, Flow(), Demand())
-        dlmp_dd = calc_sensitivity(prob, LMP(), Demand())
+        dva_dd = calc_sensitivity(prob, :va, :d)
+        dg_dd = calc_sensitivity(prob, :pg, :d)
+        df_dd = calc_sensitivity(prob, :f, :d)
+        dlmp_dd = calc_sensitivity(prob, :lmp, :d)
 
         @test size(dva_dd) == (dc_net.n, dc_net.n)
         @test size(dg_dd) == (dc_net.k, dc_net.n)
@@ -184,26 +186,26 @@ end
         solve!(prob)
 
         # Compute switching sensitivities using type-based interface
-        dva_dz = calc_sensitivity(prob, VoltageAngle(), Switching())
-        dg_dz = calc_sensitivity(prob, Generation(), Switching())
-        df_dz = calc_sensitivity(prob, Flow(), Switching())
-        dlmp_dz = calc_sensitivity(prob, LMP(), Switching())
+        dva_dsw = calc_sensitivity(prob, :va, :sw)
+        dg_dsw = calc_sensitivity(prob, :pg, :sw)
+        df_dsw = calc_sensitivity(prob, :f, :sw)
+        dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)
 
-        @test size(dva_dz) == (dc_net.n, dc_net.m)
-        @test size(dg_dz) == (dc_net.k, dc_net.m)
-        @test size(df_dz) == (dc_net.m, dc_net.m)
-        @test size(dlmp_dz) == (dc_net.n, dc_net.m)
+        @test size(dva_dsw) == (dc_net.n, dc_net.m)
+        @test size(dg_dsw) == (dc_net.k, dc_net.m)
+        @test size(df_dsw) == (dc_net.m, dc_net.m)
+        @test size(dlmp_dsw) == (dc_net.n, dc_net.m)
 
-        @test !any(isnan, Matrix(dva_dz))
-        @test !any(isnan, Matrix(dg_dz))
-        @test !any(isnan, Matrix(df_dz))
-        @test !any(isnan, Matrix(dlmp_dz))
+        @test !any(isnan, Matrix(dva_dsw))
+        @test !any(isnan, Matrix(dg_dsw))
+        @test !any(isnan, Matrix(df_dsw))
+        @test !any(isnan, Matrix(dlmp_dsw))
 
         # Verify sensitivities are finite
-        @test all(isfinite, Matrix(dva_dz))
-        @test all(isfinite, Matrix(dg_dz))
-        @test all(isfinite, Matrix(df_dz))
-        @test all(isfinite, Matrix(dlmp_dz))
+        @test all(isfinite, Matrix(dva_dsw))
+        @test all(isfinite, Matrix(dg_dsw))
+        @test all(isfinite, Matrix(df_dsw))
+        @test all(isfinite, Matrix(dlmp_dsw))
     end
 end
 
@@ -217,7 +219,8 @@ end
         raw = PowerModels.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
 
         # Solve with PowerModels DC OPF
-        pm_result = PowerModels.solve_dc_opf(raw, Ipopt.Optimizer)
+        pm_result = PowerModels.solve_dc_opf(raw,
+            optimizer_with_attributes(Ipopt.Optimizer, "print_level" => 0))
 
         # Solve with our implementation
         dc_net = DCNetwork(net)
@@ -261,7 +264,8 @@ end
     net = PowerModels.make_basic_network(raw)
 
     # Solve with PowerModels on the basic network (with duals enabled)
-    pm_result = PowerModels.solve_dc_opf(net, Ipopt.Optimizer,
+    pm_result = PowerModels.solve_dc_opf(net,
+        optimizer_with_attributes(Ipopt.Optimizer, "print_level" => 0),
         setting = Dict("output" => Dict("duals" => true)))
 
     # Ipopt returns LOCALLY_SOLVED for nonlinear problems
@@ -294,9 +298,13 @@ end
 
         if !any(isnan, pm_lmps)
             # PowerModels uses opposite sign convention (negative LMPs)
-            # Check that magnitudes are in the same ballpark (within 10x)
+            # Compare magnitudes: relative error < 50% or absolute error < 100
             pm_lmps_abs = abs.(pm_lmps)
-            @test all(our_lmps .< 10 .* pm_lmps_abs .+ 100)  # Within order of magnitude
+            for i in eachindex(our_lmps)
+                abs_err = abs(our_lmps[i] - pm_lmps_abs[i])
+                rel_err = pm_lmps_abs[i] > 1.0 ? abs_err / pm_lmps_abs[i] : abs_err
+                @test rel_err < 0.5 || abs_err < 100.0
+            end
             @info "LMP comparison:" our_lmps=our_lmps pm_lmps=pm_lmps
         end
     else
@@ -316,9 +324,9 @@ end
         # Compute analytical sensitivity using type-based interface
         prob = DCOPFProblem(dc_net, d)
         sol_base = solve!(prob)
-        dg_dd = calc_sensitivity(prob, Generation(), Demand())
-        dva_dd = calc_sensitivity(prob, VoltageAngle(), Demand())
-        df_dd = calc_sensitivity(prob, Flow(), Demand())
+        dg_dd = calc_sensitivity(prob, :pg, :d)
+        dva_dd = calc_sensitivity(prob, :va, :d)
+        df_dd = calc_sensitivity(prob, :f, :d)
 
         # Find a bus with demand
         bus_idx = findfirst(d .> 0)
@@ -343,16 +351,22 @@ end
         if norm(dg_dd_numerical) > 1e-10
             rel_error_g = norm(Matrix(dg_dd)[:, bus_idx] - dg_dd_numerical) / norm(dg_dd_numerical)
             @test rel_error_g < 0.01  # 1% tolerance
+        else
+            @info "Skipped ∂g/∂d FD check: near-zero numerical derivative" bus=bus_idx
         end
 
         if norm(dva_dd_numerical) > 1e-10
             rel_error_theta = norm(Matrix(dva_dd)[:, bus_idx] - dva_dd_numerical) / norm(dva_dd_numerical)
             @test rel_error_theta < 0.01
+        else
+            @info "Skipped ∂θ/∂d FD check: near-zero numerical derivative" bus=bus_idx
         end
 
         if norm(df_dd_numerical) > 1e-10
             rel_error_f = norm(Matrix(df_dd)[:, bus_idx] - df_dd_numerical) / norm(df_dd_numerical)
             @test rel_error_f < 0.01
+        else
+            @info "Skipped ∂f/∂d FD check: near-zero numerical derivative" bus=bus_idx
         end
     end
 end
@@ -368,7 +382,7 @@ end
         solve!(prob)
 
         # Use the type-based interface
-        dg_dd = calc_sensitivity(prob, Generation(), Demand())
+        dg_dd = calc_sensitivity(prob, :pg, :d)
 
         # For each demand bus, generation participation factors should sum to 1
         # This is because total generation must equal total demand
@@ -410,8 +424,8 @@ end
     @test abs(lmps[1] - lmps[2]) < 0.1  # Nearly equal (no congestion)
 
     # Verify sensitivities using type-based interface
-    dg_dd = calc_sensitivity(prob, Generation(), Demand())
-    dva_dd = calc_sensitivity(prob, VoltageAngle(), Demand())
+    dg_dd = calc_sensitivity(prob, :pg, :d)
+    dva_dd = calc_sensitivity(prob, :va, :d)
     @test Matrix(dg_dd)[1, 2] ≈ 1.0 atol=0.01  # dg1/dd2 = 1
     # dtheta2/dd2 = 1/b = 0.1 (same sign as theta2)
     @test abs(Matrix(dva_dd)[2, 2]) ≈ 0.1 atol=0.01
@@ -503,10 +517,10 @@ end
         solve!(prob)
 
         # Use the type-based interface
-        dg_dcl = calc_sensitivity(prob, Generation(), LinearCost())
-        dg_dcq = calc_sensitivity(prob, Generation(), QuadraticCost())
-        dlmp_dcl = calc_sensitivity(prob, LMP(), LinearCost())
-        dlmp_dcq = calc_sensitivity(prob, LMP(), QuadraticCost())
+        dg_dcl = calc_sensitivity(prob, :pg, :cl)
+        dg_dcq = calc_sensitivity(prob, :pg, :cq)
+        dlmp_dcl = calc_sensitivity(prob, :lmp, :cl)
+        dlmp_dcq = calc_sensitivity(prob, :lmp, :cq)
 
         # Check dimensions
         @test size(dg_dcl) == (dc_net.k, dc_net.k)
@@ -536,7 +550,7 @@ end
     d = [0.0, 1.0]
     prob = DCOPFProblem(dc_net, d)
     sol_base = solve!(prob)
-    dg_dcl = calc_sensitivity(prob, Generation(), LinearCost())
+    dg_dcl = calc_sensitivity(prob, :pg, :cl)
 
     # Finite difference validation for linear cost
     delta = 1e-5
@@ -556,17 +570,21 @@ end
     if norm(dg_dcl_numerical) > 1e-10
         rel_error = norm(Matrix(dg_dcl)[:, 1] - dg_dcl_numerical) / norm(dg_dcl_numerical)
         @test rel_error < 0.05  # 5% tolerance for finite difference
+    else
+        @info "Skipped ∂g/∂cl FD check: near-zero numerical derivative"
     end
 
     # LMP sensitivity check
     lmp_base = calc_lmp(sol_base, dc_net)
     lmp_pert = calc_lmp(sol_pert, dc_net_pert)
     dlmp_dcl_numerical = (lmp_pert - lmp_base) / delta
-    dlmp_dcl = calc_sensitivity(prob, LMP(), LinearCost())
+    dlmp_dcl = calc_sensitivity(prob, :lmp, :cl)
 
     if norm(dlmp_dcl_numerical) > 1e-10
         rel_error_lmp = norm(Matrix(dlmp_dcl)[:, 1] - dlmp_dcl_numerical) / norm(dlmp_dcl_numerical)
         @test rel_error_lmp < 0.1  # 10% tolerance
+    else
+        @info "Skipped ∂lmp/∂cl FD check: near-zero numerical derivative"
     end
 end
 
@@ -580,8 +598,205 @@ end
 # TODO: Fix vectorize_laplacian_weights for general MATPOWER cases
 
 # =============================================================================
+# Physics Property Tests
+# =============================================================================
+
+@testset "PTDF Row Conservation (Kirchhoff)" begin
+    net = load_test_case("case5.m")
+    if isnothing(net)
+        @test_skip false
+    else
+        dc_net = DCNetwork(net)
+        d = calc_demand_vector(net)
+        pf = DCPowerFlowState(dc_net, d)
+
+        # PTDF: ∂f/∂d, rows are branches, cols are buses
+        df_dd = calc_sensitivity(pf, :f, :d)
+
+        # For DC PF, the sum of PTDF entries along each row (for a given branch)
+        # should be approximately 0 for a lossless network.
+        # This reflects that a uniform load increase doesn't change flows (balanced by slack).
+        for ℓ in 1:dc_net.m
+            row_sum = sum(Matrix(df_dd)[ℓ, :])
+            @test abs(row_sum) < 1e-6
+        end
+    end
+end
+
+@testset "Energy Component Sanity" begin
+    # Verify the energy component is well-defined and the LMP decomposition identity
+    # holds across different network configurations.
+    # Note: energy component uniformity is a theoretical property of ideal LP with no
+    # degenerate constraints. In practice, numerical decomposition via L⁺ can introduce
+    # variation, so we only check basic sanity here.
+    net = load_test_case("case5.m")
+    if isnothing(net)
+        @test_skip false
+    else
+        dc_net = DCNetwork(net)
+        d = calc_demand_vector(net)
+        prob = DCOPFProblem(dc_net, d)
+        sol = solve!(prob)
+
+        energy = calc_energy_component(sol, dc_net)
+        congestion = calc_congestion_component(sol, dc_net)
+        lmp = calc_lmp(sol, dc_net)
+
+        @test !any(isnan, energy)
+        @test !any(isinf, energy)
+
+        # Decomposition identity: LMP = energy + congestion
+        @test isapprox(lmp, energy .+ congestion, atol=1e-6)
+
+        # Energy component should be positive for typical networks with positive costs
+        @test mean(energy) > 0
+    end
+end
+
+@testset "case14 Basic Validation" begin
+    net = load_test_case("case14.m")
+    if isnothing(net)
+        @info "Skipping case14 tests - PowerModels test data not found"
+        @test_skip false
+    else
+        # DC OPF on case14
+        dc_net = DCNetwork(net)
+        d = calc_demand_vector(net)
+        prob = DCOPFProblem(dc_net, d)
+        sol = solve!(prob)
+
+        @test all(isfinite, sol.θ)
+        @test all(isfinite, sol.g)
+        @test all(isfinite, sol.f)
+        @test abs(sum(sol.g) - sum(d)) < 1e-4  # Power balance
+
+        # Sensitivities should all be finite
+        for (op, param) in [(:va, :d), (:pg, :d), (:f, :d), (:lmp, :d),
+                            (:va, :sw), (:pg, :sw), (:f, :sw), (:lmp, :sw)]
+            S = calc_sensitivity(prob, op, param)
+            @test all(isfinite, Matrix(S))
+        end
+
+        # Participation factors sum to 1
+        dg_dd = calc_sensitivity(prob, :pg, :d)
+        for i in 1:dc_net.n
+            @test abs(sum(Matrix(dg_dd)[:, i]) - 1.0) < 0.01
+        end
+
+        # AC power flow on case14
+        pf_data = deepcopy(net)
+        PowerModels.compute_ac_pf!(pf_data)
+        state = ACPowerFlowState(pf_data)
+
+        dvm_dp = calc_sensitivity(state, :vm, :p)
+        dvm_dq = calc_sensitivity(state, :vm, :q)
+        @test all(isfinite, Matrix(dvm_dp))
+        @test all(isfinite, Matrix(dvm_dq))
+
+        # Slack bus sensitivity should be zero
+        slack = state.idx_slack
+        @test maximum(abs.(Matrix(dvm_dp)[slack, :])) < 1e-10
+        @test maximum(abs.(Matrix(dvm_dq)[slack, :])) < 1e-10
+    end
+end
+
+# =============================================================================
+# Physics Cross-Validation Tests
+# =============================================================================
+
+@testset "Uncongested DC OPF ≈ DC PF" begin
+    # When no constraints bind, DC OPF angles should match DC PF angles
+    net = load_test_case("case5.m")
+    if isnothing(net)
+        @test_skip false
+    else
+        # Build network with very relaxed limits so nothing binds
+        dc_net = DCNetwork(net)
+        dc_net.fmax .= 1000.0  # No flow congestion
+        dc_net.gmax .= 1000.0  # No generation limits
+
+        d = calc_demand_vector(net)
+
+        # Solve OPF
+        prob = DCOPFProblem(dc_net, d)
+        sol = solve!(prob)
+
+        # Build PF with OPF generation mapped to buses
+        g_bus = dc_net.G_inc * sol.g
+        pf = DCPowerFlowState(dc_net, g_bus, d)
+
+        # Compare ∂va/∂d from both formulations
+        dva_dd_opf = Matrix(calc_sensitivity(prob, :va, :d))
+        dva_dd_pf  = Matrix(calc_sensitivity(pf, :va, :d))
+
+        @test size(dva_dd_opf) == size(dva_dd_pf)
+        max_diff = maximum(abs.(dva_dd_opf - dva_dd_pf))
+        @test max_diff < 0.1
+        @info "Uncongested OPF vs PF ∂va/∂d max diff:" max_diff=max_diff
+    end
+end
+
+@testset "Binding Generator → Zero Participation" begin
+    # A generator at its upper limit should have ∂pg/∂d ≈ 0
+    # (it cannot increase output further)
+    net = load_test_case("case5.m")
+    if isnothing(net)
+        @test_skip false
+    else
+        dc_net = DCNetwork(net)
+        d = calc_demand_vector(net)
+        prob = DCOPFProblem(dc_net, d)
+        sol = solve!(prob)
+
+        dg_dd = Matrix(calc_sensitivity(prob, :pg, :d))
+
+        # Find generators at their upper bound
+        for i in 1:dc_net.k
+            if sol.g[i] >= dc_net.gmax[i] - 1e-4
+                # This generator is at its limit — participation should be near zero
+                participation = maximum(abs.(dg_dd[i, :]))
+                @test participation < 0.05
+                @info "Generator $i at upper bound: max |∂pg/∂d| = $participation"
+            end
+        end
+    end
+end
+
+@testset "Energy Component Uniformity" begin
+    # For a connected lossless DC network with NO binding constraints (flow or
+    # generator), all LMPs equal the common marginal cost and the energy component
+    # (= LMP - congestion) should be perfectly uniform.  The congestion formula
+    # L⁺ A' W (λ_ub - λ_lb) only captures flow-constraint contributions, so
+    # uniformity only holds when generator bounds are also slack.
+    net = load_test_case("case5.m")
+    if isnothing(net)
+        @test_skip false
+    else
+        dc_net = DCNetwork(net)
+        dc_net.fmax .= 1000.0  # No flow congestion
+        dc_net.gmax .= 1000.0  # No generator limits binding
+
+        d = calc_demand_vector(net)
+        prob = DCOPFProblem(dc_net, d)
+        sol = solve!(prob)
+
+        energy = calc_energy_component(sol, dc_net)
+
+        # With no binding constraints, energy component must be uniform
+        μ = mean(energy)
+        σ = std(energy)
+        @test μ > 0
+        @test σ / μ < 1e-4
+        @info "Energy component CV:" cv=σ/μ mean=μ std=σ
+    end
+end
+
+# =============================================================================
 # Unified Architecture Tests
 # =============================================================================
 include("unified/test_interface.jl")
 include("test_ac_opf_sens.jl")
 include("test_sensitivity_coverage.jl")
+include("test_dc_opf_verification.jl")
+include("test_ac_pf_verification.jl")
+include("test_update_switching.jl")

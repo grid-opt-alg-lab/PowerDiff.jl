@@ -9,6 +9,8 @@
 
 Solve the AC OPF problem and return an ACOPFSolution.
 
+Invalidates the sensitivity cache since the solution may have changed.
+
 # Returns
 ACOPFSolution containing optimal primal and dual variables.
 
@@ -16,12 +18,20 @@ ACOPFSolution containing optimal primal and dual variables.
 Error if optimization does not converge to optimal/locally optimal solution.
 """
 function solve!(prob::ACOPFProblem)
+    # Invalidate sensitivity cache since we're re-solving
+    invalidate!(prob.cache)
+
     optimize!(prob.model)
 
     status = termination_status(prob.model)
     @assert status in [MOI.OPTIMAL, MOI.LOCALLY_SOLVED] "AC OPF failed with status: $status"
 
-    return _extract_ac_opf_solution(prob)
+    sol = _extract_ac_opf_solution(prob)
+
+    # Cache the solution for sensitivity computations
+    prob.cache.solution = sol
+
+    return sol
 end
 
 """
@@ -121,36 +131,28 @@ function _extract_ac_opf_solution(prob::ACOPFProblem)
 end
 
 """
-    update_switching!(prob::ACOPFProblem, z::AbstractVector)
+    update_switching!(prob::ACOPFProblem, sw::AbstractVector)
 
-Update the network switching state and invalidate the sensitivity cache.
+Update the network switching state, invalidate the sensitivity cache, and
+rebuild the JuMP model so that `solve!(prob)` uses the new switching state.
 
 # Arguments
 - `prob`: ACOPFProblem to update
-- `z`: New switching state vector (length m), values in [0,1]
-
-# Note
-This modifies `prob.network.z` and invalidates cached sensitivities.
-The JuMP model constraints embed the previous z values as coefficients,
-so the problem must be rebuilt for exact re-optimization. However, the
-KKT-based sensitivity analysis (which uses its own `ac_kkt` function
-with the current `network.z`) works correctly without a model rebuild.
+- `sw`: New switching state vector (length m), values in [0,1]
 """
-function update_switching!(prob::ACOPFProblem, z::AbstractVector)
+function update_switching!(prob::ACOPFProblem, sw::AbstractVector)
     m = prob.network.m
-    @assert length(z) == m "Switching vector length must match number of branches"
-    @assert all(0 .<= z .<= 1) "Switching values must be in [0,1]"
+    @assert length(sw) == m "Switching vector length must match number of branches"
+    @assert all(0 .<= sw .<= 1) "Switching values must be in [0,1]"
 
     # Invalidate sensitivity cache since parameters changed
     invalidate!(prob.cache)
 
     # Update network switching state
-    prob.network.z .= z
+    prob.network.sw .= sw
 
-    # Note: The JuMP model constraints embed the previous z values as coefficients.
-    # After calling this, the problem must be rebuilt for exact re-optimization.
-    # However, the KKT-based sensitivity analysis (which uses its own ac_kkt function
-    # with the current network.z) works correctly without a model rebuild.
+    # Rebuild JuMP model with new switching coefficients
+    _rebuild_jump_model!(prob)
 
     return prob
 end

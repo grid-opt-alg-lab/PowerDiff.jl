@@ -23,31 +23,6 @@ using Test
         @test pf_state isa AbstractPowerFlowState
     end
 
-    @testset "Singleton Type Tags" begin
-        # Test formulation tags
-        @test DCOPF() isa AbstractFormulation
-        @test DCPF() isa AbstractFormulation
-        @test ACOPF() isa AbstractFormulation
-        @test ACPF() isa AbstractFormulation
-
-        # Test operand tags
-        @test VoltageAngle() isa AbstractOperand
-        @test VoltageMagnitude() isa AbstractOperand
-        @test LMP() isa AbstractOperand
-        @test Generation() isa AbstractOperand
-        @test Flow() isa AbstractOperand
-
-        # Test parameter tags
-        @test Demand() isa AbstractParameter
-        @test Switching() isa AbstractParameter
-        @test QuadraticCost() isa AbstractParameter
-        @test LinearCost() isa AbstractParameter
-        @test FlowLimit() isa AbstractParameter
-        @test Susceptance() isa AbstractParameter
-        @test ActivePower() isa AbstractParameter
-        @test ReactivePower() isa AbstractParameter
-    end
-
     @testset "DC Power Flow State" begin
         net = DCNetwork(net_data)
         demand = calc_demand_vector(net_data)
@@ -72,14 +47,19 @@ using Test
         demand = calc_demand_vector(net_data)
         pf_state = DCPowerFlowState(net, demand)
 
-        # Test type-based interface
-        dva_dz = calc_sensitivity(pf_state, VoltageAngle(), Switching())
-        @test dva_dz isa Sensitivity{DCPF, VoltageAngle, Switching}
-        @test size(dva_dz) == (net.n, net.m)
+        dva_dsw = calc_sensitivity(pf_state, :va, :sw)
+        @test dva_dsw isa Sensitivity
+        @test dva_dsw.formulation == :dcpf
+        @test dva_dsw.operand == :va
+        @test dva_dsw.parameter == :sw
+        @test size(dva_dsw) == (net.n, net.m)
 
-        df_dz = calc_sensitivity(pf_state, Flow(), Switching())
-        @test df_dz isa Sensitivity{DCPF, Flow, Switching}
-        @test size(df_dz) == (net.m, net.m)
+        df_dsw = calc_sensitivity(pf_state, :f, :sw)
+        @test df_dsw isa Sensitivity
+        @test df_dsw.formulation == :dcpf
+        @test df_dsw.operand == :f
+        @test df_dsw.parameter == :sw
+        @test size(df_dsw) == (net.m, net.m)
     end
 
     @testset "DC Power Flow Demand Sensitivity" begin
@@ -87,13 +67,18 @@ using Test
         demand = calc_demand_vector(net_data)
         pf_state = DCPowerFlowState(net, demand)
 
-        # Test type-based interface
-        dva_dd = calc_sensitivity(pf_state, VoltageAngle(), Demand())
-        @test dva_dd isa Sensitivity{DCPF, VoltageAngle, Demand}
+        dva_dd = calc_sensitivity(pf_state, :va, :d)
+        @test dva_dd isa Sensitivity
+        @test dva_dd.formulation == :dcpf
+        @test dva_dd.operand == :va
+        @test dva_dd.parameter == :d
         @test size(dva_dd) == (net.n, net.n)
 
-        df_dd = calc_sensitivity(pf_state, Flow(), Demand())
-        @test df_dd isa Sensitivity{DCPF, Flow, Demand}
+        df_dd = calc_sensitivity(pf_state, :f, :d)
+        @test df_dd isa Sensitivity
+        @test df_dd.formulation == :dcpf
+        @test df_dd.operand == :f
+        @test df_dd.parameter == :d
         @test size(df_dd) == (net.m, net.n)
     end
 
@@ -102,18 +87,21 @@ using Test
         demand = calc_demand_vector(net_data)
         prob = DCOPFProblem(net, demand)
 
-        # Test type-based interface
-        dva_dz = calc_sensitivity(prob, VoltageAngle(), Switching())
-        @test dva_dz isa Sensitivity{DCOPF, VoltageAngle, Switching}
-        @test size(dva_dz) == (net.n, net.m)
+        dva_dsw = calc_sensitivity(prob, :va, :sw)
+        @test dva_dsw isa Sensitivity
+        @test dva_dsw.formulation == :dcopf
+        @test size(dva_dsw) == (net.n, net.m)
 
-        dg_dz = calc_sensitivity(prob, Generation(), Switching())
-        @test dg_dz isa Sensitivity{DCOPF, Generation, Switching}
-        @test size(dg_dz) == (net.k, net.m)
+        dg_dsw = calc_sensitivity(prob, :pg, :sw)
+        @test dg_dsw isa Sensitivity
+        @test dg_dsw.formulation == :dcopf
+        @test dg_dsw.operand == :pg
+        @test size(dg_dsw) == (net.k, net.m)
 
-        df_dz = calc_sensitivity(prob, Flow(), Switching())
-        @test df_dz isa Sensitivity{DCOPF, Flow, Switching}
-        @test size(df_dz) == (net.m, net.m)
+        df_dsw = calc_sensitivity(prob, :f, :sw)
+        @test df_dsw isa Sensitivity
+        @test df_dsw.formulation == :dcopf
+        @test size(df_dsw) == (net.m, net.m)
     end
 
     @testset "DC OPF Demand Sensitivity" begin
@@ -121,9 +109,11 @@ using Test
         demand = calc_demand_vector(net_data)
         prob = DCOPFProblem(net, demand)
 
-        # Test type-based interface returns typed result
-        dlmp_dd = calc_sensitivity(prob, LMP(), Demand())
-        @test dlmp_dd isa Sensitivity{DCOPF, LMP, Demand}
+        dlmp_dd = calc_sensitivity(prob, :lmp, :d)
+        @test dlmp_dd isa Sensitivity
+        @test dlmp_dd.formulation == :dcopf
+        @test dlmp_dd.operand == :lmp
+        @test dlmp_dd.parameter == :d
         @test size(dlmp_dd) == (net.n, net.n)
 
         # Test index mappings
@@ -147,9 +137,9 @@ using Test
         @test size(Y) == (ac_net.n, ac_net.n)
 
         # With switching
-        z = ones(ac_net.m)
-        z[1] = 0.0  # Open first branch
-        Y_switched = admittance_matrix(ac_net, z)
+        sw = ones(ac_net.m)
+        sw[1] = 0.0  # Open first branch
+        Y_switched = admittance_matrix(ac_net, sw)
         @test Y_switched != Y
     end
 
@@ -175,13 +165,18 @@ using Test
         PowerModels.compute_ac_pf!(net_data)
         state = ACPowerFlowState(net_data)
 
-        # Type-based interface
-        dvm_dp = calc_sensitivity(state, VoltageMagnitude(), ActivePower())
-        @test dvm_dp isa Sensitivity{ACPF, VoltageMagnitude, ActivePower}
+        dvm_dp = calc_sensitivity(state, :vm, :p)
+        @test dvm_dp isa Sensitivity
+        @test dvm_dp.formulation == :acpf
+        @test dvm_dp.operand == :vm
+        @test dvm_dp.parameter == :p
         @test size(dvm_dp) == (state.n, state.n)
 
-        dvm_dq = calc_sensitivity(state, VoltageMagnitude(), ReactivePower())
-        @test dvm_dq isa Sensitivity{ACPF, VoltageMagnitude, ReactivePower}
+        dvm_dq = calc_sensitivity(state, :vm, :q)
+        @test dvm_dq isa Sensitivity
+        @test dvm_dq.formulation == :acpf
+        @test dvm_dq.operand == :vm
+        @test dvm_dq.parameter == :q
         @test size(dvm_dq) == (state.n, state.n)
 
         # Sensitivities should be real and finite
@@ -189,35 +184,22 @@ using Test
         @test all(isfinite, Matrix(dvm_dq))
     end
 
-    @testset "Sensitivity Type Dispatch" begin
+    @testset "Sensitivity Metadata" begin
         net = DCNetwork(net_data)
         demand = calc_demand_vector(net_data)
         prob = DCOPFProblem(net, demand)
 
-        # Get typed sensitivity
-        sens = calc_sensitivity(prob, LMP(), Demand())
+        # Get sensitivity and check metadata
+        sens = calc_sensitivity(prob, :lmp, :d)
+        @test sens.formulation == :dcopf
+        @test sens.operand == :lmp
+        @test sens.parameter == :d
 
-        # Test dispatch helpers
-        @test formulation(sens) == DCOPF
-        @test operand(sens) == LMP
-        @test parameter(sens) == Demand
-
-        # Test type-based dispatch
-        function process_sens(s::Sensitivity{DCOPF, LMP, Demand})
-            return "DC OPF LMP-demand"
-        end
-        function process_sens(s::Sensitivity{F, O, P}) where {F, O, P}
-            return "Generic sensitivity"
-        end
-
-        @test process_sens(sens) == "DC OPF LMP-demand"
-
-        # Test dispatching on any switching sensitivity
-        dva_dz = calc_sensitivity(prob, VoltageAngle(), Switching())
-        function process_switching(s::Sensitivity{F, O, Switching}) where {F, O}
-            return "Switching sensitivity"
-        end
-        @test process_switching(dva_dz) == "Switching sensitivity"
+        # Test that metadata is accessible as fields
+        dva_dsw = calc_sensitivity(prob, :va, :sw)
+        @test dva_dsw.formulation == :dcopf
+        @test dva_dsw.operand == :va
+        @test dva_dsw.parameter == :sw
     end
 end
 
