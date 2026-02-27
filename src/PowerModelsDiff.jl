@@ -6,7 +6,6 @@ using JuMP
 using Clarabel
 using Ipopt
 using ForwardDiff
-using BlockArrays
 import PowerModels
 const PM = PowerModels
 

@@ -264,7 +264,7 @@ end
 # =============================================================================
 
 """
-Compute the reduced-space Lagrangian L(va, vm, pg, qg; duals, z_switch).
+Compute the reduced-space Lagrangian L(va, vm, pg, qg; duals, sw).
 
 In the reduced space, flows are functions of (va, vm), not separate variables.
 ForwardDiff.gradient of this function w.r.t. [va; vm; pg; qg] gives the
@@ -645,34 +645,34 @@ function _ensure_ac_solved!(prob::ACOPFProblem)::ACOPFSolution
 end
 
 """
-    _get_ac_dx_ds!(prob::ACOPFProblem) → Matrix{Float64}
+    _get_ac_dz_dsw!(prob::ACOPFProblem) → Matrix{Float64}
 
 Get or compute the full KKT derivative matrix w.r.t. switching.
 Uses cached value if available, otherwise computes and caches.
 
 Uses the implicit function theorem on KKT conditions:
-∂x/∂s = -(∂K/∂x)⁻¹ · (∂K/∂s)
+∂z/∂sw = -(∂K/∂z)⁻¹ · (∂K/∂sw)
 """
-function _get_ac_dx_ds!(prob::ACOPFProblem)::Matrix{Float64}
-    if isnothing(prob.cache.dx_ds)
+function _get_ac_dz_dsw!(prob::ACOPFProblem)::Matrix{Float64}
+    if isnothing(prob.cache.dz_dsw)
         sol = _ensure_ac_solved!(prob)
 
-        J_x = calc_ac_kkt_jacobian(prob; sol=sol)  # ∂K/∂x
-        J_s = calc_ac_kkt_jacobian_switching(prob, sol)  # ∂K/∂s
+        J_z = calc_ac_kkt_jacobian(prob; sol=sol)   # ∂K/∂z
+        J_sw = calc_ac_kkt_jacobian_switching(prob, sol)  # ∂K/∂sw
 
-        # Implicit function theorem: ∂x/∂s = -(∂K/∂x)⁻¹ · (∂K/∂s)
-        prob.cache.dx_ds = try
-            -J_x \ J_s
+        # Implicit function theorem: ∂z/∂sw = -(∂K/∂z)⁻¹ · (∂K/∂sw)
+        prob.cache.dz_dsw = try
+            -J_z \ J_sw
         catch e
             if e isa LinearAlgebra.SingularException
                 ε = 1e-10
-                -((J_x + ε * I) \ J_s)
+                -((J_z + ε * I) \ J_sw)
             else
                 rethrow(e)
             end
         end
     end
-    return prob.cache.dx_ds
+    return prob.cache.dz_dsw
 end
 
 """
@@ -691,13 +691,13 @@ NamedTuple containing Jacobians of solution variables w.r.t. switching:
 - `dqg_dsw`: ∂qg/∂sw (k × m) - reactive generation w.r.t. switching
 """
 function calc_sensitivity_switching(prob::ACOPFProblem)
-    dx_ds = _get_ac_dx_ds!(prob)
+    dz_dsw = _get_ac_dz_dsw!(prob)
     idx = ac_kkt_indices(prob)
 
     return (
-        dvm_dsw = dx_ds[idx.vm, :],
-        dva_dsw = dx_ds[idx.va, :],
-        dpg_dsw = dx_ds[idx.pg, :],
-        dqg_dsw = dx_ds[idx.qg, :],
+        dvm_dsw = dz_dsw[idx.vm, :],
+        dva_dsw = dz_dsw[idx.va, :],
+        dpg_dsw = dz_dsw[idx.pg, :],
+        dqg_dsw = dz_dsw[idx.qg, :],
     )
 end

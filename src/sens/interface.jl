@@ -242,15 +242,15 @@ end
 function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, param::Symbol)
     param === :sw || throw(ArgumentError(
         "ACOPFProblem currently only supports :sw parameter, got :$param"))
-    dx_ds = _get_ac_dx_ds!(prob)
+    dz_dsw = _get_ac_dz_dsw!(prob)
     idx = ac_kkt_indices(prob)
     if op === :vm
-        return dx_ds[idx.vm, :]
+        return dz_dsw[idx.vm, :]
     elseif op === :va
-        return dx_ds[idx.va, :]
+        return dz_dsw[idx.va, :]
     elseif op === :pg
-        return dx_ds[idx.pg, :]
+        return dz_dsw[idx.pg, :]
     else  # :qg
-        return dx_ds[idx.qg, :]
+        return dz_dsw[idx.qg, :]
     end
 end

@@ -187,16 +187,16 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
         # Note: A is m × n, so we get the e-th row
         aₑ = Vector(net.A[e, :])
 
-        # ∂L/∂zₑ = -bₑ · (aₑ · aₑ')
+        # ∂L/∂swₑ = -bₑ · (aₑ · aₑ')
         # This is a rank-1 matrix
-        ∂L_∂zₑ = -net.b[e] * (aₑ * aₑ')
+        ∂L_∂swₑ = -net.b[e] * (aₑ * aₑ')
 
-        # ∂va_raw/∂zₑ = -L⁺ · ∂L/∂zₑ · va_raw
-        dva_raw_dzₑ = -L_pinv * ∂L_∂zₑ * θ_raw
+        # ∂va_raw/∂swₑ = -L⁺ · ∂L/∂swₑ · va_raw
+        dva_raw_dswₑ = -L_pinv * ∂L_∂swₑ * θ_raw
 
         # Account for centering: va = va_raw - va_raw[ref]
-        # So ∂va/∂zₑ = ∂va_raw/∂zₑ - (∂va_raw/∂zₑ)[ref] · 1
-        dva_dsw[:, e] = dva_raw_dzₑ .- dva_raw_dzₑ[ref]
+        # So ∂va/∂swₑ = ∂va_raw/∂swₑ - (∂va_raw/∂swₑ)[ref] · 1
+        dva_dsw[:, e] = dva_raw_dswₑ .- dva_raw_dswₑ[ref]
     end
 
     # Flow sensitivity: f = W · A · va where W = Diag(-b ⊙ sw)
@@ -224,7 +224,7 @@ end
 
 Compute demand sensitivity for DC power flow (not OPF).
 
-For DC power flow va = L(z)⁺ p, the sensitivity of angles w.r.t. demand is:
+For DC power flow va = L(sw)⁺ p, the sensitivity of angles w.r.t. demand is:
 
     ∂va/∂d = -L⁺
 

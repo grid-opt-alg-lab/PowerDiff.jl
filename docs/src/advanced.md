@@ -72,9 +72,9 @@ Cache invalidation happens automatically when `solve!`, `update_demand!`, or `up
 The [`ACOPFProblem`](@ref) maintains an `ACSensitivityCache` with:
 
 - `solution`: The last solved `ACOPFSolution`
-- `dx_ds`: Full KKT derivative matrix w.r.t. switching
+- `dz_dsw`: Full KKT derivative matrix w.r.t. switching
 
-All AC OPF operands (`:vm`, `:va`, `:pg`, `:qg`) share a single cached `dx_ds` computation.
+All AC OPF operands (`:vm`, `:va`, `:pg`, `:qg`) share a single cached `dz_dsw` computation.
 
 ## Solver Configuration
 

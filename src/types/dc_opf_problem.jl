@@ -21,7 +21,7 @@ factorization is reused for subsequent parameters. Different operand queries
 rows from the same cached `dz_d*` matrix — no recomputation needed.
 
 By contrast, `ACSensitivityCache` only needs 2 fields because AC OPF currently
-supports only switching (`:sw`) as a parameter, and `dx_ds` already contains all
+supports only switching (`:sw`) as a parameter, and `dz_dsw` already contains all
 operand rows. Power flow states (`DCPowerFlowState`, `ACPowerFlowState`) have no
 cache at all because their sensitivities are cheap direct algebra (pseudoinverse
 or Jacobian factorization is precomputed at construction time).
@@ -95,6 +95,8 @@ B-θ formulation of DC OPF wrapped around a JuMP model.
 - `d`: Demand parameter (can be updated for sensitivity analysis)
 - `cons`: Named tuple of constraint references
 - `cache`: Mutable sensitivity cache for avoiding redundant KKT solves
+- `_optimizer`: Optimizer factory for model rebuilds (internal)
+- `_silent`: Whether to suppress solver output (internal)
 """
 mutable struct DCOPFProblem <: AbstractOPFProblem
     model::JuMP.Model
@@ -105,6 +107,8 @@ mutable struct DCOPFProblem <: AbstractOPFProblem
     d::Vector{Float64}
     cons::NamedTuple
     cache::DCSensitivityCache
+    _optimizer::Any
+    _silent::Bool
 end
 
 # =============================================================================
@@ -131,16 +135,34 @@ solve!(prob)
 ```
 """
 function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.Optimizer, silent::Bool=true)
+    @assert length(d) == network.n "Demand vector length must match number of buses"
+
+    prob = DCOPFProblem(
+        JuMP.Model(), network, VariableRef[], VariableRef[], VariableRef[],
+        Float64.(d), (;), DCSensitivityCache(), optimizer, silent
+    )
+    _rebuild_jump_model!(prob)
+    return prob
+end
+
+"""
+    _rebuild_jump_model!(prob::DCOPFProblem)
+
+Build (or rebuild) the JuMP model from current network parameters.
+Called by the constructor and by `update_switching!` after mutating `network.sw`.
+"""
+function _rebuild_jump_model!(prob::DCOPFProblem)
+    network = prob.network
     n, m, k = network.n, network.m, network.k
-    @assert length(d) == n "Demand vector length must match number of buses"
+    d = prob.d
 
     # Build susceptance matrix B = A' * W * A
     W = Diagonal(-network.b .* network.sw)
     B_mat = sparse(network.A' * W * network.A)
 
     # Create model
-    model = JuMP.Model(optimizer)
-    silent && set_silent(model)
+    model = JuMP.Model(prob._optimizer)
+    prob._silent && set_silent(model)
 
     # Variables
     @variable(model, θ[1:n])
@@ -174,7 +196,11 @@ function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.
     # Phase angle difference limits
     phase_diff = @constraint(model, network.Δθ_min .<= network.A * θ .<= network.Δθ_max)
 
-    cons = (
+    prob.model = model
+    prob.θ = θ
+    prob.g = g
+    prob.f = f
+    prob.cons = (
         power_bal = power_bal,
         flow_def = flow_def,
         line_lb = line_lb,
@@ -185,7 +211,7 @@ function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.
         phase_diff = phase_diff
     )
 
-    return DCOPFProblem(model, network, θ, g, f, Float64.(d), cons, DCSensitivityCache())
+    return nothing
 end
 
 """

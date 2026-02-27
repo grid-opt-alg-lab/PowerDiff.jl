@@ -159,7 +159,6 @@ using Test
         dva_dsw = calc_sensitivity(prob, :va, :sw)
 
         # Verify with finite differences (negative perturbation to stay in [0,1])
-        # Construct a fresh DCOPFProblem per perturbation to avoid stale JuMP model (#5)
         ε = 1e-5
         m = net.m
 
@@ -172,15 +171,15 @@ using Test
             prob_pert = DCOPFProblem(net_pert, d)
             sol_pert = solve!(prob_pert)
 
-            fd_dva_dz_col = (sol.θ - sol_pert.θ) / ε  # Reversed due to negative ε
+            fd_dva_dsw_col = (sol.θ - sol_pert.θ) / ε  # Reversed due to negative ε
 
             # Larger tolerance for OPF due to active constraint changes
-            max_err = maximum(abs.(Matrix(dva_dsw)[:, e] - fd_dva_dz_col))
+            max_err = maximum(abs.(Matrix(dva_dsw)[:, e] - fd_dva_dsw_col))
             @test max_err < 0.05
         end
     end
 
-    @testset "DC OPF Switching Sensitivity (∂pg/∂z, ∂f/∂z)" begin
+    @testset "DC OPF Switching Sensitivity (∂pg/∂sw, ∂f/∂sw)" begin
         net = DCNetwork(net_data)
         d = calc_demand_vector(net_data)
         prob = DCOPFProblem(net, d)
@@ -191,7 +190,6 @@ using Test
         df_dsw = calc_sensitivity(prob, :f, :sw)
 
         # Verify with finite differences (negative perturbation to stay in [0,1])
-        # Construct a fresh DCOPFProblem per perturbation to avoid stale JuMP model (#5)
         ε = 1e-5
         m = net.m
 
@@ -208,20 +206,20 @@ using Test
             fd_dpg_col = (sol.g - sol_pert.g) / ε
             fd_df_col = (sol.f - sol_pert.f) / ε
 
-            # Check ∂pg/∂z
+            # Check ∂pg/∂sw
             if norm(fd_dpg_col) > 1e-10
                 rel_err_pg = norm(Matrix(dpg_dsw)[:, e] - fd_dpg_col) / norm(fd_dpg_col)
                 @test rel_err_pg < 0.05
             else
-                @info "Skipped ∂pg/∂z FD: near-zero perturbation" branch=e
+                @info "Skipped ∂pg/∂sw FD: near-zero perturbation" branch=e
             end
 
-            # Check ∂f/∂z
+            # Check ∂f/∂sw
             if norm(fd_df_col) > 1e-10
                 rel_err_f = norm(Matrix(df_dsw)[:, e] - fd_df_col) / norm(fd_df_col)
                 @test rel_err_f < 0.05
             else
-                @info "Skipped ∂f/∂z FD: near-zero perturbation" branch=e
+                @info "Skipped ∂f/∂sw FD: near-zero perturbation" branch=e
             end
         end
     end

@@ -133,19 +133,12 @@ end
 """
     update_switching!(prob::ACOPFProblem, sw::AbstractVector)
 
-Update the network switching state and invalidate the sensitivity cache.
+Update the network switching state, invalidate the sensitivity cache, and
+rebuild the JuMP model so that `solve!(prob)` uses the new switching state.
 
 # Arguments
 - `prob`: ACOPFProblem to update
 - `sw`: New switching state vector (length m), values in [0,1]
-
-# Warning
-This modifies `prob.network.sw` and invalidates cached sensitivities.
-The JuMP model constraints embed the previous sw values as coefficients,
-so the problem **must** be rebuilt for exact re-optimization. However, the
-KKT-based sensitivity analysis (which uses its own `ac_kkt` function
-with the current `network.sw`) works correctly **not** requiring a model rebuild.
-See GitHub issue #5.
 """
 function update_switching!(prob::ACOPFProblem, sw::AbstractVector)
     m = prob.network.m
@@ -158,10 +151,8 @@ function update_switching!(prob::ACOPFProblem, sw::AbstractVector)
     # Update network switching state
     prob.network.sw .= sw
 
-    # Note: The JuMP model constraints embed the previous sw values as coefficients.
-    # After calling this, the problem must be rebuilt for exact re-optimization.
-    # However, the KKT-based sensitivity analysis (which uses its own ac_kkt function
-    # with the current network.sw) works correctly without a model rebuild.
+    # Rebuild JuMP model with new switching coefficients
+    _rebuild_jump_model!(prob)
 
     return prob
 end

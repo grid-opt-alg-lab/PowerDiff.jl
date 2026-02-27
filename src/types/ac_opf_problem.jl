@@ -110,11 +110,11 @@ KKT solves and ForwardDiff Jacobian evaluations.
 
 # Fields
 - `solution`: Cached ACOPFSolution (or nothing if not yet solved)
-- `dx_ds`: Full ∂x/∂s derivative matrix w.r.t. switching (or nothing)
+- `dz_dsw`: Full ∂z/∂sw derivative matrix w.r.t. switching (or nothing)
 """
 mutable struct ACSensitivityCache
     solution::Union{Nothing, ACOPFSolution}
-    dx_ds::Union{Nothing, Matrix{Float64}}
+    dz_dsw::Union{Nothing, Matrix{Float64}}
 end
 
 """
@@ -131,7 +131,7 @@ Clear all cached AC sensitivity data. Called when problem parameters change.
 """
 function invalidate!(cache::ACSensitivityCache)
     cache.solution = nothing
-    cache.dx_ds = nothing
+    cache.dz_dsw = nothing
 end
 
 # =============================================================================
@@ -154,6 +154,8 @@ Polar coordinate AC OPF wrapped around a JuMP model.
 - `gen_buses`: Generator bus indices (maps generator index to bus index)
 - `n_gen`: Number of generators
 - `cache`: ACSensitivityCache for caching KKT derivatives
+- `_optimizer`: Optimizer factory for model rebuilds (internal)
+- `_silent`: Whether to suppress solver output (internal)
 """
 mutable struct ACOPFProblem <: AbstractOPFProblem
     model::JuMP.Model
@@ -169,6 +171,8 @@ mutable struct ACOPFProblem <: AbstractOPFProblem
     gen_buses::Vector{Int}
     n_gen::Int
     cache::ACSensitivityCache
+    _optimizer::Any
+    _silent::Bool
 end
 
 # =============================================================================
@@ -204,18 +208,61 @@ function ACOPFProblem(
 )
     @assert haskey(pm_data, "basic_network") && pm_data["basic_network"] == true "Network must be a basic network"
 
+    if optimizer === Clarabel.Optimizer
+        @warn "Clarabel is a convex solver and cannot solve nonconvex AC OPF. " *
+              "Use Ipopt.Optimizer (default) or another NLP solver."
+    end
+
     # Build PowerModels reference structure
     PM.standardize_cost_terms!(pm_data, order=2)
     PM.calc_thermal_limits!(pm_data)
     ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
 
-    n = network.n
-    m = network.m
     n_gen = length(ref[:gen])
+    gen_buses = [ref[:gen][i]["gen_bus"] for i in 1:n_gen]
+
+    # Convert ref to Symbol-keyed dict for storage
+    ref_sym = Dict{Symbol, Any}(
+        :bus => ref[:bus],
+        :gen => ref[:gen],
+        :branch => ref[:branch],
+        :load => ref[:load],
+        :shunt => ref[:shunt],
+        :arcs => ref[:arcs],
+        :arcs_from => ref[:arcs_from],
+        :arcs_to => ref[:arcs_to],
+        :bus_arcs => ref[:bus_arcs],
+        :bus_gens => ref[:bus_gens],
+        :bus_loads => ref[:bus_loads],
+        :bus_shunts => ref[:bus_shunts],
+        :ref_buses => ref[:ref_buses]
+    )
+
+    prob = ACOPFProblem(
+        JuMP.Model(), network,
+        VariableRef[], VariableRef[], VariableRef[], VariableRef[],
+        Dict{Tuple{Int,Int,Int}, VariableRef}(), Dict{Tuple{Int,Int,Int}, VariableRef}(),
+        (;), ref_sym, gen_buses, n_gen, ACSensitivityCache(), optimizer, silent
+    )
+    _rebuild_jump_model!(prob)
+    return prob
+end
+
+"""
+    _rebuild_jump_model!(prob::ACOPFProblem)
+
+Build (or rebuild) the JuMP model from current network parameters.
+Called by the constructor and by `update_switching!` after mutating `network.sw`.
+"""
+function _rebuild_jump_model!(prob::ACOPFProblem)
+    network = prob.network
+    ref = prob.ref
+    n, m = network.n, network.m
+    n_gen = prob.n_gen
 
     # Create model
-    model = JuMP.Model(optimizer)
-    silent && set_silent(model)
+    model = JuMP.Model(prob._optimizer)
+    prob._silent && set_silent(model)
     set_optimizer_attribute(model, "tol", 1e-6)
 
     # Voltage variables
@@ -344,11 +391,14 @@ function ACOPFProblem(
         thermal_to_cons[l] = @constraint(model, p_to^2 + q_to^2 <= branch["rate_a"]^2)
     end
 
-    # Store generator bus mapping
-    gen_buses = [ref[:gen][i]["gen_bus"] for i in 1:n_gen]
-
-    # Pack constraints
-    cons = (
+    prob.model = model
+    prob.va = collect(va)
+    prob.vm = collect(vm)
+    prob.pg = collect(pg)
+    prob.qg = collect(qg)
+    prob.p = p
+    prob.q = q
+    prob.cons = (
         ref_bus = ref_bus_con,
         p_bal = p_bal_cons,
         q_bal = q_bal_cons,
@@ -361,25 +411,7 @@ function ACOPFProblem(
         angle_diff = angle_diff_cons
     )
 
-    # Convert ref to Symbol-keyed dict for storage
-    ref_sym = Dict{Symbol, Any}(
-        :bus => ref[:bus],
-        :gen => ref[:gen],
-        :branch => ref[:branch],
-        :load => ref[:load],
-        :shunt => ref[:shunt],
-        :arcs => ref[:arcs],
-        :arcs_from => ref[:arcs_from],
-        :arcs_to => ref[:arcs_to],
-        :bus_arcs => ref[:bus_arcs],
-        :bus_gens => ref[:bus_gens],
-        :bus_loads => ref[:bus_loads],
-        :bus_shunts => ref[:bus_shunts],
-        :ref_buses => ref[:ref_buses]
-    )
-
-    return ACOPFProblem(model, network, collect(va), collect(vm), collect(pg), collect(qg),
-                        p, q, cons, ref_sym, gen_buses, n_gen, ACSensitivityCache())
+    return nothing
 end
 
 """

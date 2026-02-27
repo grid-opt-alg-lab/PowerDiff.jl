@@ -149,7 +149,7 @@ Uses susceptance-weighted Laplacian `L = A' * Diagonal(-b .* sw) * A`:
 - `ACOPFProblem`: Full nonlinear AC OPF via Ipopt, with `ACSensitivityCache` for efficient KKT reuse
 - `ACOPFSolution`: Primal (va, vm, pg, qg) and dual variables
 - Switching sensitivity via KKT implicit differentiation with ForwardDiff
-- Multiple operands (`:vm`, `:va`, `:pg`, `:qg`) share a single cached `dx_ds` computation
+- Multiple operands (`:vm`, `:va`, `:pg`, `:qg`) share a single cached `dz_dsw` computation
 
 ### KKT Systems
 

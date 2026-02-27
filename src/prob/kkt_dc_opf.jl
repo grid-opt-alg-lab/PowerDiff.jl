@@ -619,19 +619,12 @@ end
 """
     update_switching!(prob::DCOPFProblem, s::AbstractVector)
 
-Update the network switching state and invalidate the sensitivity cache.
+Update the network switching state, invalidate the sensitivity cache, and
+rebuild the JuMP model so that `solve!(prob)` uses the new switching state.
 
 # Arguments
 - `prob`: DCOPFProblem to update
 - `s`: New switching state vector (length m), values in [0,1]
-
-# Warning
-This modifies `prob.network.sw` and invalidates cached sensitivities, but does
-**not** rebuild the JuMP model. Calling `solve!(prob)` afterwards returns stale
-results because the JuMP constraints still reference the old switching state.
-Use this function only for KKT-based sensitivity cache invalidation. For
-finite-difference verification, construct a fresh `DCOPFProblem` instead.
-See GitHub issue #5.
 """
 function update_switching!(prob::DCOPFProblem, s::AbstractVector)
     m = prob.network.m
@@ -643,6 +636,9 @@ function update_switching!(prob::DCOPFProblem, s::AbstractVector)
 
     # Update network switching state
     prob.network.sw .= s
+
+    # Rebuild JuMP model with new switching coefficients
+    _rebuild_jump_model!(prob)
 
     return prob
 end

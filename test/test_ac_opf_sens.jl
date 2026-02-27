@@ -147,7 +147,7 @@ using Test
         # First call computes and caches
         dvm_dsw = calc_sensitivity(prob, :vm, :sw)
         @test size(dvm_dsw) == (5, 7)
-        @test !isnothing(prob.cache.dx_ds)
+        @test !isnothing(prob.cache.dz_dsw)
 
         # Subsequent calls reuse cache (no re-solve)
         dva_dsw = calc_sensitivity(prob, :va, :sw)
