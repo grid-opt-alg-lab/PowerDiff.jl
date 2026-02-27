@@ -166,6 +166,8 @@ end
             if norm(fd_dvm) > 1e-10
                 rel_err = norm(analytical_col - fd_dvm) / norm(fd_dvm)
                 @test rel_err < fd_tol
+            else
+                @info "Skipped ∂|v|/∂p FD: near-zero perturbation" bus=k_global
             end
         end
     end
@@ -188,6 +190,8 @@ end
             if norm(fd_dvm) > 1e-10
                 rel_err = norm(analytical_col - fd_dvm) / norm(fd_dvm)
                 @test rel_err < fd_tol
+            else
+                @info "Skipped ∂|v|/∂q FD: near-zero perturbation" bus=k_global
             end
         end
     end
@@ -220,6 +224,8 @@ end
             if norm(fd_dim[active]) > 1e-10
                 rel_err = norm(analytical_col[active] - fd_dim[active]) / norm(fd_dim[active])
                 @test rel_err < fd_tol
+            else
+                @info "Skipped ∂|I|/∂p FD: near-zero perturbation" bus=k_global
             end
         end
     end
@@ -252,6 +258,60 @@ end
             if norm(fd_dim[active]) > 1e-10
                 rel_err = norm(analytical_col[active] - fd_dim[active]) / norm(fd_dim[active])
                 @test rel_err < fd_tol
+            else
+                @info "Skipped ∂|I|/∂q FD: near-zero perturbation" bus=k_global
+            end
+        end
+    end
+
+    # -----------------------------------------------------------------
+    # ∂v/∂p — complex phasor sensitivity w.r.t. active power
+    # This test would have caught the conjugate sign bug in ∂v reconstruction
+    # -----------------------------------------------------------------
+    dv_dp = calc_sensitivity(state, :v, :p)
+    dv_dq = calc_sensitivity(state, :v, :q)
+
+    @testset "∂v/∂p (complex phasor w.r.t. active power)" begin
+        for k_local in 1:min(3, length(non_slack))
+            k_global = non_slack[k_local]
+
+            p_pert = copy(p_base)
+            p_pert[k_local] += delta
+
+            v_new = _solve_pf_pq(Y, v_base, p_pert, q_base, slack)
+            fd_dv = (v_new - v_base) / delta
+
+            analytical_col = Matrix(dv_dp)[:, k_global]
+
+            if norm(fd_dv) > 1e-10
+                rel_err = norm(analytical_col - fd_dv) / norm(fd_dv)
+                @test rel_err < fd_tol
+            else
+                @info "Skipped ∂v/∂p FD: near-zero perturbation" bus=k_global
+            end
+        end
+    end
+
+    # -----------------------------------------------------------------
+    # ∂v/∂q — complex phasor sensitivity w.r.t. reactive power
+    # -----------------------------------------------------------------
+    @testset "∂v/∂q (complex phasor w.r.t. reactive power)" begin
+        for k_local in 1:min(3, length(non_slack))
+            k_global = non_slack[k_local]
+
+            q_pert = copy(q_base)
+            q_pert[k_local] += delta
+
+            v_new = _solve_pf_pq(Y, v_base, p_base, q_pert, slack)
+            fd_dv = (v_new - v_base) / delta
+
+            analytical_col = Matrix(dv_dq)[:, k_global]
+
+            if norm(fd_dv) > 1e-10
+                rel_err = norm(analytical_col - fd_dv) / norm(fd_dv)
+                @test rel_err < fd_tol
+            else
+                @info "Skipped ∂v/∂q FD: near-zero perturbation" bus=k_global
             end
         end
     end

@@ -175,10 +175,8 @@ function calc_voltage_reactive_power_sensitivities(
     for k in 1:d
         if abs(v_[k]) > 1e-6
             # Right-hand side: unit perturbation in reactive power at bus k
-            # Note: power flow equation is p + jq = conj(v) * Y * v
-            # Derivative w.r.t. q has opposite sign in imaginary part
             b = zeros(2d)
-            b[d + k] = -1.0  # Note the negative sign
+            b[d + k] = 1.0
 
             # Solve the linear system
             x = A \ b
@@ -214,13 +212,16 @@ end
 Build the linearized system matrix A for voltage-power sensitivity computation.
 
 The matrix A relates perturbations in (v_re, v_im) to perturbations in (p, q)
-based on the power flow equations:
-    p = Re(conj(v) * (Y * v))
-    q = Im(conj(v) * (Y * v))
+based on the standard-convention power flow equations:
+
+    p + jq = V · conj(Y · V) = conj(conj(V) · Y · V)
+    p = Re(conj(V) · Y · V)
+    q = -Im(conj(V) · Y · V)   [standard convention]
 
 The matrix has structure:
-    A = [∂p/∂v_re  ∂p/∂v_im]
-        [∂q/∂v_re  ∂q/∂v_im]
+
+    A = [∂P/∂v_re   ∂P/∂v_im]
+        [∂Q/∂v_re   ∂Q/∂v_im]
 
 evaluated at the operating point (v, Y).
 """
@@ -248,16 +249,18 @@ function _build_voltage_sensitivity_matrix(
         for j in 1:d
             if i == j
                 # Diagonal blocks include current injection terms
+                # Top block: ∂P/∂(v_re, v_im) — unchanged
                 A[i, j] = real(I[i]) + real(H[i, j])
-                A[d+i, j] = imag(I[i]) + imag(H[i, j])
                 A[i, d+j] = imag(I[i]) - imag(H[i, j])
-                A[d+i, d+j] = real(H[i, j]) - real(I[i])
+                # Bottom block: ∂Q/∂(v_re, v_im) — negated from Im(conj(V)·Y·V)
+                A[d+i, j] = -(imag(I[i]) + imag(H[i, j]))
+                A[d+i, d+j] = -(real(H[i, j]) - real(I[i]))
             else
                 # Off-diagonal blocks
                 A[i, j] = real(H[i, j])
-                A[d+i, j] = imag(H[i, j])
                 A[i, d+j] = -imag(H[i, j])
-                A[d+i, d+j] = real(H[i, j])
+                A[d+i, j] = -imag(H[i, j])
+                A[d+i, d+j] = -real(H[i, j])
             end
         end
     end
