@@ -41,7 +41,7 @@ using Test
         @test_throws ArgumentError calc_sensitivity(pf, :vm, :d)
     end
 
-    @testset "DC OPF — all 20 combinations" begin
+    @testset "DC OPF — all 24 combinations" begin
         net = DCNetwork(net_data)
         d = calc_demand_vector(net_data)
         prob = DCOPFProblem(net, d)
@@ -56,10 +56,7 @@ using Test
         param_sizes = Dict(:d => net.n, :z => net.m, :cl => net.k, :cq => net.k,
                            :fmax => net.m, :b => net.m)
 
-        # Not all combinations are valid: cost operands only with cost params?
-        # Actually, all 4 operands × 6 params = 24 combos should work.
-        # But :cl and :cq only have :pg and :lmp operands in the implementation.
-        # Let me check what's actually implemented.
+        # 4 operands × 6 parameters = 24 combinations
 
         for op in operands
             for param in params

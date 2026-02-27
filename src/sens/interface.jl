@@ -239,7 +239,9 @@ end
 # AC OPF: Implementation (uses cached KKT derivatives)
 # =============================================================================
 
-function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, ::Symbol)
+function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, param::Symbol)
+    param === :z || throw(ArgumentError(
+        "ACOPFProblem currently only supports :z parameter, got :$param"))
     dx_ds = _get_ac_dx_ds!(prob)
     idx = ac_kkt_indices(prob)
     if op === :vm

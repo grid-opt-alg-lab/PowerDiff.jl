@@ -67,7 +67,8 @@ function Sensitivity(
     row_to_id, id_to_row = row_mapping
     col_to_id, id_to_col = col_mapping
     return Sensitivity{T}(matrix, formulation, operand, parameter,
-                          row_to_id, id_to_row, col_to_id, id_to_col)
+                          copy(row_to_id), copy(id_to_row),
+                          copy(col_to_id), copy(id_to_col))
 end
 
 # =============================================================================

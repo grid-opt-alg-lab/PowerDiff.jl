@@ -159,6 +159,7 @@ using Test
         dva_dz = calc_sensitivity(prob, :va, :z)
 
         # Verify with finite differences (negative perturbation to stay in [0,1])
+        # Construct a fresh DCOPFProblem per perturbation to avoid stale JuMP model (#5)
         ε = 1e-5
         m = net.m
 
@@ -166,16 +167,16 @@ using Test
             z_pert = copy(net.z)
             z_pert[e] -= ε
 
-            update_switching!(prob, z_pert)
-            sol_pert = solve!(prob)
+            net_pert = DCNetwork(net_data)
+            net_pert.z .= z_pert
+            prob_pert = DCOPFProblem(net_pert, d)
+            sol_pert = solve!(prob_pert)
 
             fd_dva_dz_col = (sol.θ - sol_pert.θ) / ε  # Reversed due to negative ε
 
             # Larger tolerance for OPF due to active constraint changes
             max_err = maximum(abs.(Matrix(dva_dz)[:, e] - fd_dva_dz_col))
             @test max_err < 0.05
-
-            update_switching!(prob, net.z)
         end
     end
 
@@ -190,6 +191,7 @@ using Test
         df_dz = calc_sensitivity(prob, :f, :z)
 
         # Verify with finite differences (negative perturbation to stay in [0,1])
+        # Construct a fresh DCOPFProblem per perturbation to avoid stale JuMP model (#5)
         ε = 1e-5
         m = net.m
 
@@ -197,8 +199,10 @@ using Test
             z_pert = copy(net.z)
             z_pert[e] -= ε
 
-            update_switching!(prob, z_pert)
-            sol_pert = solve!(prob)
+            net_pert = DCNetwork(net_data)
+            net_pert.z .= z_pert
+            prob_pert = DCOPFProblem(net_pert, d)
+            sol_pert = solve!(prob_pert)
 
             # Reversed sign due to negative perturbation
             fd_dpg_col = (sol.g - sol_pert.g) / ε
@@ -219,8 +223,6 @@ using Test
             else
                 @info "Skipped ∂f/∂z FD: near-zero perturbation" branch=e
             end
-
-            update_switching!(prob, net.z)
         end
     end
 

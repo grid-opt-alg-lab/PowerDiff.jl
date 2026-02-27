@@ -5,7 +5,7 @@
 # KKT system in kkt_dc_opf.jl. The functions here provide convenience wrappers.
 
 """
-    calc_generation_participation_factors(prob::DCOPFProblem)
+    calc_generation_participation_factors(prob::DCOPFProblem) → Sensitivity{Float64}
 
 Compute generation participation factors from demand sensitivity.
 
@@ -13,14 +13,14 @@ The participation factor for generator i at bus j is dg_i/dd_j,
 representing how much generator i output changes when demand at bus j increases by 1 MW.
 
 # Returns
-Matrix (k x n) of participation factors.
+`Sensitivity{Float64}` (k × n) with formulation=:dcopf, operand=:pg, parameter=:d.
 """
 function calc_generation_participation_factors(prob::DCOPFProblem)
-    return _extract_sensitivity(prob, _get_dz_dd!(prob), :pg)
+    return calc_sensitivity(prob, :pg, :d)
 end
 
 """
-    calc_ptdf_from_sensitivity(prob::DCOPFProblem)
+    calc_ptdf_from_sensitivity(prob::DCOPFProblem) → Sensitivity{Float64}
 
 Compute Power Transfer Distribution Factors from flow sensitivity.
 
@@ -30,8 +30,8 @@ when power is injected at bus j (and withdrawn at the slack bus).
 For the B-theta formulation, this is directly available from the sensitivity analysis.
 
 # Returns
-Matrix (m x n) of PTDFs.
+`Sensitivity{Float64}` (m × n) with formulation=:dcopf, operand=:f, parameter=:d.
 """
 function calc_ptdf_from_sensitivity(prob::DCOPFProblem)
-    return _extract_sensitivity(prob, _get_dz_dd!(prob), :f)
+    return calc_sensitivity(prob, :f, :d)
 end

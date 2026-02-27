@@ -146,14 +146,13 @@ Extract a single sensitivity matrix from the full KKT derivative.
 function _extract_sensitivity(prob::DCOPFProblem, dz_dp::Matrix{Float64}, operand::Symbol)::Matrix{Float64}
     idx = kkt_indices(prob)
 
-    if operand === :va || operand === :θ
+    if operand === :va
         return Matrix(dz_dp[idx.θ, :])
-    elseif operand === :pg || operand === :g
+    elseif operand === :pg
         return Matrix(dz_dp[idx.g, :])
     elseif operand === :f
         return Matrix(dz_dp[idx.f, :])
-    elseif operand === :lmp || operand === :ν_bal
-        # LMP = ν_bal in B-θ formulation
+    elseif operand === :lmp
         return Matrix(dz_dp[idx.ν_bal, :])
     else
         throw(ArgumentError("Unknown operand: $operand"))
@@ -626,10 +625,13 @@ Update the network switching state and invalidate the sensitivity cache.
 - `prob`: DCOPFProblem to update
 - `s`: New switching state vector (length m), values in [0,1]
 
-# Note
-This modifies `prob.network.z` and invalidates cached sensitivities.
-The JuMP model is not rebuilt; re-solving will use the new switching state
-for KKT-based sensitivity analysis.
+# Warning
+This modifies `prob.network.z` and invalidates cached sensitivities, but does
+**not** rebuild the JuMP model. Calling `solve!(prob)` afterwards returns stale
+results because the JuMP constraints still reference the old switching state.
+Use this function only for KKT-based sensitivity cache invalidation. For
+finite-difference verification, construct a fresh `DCOPFProblem` instead.
+See GitHub issue #5.
 """
 function update_switching!(prob::DCOPFProblem, s::AbstractVector)
     m = prob.network.m
