@@ -72,7 +72,7 @@ function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork)
     # Convert JuMP duals to standard convention: λ_ub_std = -λ_ub_jmp
     λ_ub_std = -sol.λ_ub
     λ_lb_std = sol.λ_lb
-    return L_pinv * net.A' * Diagonal(w .* net.z) * (λ_ub_std - λ_lb_std)
+    return L_pinv * net.A' * Diagonal(w .* net.sw) * (λ_ub_std - λ_lb_std)
 end
 
 """

@@ -181,19 +181,19 @@ end
         end
 
         # -----------------------------------------------------------------
-        # LMP w.r.t. :z — perturb a switching state
+        # LMP w.r.t. :sw — perturb a switching state
         # -----------------------------------------------------------------
-        @testset "LMP w.r.t. :z" begin
-            dlmp_dz = calc_sensitivity(prob_base, :lmp, :z)
+        @testset "LMP w.r.t. :sw" begin
+            dlmp_dsw = calc_sensitivity(prob_base, :lmp, :sw)
 
             # Perturb switching state of branch 1
             branch_idx = 1
-            z_pert = copy(dc_net.z)
-            z_pert[branch_idx] -= delta
+            sw_pert = copy(dc_net.sw)
+            sw_pert[branch_idx] -= delta
 
-            # Rebuild DCNetwork with perturbed z
+            # Rebuild DCNetwork with perturbed sw
             dc_net_pert = DCNetwork(net)
-            dc_net_pert.z .= z_pert
+            dc_net_pert.sw .= sw_pert
 
             prob_pert = DCOPFProblem(dc_net_pert, d)
             sol_pert = solve!(prob_pert)
@@ -202,7 +202,7 @@ end
             # Negative perturbation, so fd = (base - pert) / delta
             fd_lmp = (lmp_base - lmp_pert) / delta
             if norm(fd_lmp) > 1e-10
-                rel_err = norm(Matrix(dlmp_dz)[:, branch_idx] - fd_lmp) / norm(fd_lmp)
+                rel_err = norm(Matrix(dlmp_dsw)[:, branch_idx] - fd_lmp) / norm(fd_lmp)
                 @test rel_err < lmp_tol
             end
         end

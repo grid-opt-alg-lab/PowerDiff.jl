@@ -27,7 +27,7 @@ providing bidirectional index mappings between internal indices and element IDs.
 - `matrix::Matrix{T}`: The sensitivity matrix data
 - `formulation::Symbol`: Formulation tag (:dcpf, :dcopf, :acpf, :acopf)
 - `operand::Symbol`: Operand tag (:va, :vm, :pg, :qg, :f, :lmp, :im, :v)
-- `parameter::Symbol`: Parameter tag (:d, :z, :cq, :cl, :fmax, :b, :p, :q)
+- `parameter::Symbol`: Parameter tag (:d, :sw, :cq, :cl, :fmax, :b, :p, :q)
 - `row_to_id::Vector{Int}`: Maps internal row index → external element ID
 - `id_to_row::Dict{Int,Int}`: Maps external element ID → internal row index
 - `col_to_id::Vector{Int}`: Maps internal col index → external element ID

@@ -31,7 +31,7 @@ Stores the DC network topology and parameters.
 | `A` | `SparseMatrixCSC` | Incidence matrix (m × n) |
 | `G_inc` | `SparseMatrixCSC` | Generator-bus incidence (n × k) |
 | `b` | `Vector{Float64}` | Branch susceptances |
-| `z` | `Vector{Float64}` | Switching states in [0,1] |
+| `sw` | `Vector{Float64}` | Switching states in [0,1] |
 | `fmax` | `Vector{Float64}` | Branch flow limits |
 | `gmax`, `gmin` | `Vector{Float64}` | Generator limits |
 | `cq`, `cl` | `Vector{Float64}` | Cost coefficients (quadratic, linear) |
@@ -51,7 +51,7 @@ Stores the AC network with vectorized admittance representation.
 | `incidences` | `Vector{Tuple}` | Edge list [(i,j), ...] |
 | `g`, `b` | `Vector{Float64}` | Conductances, susceptances |
 | `g_shunt`, `b_shunt` | `Vector{Float64}` | Shunt admittances |
-| `z` | `Vector{Float64}` | Switching states |
+| `sw` | `Vector{Float64}` | Switching states |
 
 ## Sensitivity Caching
 
@@ -61,7 +61,7 @@ The [`DCOPFProblem`](@ref) maintains a `DCSensitivityCache` that avoids redundan
 
 - `solution`: The last solved `DCOPFSolution`
 - `kkt_factor`: LU factorization of the KKT Jacobian
-- `dz_dd`, `dz_dz`, `dz_dcl`, `dz_dcq`, `dz_dfmax`, `dz_db`: Full KKT derivative matrices
+- `dz_dd`, `dz_dsw`, `dz_dcl`, `dz_dcq`, `dz_dfmax`, `dz_db`: Full KKT derivative matrices
 
 Calling `calc_sensitivity` with different operands for the same parameter reuses the cached KKT solve. For example, computing both `:va` and `:pg` w.r.t. `:d` only solves the KKT system once.
 

@@ -186,26 +186,26 @@ end
         solve!(prob)
 
         # Compute switching sensitivities using type-based interface
-        dva_dz = calc_sensitivity(prob, :va, :z)
-        dg_dz = calc_sensitivity(prob, :pg, :z)
-        df_dz = calc_sensitivity(prob, :f, :z)
-        dlmp_dz = calc_sensitivity(prob, :lmp, :z)
+        dva_dsw = calc_sensitivity(prob, :va, :sw)
+        dg_dsw = calc_sensitivity(prob, :pg, :sw)
+        df_dsw = calc_sensitivity(prob, :f, :sw)
+        dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)
 
-        @test size(dva_dz) == (dc_net.n, dc_net.m)
-        @test size(dg_dz) == (dc_net.k, dc_net.m)
-        @test size(df_dz) == (dc_net.m, dc_net.m)
-        @test size(dlmp_dz) == (dc_net.n, dc_net.m)
+        @test size(dva_dsw) == (dc_net.n, dc_net.m)
+        @test size(dg_dsw) == (dc_net.k, dc_net.m)
+        @test size(df_dsw) == (dc_net.m, dc_net.m)
+        @test size(dlmp_dsw) == (dc_net.n, dc_net.m)
 
-        @test !any(isnan, Matrix(dva_dz))
-        @test !any(isnan, Matrix(dg_dz))
-        @test !any(isnan, Matrix(df_dz))
-        @test !any(isnan, Matrix(dlmp_dz))
+        @test !any(isnan, Matrix(dva_dsw))
+        @test !any(isnan, Matrix(dg_dsw))
+        @test !any(isnan, Matrix(df_dsw))
+        @test !any(isnan, Matrix(dlmp_dsw))
 
         # Verify sensitivities are finite
-        @test all(isfinite, Matrix(dva_dz))
-        @test all(isfinite, Matrix(dg_dz))
-        @test all(isfinite, Matrix(df_dz))
-        @test all(isfinite, Matrix(dlmp_dz))
+        @test all(isfinite, Matrix(dva_dsw))
+        @test all(isfinite, Matrix(dg_dsw))
+        @test all(isfinite, Matrix(df_dsw))
+        @test all(isfinite, Matrix(dlmp_dsw))
     end
 end
 
@@ -672,7 +672,7 @@ end
 
         # Sensitivities should all be finite
         for (op, param) in [(:va, :d), (:pg, :d), (:f, :d), (:lmp, :d),
-                            (:va, :z), (:pg, :z), (:f, :z), (:lmp, :z)]
+                            (:va, :sw), (:pg, :sw), (:f, :sw), (:lmp, :sw)]
             S = calc_sensitivity(prob, op, param)
             @test all(isfinite, Matrix(S))
         end

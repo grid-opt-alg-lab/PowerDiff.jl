@@ -77,7 +77,7 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 
 **Parameter symbols** (what we differentiate w.r.t.):
 - `:d` or `:pd` - Demand
-- `:z` - Switching states
+- `:sw` - Switching states
 - `:cq`, `:cl` - Cost coefficients (DC OPF)
 - `:fmax` - Flow limits (DC OPF)
 - `:b` - Susceptances (DC OPF)
@@ -88,7 +88,7 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 # DC Power Flow
 pf_state = DCPowerFlowState(net, d)
 dva_dd = calc_sensitivity(pf_state, :va, :d)    # Sensitivity{Float64}, .formulation == :dcpf
-df_dz = calc_sensitivity(pf_state, :f, :z)      # Sensitivity{Float64}, .formulation == :dcpf
+df_dsw = calc_sensitivity(pf_state, :f, :sw)     # Sensitivity{Float64}, .formulation == :dcpf
 
 # DC OPF (has LMP because it has duals)
 prob = DCOPFProblem(net, d)
@@ -101,7 +101,7 @@ dvm_dp = calc_sensitivity(ac_state, :vm, :p)    # .formulation == :acpf, .operan
 
 # AC OPF
 ac_prob = ACOPFProblem(pm_data)
-dvm_dz = calc_sensitivity(ac_prob, :vm, :z)     # .formulation == :acopf, .operand == :vm
+dvm_dsw = calc_sensitivity(ac_prob, :vm, :sw)    # .formulation == :acopf, .operand == :vm
 
 # Invalid combinations throw ArgumentError
 calc_sensitivity(pf_state, :lmp, :d)  # ERROR: no LMP for power flow
@@ -116,7 +116,7 @@ Fields:
 - `matrix`: The sensitivity data (Matrix{T})
 - `formulation`: Symbol (:dcpf, :dcopf, :acpf, :acopf)
 - `operand`: Symbol (:va, :vm, :pg, :qg, :f, :lmp, :im, :v)
-- `parameter`: Symbol (:d, :z, :cq, :cl, :fmax, :b, :p, :q)
+- `parameter`: Symbol (:d, :sw, :cq, :cl, :fmax, :b, :p, :q)
 - `row_to_id`, `id_to_row`: Row index ↔ element ID
 - `col_to_id`, `id_to_col`: Column index ↔ element ID
 
@@ -133,13 +133,13 @@ To find connections:
 - Generator i is at bus: `net["gen"]["$i"]["gen_bus"]`
 - Branch j connects: `net["branch"]["$j"]["f_bus"]` → `net["branch"]["$j"]["t_bus"]`
 
-Example: `dg_dz[i,j]` = ∂(generation at generator i) / ∂(switching state of branch j)
+Example: `dg_dsw[i,j]` = ∂(generation at generator i) / ∂(switching state of branch j)
 
 ### DC OPF - B-theta Formulation
 
-Uses susceptance-weighted Laplacian `L = A' * Diagonal(-b .* z) * A`:
+Uses susceptance-weighted Laplacian `L = A' * Diagonal(-b .* sw) * A`:
 
-- `DCNetwork`: Network data (topology `A`, susceptances `b`, switching `z`, limits, costs)
+- `DCNetwork`: Network data (topology `A`, susceptances `b`, switching `sw`, limits, costs)
 - `DCOPFProblem`: JuMP optimization wrapper with `DCSensitivityCache` for efficient KKT reuse
 - `DCOPFSolution`: Primal (θ, g, f) and dual variables (ν_bal for LMPs)
 - `DCPowerFlowState`: Non-OPF power flow (θ = L⁺ * p, no optimization)
@@ -230,10 +230,10 @@ docs/
 
 **Matrix Orientations**
 - Incidence matrix `A` is (m × n): rows are branches, columns are buses
-- B-theta Laplacian: `L = A' * Diagonal(-b .* z) * A`
+- B-theta Laplacian: `L = A' * Diagonal(-b .* sw) * A`
 
 **Switching Variables**
-- `z` stores switching states in [0,1]; z=1 means branch closed, z=0 means open
+- `sw` stores switching states in [0,1]; sw=1 means branch closed, sw=0 means open
 - Derivatives are continuous (not discrete on/off)
 
 **Default Solver**

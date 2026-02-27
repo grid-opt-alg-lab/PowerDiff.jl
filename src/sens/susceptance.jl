@@ -19,8 +19,8 @@ Sparse matrix of size (kkt_dims x m).
 
 # Notes
 Susceptance b affects:
-- Susceptance matrix: B = A' * Diag(-b .* z) * A
-- Weight matrix: W = Diag(-b .* z)
+- Susceptance matrix: B = A' * Diag(-b .* sw) * A
+- Weight matrix: W = Diag(-b .* sw)
 - Flow definition: f = W * A * theta
 
 The affected KKT conditions are:
@@ -29,8 +29,8 @@ The affected KKT conditions are:
 - K_flow_def = f - W * A * theta
 
 Derivatives:
-- dB/db_e = -z_e * A[e,:]' * A[e,:]
-- d(WA)/db_e: row e becomes -z_e * A[e,:]
+- dB/db_e = -sw_e * A[e,:]' * A[e,:]
+- d(WA)/db_e: row e becomes -sw_e * A[e,:]
 """
 function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
@@ -43,7 +43,7 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
     nu_flow = sol.ν_flow
 
     # Network parameters
-    z = net.z
+    sw = net.sw
     A = net.A
 
     J_b = spzeros(dim, m)
@@ -61,11 +61,11 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
         # Contribution from nu_bal through B:
         # dB/db_e * nu_bal = -z_e * A[e,:]' * (A[e,:] . nu_bal)
         Ae_dot_nu_bal = dot(A_e_vec, nu_bal)
-        dK_theta_from_nu_bal = -z[e] * A_e_vec * Ae_dot_nu_bal
+        dK_theta_from_nu_bal = -sw[e] * A_e_vec * Ae_dot_nu_bal
 
         # Contribution from nu_flow through WA':
         # d(WA')/db_e * nu_flow = -z_e * A[e,:]' * nu_flow[e]
-        dK_theta_from_nu_flow = -z[e] * A_e_vec * nu_flow[e]
+        dK_theta_from_nu_flow = -sw[e] * A_e_vec * nu_flow[e]
 
         J_b[idx.θ, e] = dK_theta_from_nu_bal + dK_theta_from_nu_flow
 
@@ -73,7 +73,7 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
         # dK_power_bal/db_e = -dB/db_e * theta = -(-z_e * A[e,:]' * A[e,:]) * theta
         #                    = z_e * A[e,:]' * (A[e,:] . theta)
         #                    = z_e * A_e_vec * Atheta_e
-        dK_power_bal_db_e = z[e] * A_e_vec * Atheta_e
+        dK_power_bal_db_e = sw[e] * A_e_vec * Atheta_e
         J_b[idx.ν_bal, e] = dK_power_bal_db_e
 
         # 3. dK_flow_def/db_e: K_flow_def = f - W * A * theta
@@ -81,7 +81,7 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
         # d(WA)/db_e * theta: row e is -z_e * A[e,:] * theta = -z_e * Atheta_e
         # So dK_flow_def/db_e: row e is z_e * Atheta_e (note the sign flip)
         dK_flow_def_db_e = spzeros(m)
-        dK_flow_def_db_e[e] = z[e] * Atheta_e
+        dK_flow_def_db_e[e] = sw[e] * Atheta_e
         J_b[idx.ν_flow, e] = dK_flow_def_db_e
     end
 

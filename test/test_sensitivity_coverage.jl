@@ -21,8 +21,8 @@ using Test
         combos = [
             (:va, :d, (net.n, net.n)),
             (:f,  :d, (net.m, net.n)),
-            (:va, :z, (net.n, net.m)),
-            (:f,  :z, (net.m, net.m)),
+            (:va, :sw, (net.n, net.m)),
+            (:f,  :sw, (net.m, net.m)),
         ]
 
         for (op, param, expected_size) in combos
@@ -48,12 +48,12 @@ using Test
         solve!(prob)
 
         operands = [:va, :pg, :f, :lmp]
-        params = [:d, :z, :cl, :cq, :fmax, :b]
+        params = [:d, :sw, :cl, :cq, :fmax, :b]
 
         # Expected sizes for each operand
         op_sizes = Dict(:va => net.n, :pg => net.k, :f => net.m, :lmp => net.n)
         # Expected sizes for each parameter
-        param_sizes = Dict(:d => net.n, :z => net.m, :cl => net.k, :cq => net.k,
+        param_sizes = Dict(:d => net.n, :sw => net.m, :cl => net.k, :cq => net.k,
                            :fmax => net.m, :b => net.m)
 
         # 4 operands × 6 parameters = 24 combinations
@@ -111,10 +111,10 @@ using Test
         prob = ACOPFProblem(net_data; silent=true)
 
         combos = [
-            (:vm, :z, (prob.network.n, prob.network.m)),
-            (:va, :z, (prob.network.n, prob.network.m)),
-            (:pg, :z, (prob.n_gen, prob.network.m)),
-            (:qg, :z, (prob.n_gen, prob.network.m)),
+            (:vm, :sw, (prob.network.n, prob.network.m)),
+            (:va, :sw, (prob.network.n, prob.network.m)),
+            (:pg, :sw, (prob.n_gen, prob.network.m)),
+            (:qg, :sw, (prob.n_gen, prob.network.m)),
         ]
 
         for (op, param, expected_size) in combos
@@ -128,8 +128,8 @@ using Test
         end
 
         # Invalid combinations
-        @test_throws ArgumentError calc_sensitivity(prob, :lmp, :z)
-        @test_throws ArgumentError calc_sensitivity(prob, :f, :z)
+        @test_throws ArgumentError calc_sensitivity(prob, :lmp, :sw)
+        @test_throws ArgumentError calc_sensitivity(prob, :f, :sw)
     end
 
     @testset "Symbol aliases" begin

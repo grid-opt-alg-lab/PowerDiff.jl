@@ -27,8 +27,8 @@ Compute sensitivities with the symbol API:
 
 ```julia
 dva_dd = calc_sensitivity(pf_state, :va, :d)   # dtheta/dd (n x n)
-df_dz  = calc_sensitivity(pf_state, :f, :z)    # df/dz (m x m)
-dva_dz = calc_sensitivity(pf_state, :va, :z)   # dtheta/dz (n x m)
+df_dsw  = calc_sensitivity(pf_state, :f, :sw)   # df/dsw (m x m)
+dva_dsw = calc_sensitivity(pf_state, :va, :sw)  # dtheta/dsw (n x m)
 df_dd  = calc_sensitivity(pf_state, :f, :d)    # df/dd (m x n)
 ```
 
@@ -62,13 +62,13 @@ congestion = calc_congestion_component(sol, dc_net)
 
 ### OPF Sensitivities
 
-DC OPF supports sensitivities for all four operands (`:va`, `:pg`, `:f`, `:lmp`) with respect to six parameters (`:d`, `:z`, `:cq`, `:cl`, `:fmax`, `:b`):
+DC OPF supports sensitivities for all four operands (`:va`, `:pg`, `:f`, `:lmp`) with respect to six parameters (`:d`, `:sw`, `:cq`, `:cl`, `:fmax`, `:b`):
 
 ```julia
 dlmp_dd  = calc_sensitivity(prob, :lmp, :d)    # dLMP/dd (n x n)
 dpg_dd   = calc_sensitivity(prob, :pg, :d)     # dg/dd (k x n)
 dpg_dcq  = calc_sensitivity(prob, :pg, :cq)    # dg/dcq (k x k)
-dlmp_dz  = calc_sensitivity(prob, :lmp, :z)    # dLMP/dz (n x m)
+dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)   # dLMP/dsw (n x m)
 df_dfmax = calc_sensitivity(prob, :f, :fmax)   # df/dfmax (m x m)
 ```
 
@@ -108,8 +108,8 @@ AC OPF computes switching sensitivities via implicit differentiation of the full
 ac_prob = ACOPFProblem(net)
 solve!(ac_prob)
 
-dvm_dz = calc_sensitivity(ac_prob, :vm, :z)    # d|V|/dz (n x m)
-dva_dz = calc_sensitivity(ac_prob, :va, :z)    # dva/dz (n x m)
-dpg_dz = calc_sensitivity(ac_prob, :pg, :z)    # dpg/dz (k x m)
-dqg_dz = calc_sensitivity(ac_prob, :qg, :z)    # dqg/dz (k x m)
+dvm_dsw = calc_sensitivity(ac_prob, :vm, :sw)   # d|V|/dsw (n x m)
+dva_dsw = calc_sensitivity(ac_prob, :va, :sw)   # dva/dsw (n x m)
+dpg_dsw = calc_sensitivity(ac_prob, :pg, :sw)   # dpg/dsw (k x m)
+dqg_dsw = calc_sensitivity(ac_prob, :qg, :sw)   # dqg/dsw (k x m)
 ```

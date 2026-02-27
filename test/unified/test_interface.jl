@@ -47,19 +47,19 @@ using Test
         demand = calc_demand_vector(net_data)
         pf_state = DCPowerFlowState(net, demand)
 
-        dva_dz = calc_sensitivity(pf_state, :va, :z)
-        @test dva_dz isa Sensitivity
-        @test dva_dz.formulation == :dcpf
-        @test dva_dz.operand == :va
-        @test dva_dz.parameter == :z
-        @test size(dva_dz) == (net.n, net.m)
+        dva_dsw = calc_sensitivity(pf_state, :va, :sw)
+        @test dva_dsw isa Sensitivity
+        @test dva_dsw.formulation == :dcpf
+        @test dva_dsw.operand == :va
+        @test dva_dsw.parameter == :sw
+        @test size(dva_dsw) == (net.n, net.m)
 
-        df_dz = calc_sensitivity(pf_state, :f, :z)
-        @test df_dz isa Sensitivity
-        @test df_dz.formulation == :dcpf
-        @test df_dz.operand == :f
-        @test df_dz.parameter == :z
-        @test size(df_dz) == (net.m, net.m)
+        df_dsw = calc_sensitivity(pf_state, :f, :sw)
+        @test df_dsw isa Sensitivity
+        @test df_dsw.formulation == :dcpf
+        @test df_dsw.operand == :f
+        @test df_dsw.parameter == :sw
+        @test size(df_dsw) == (net.m, net.m)
     end
 
     @testset "DC Power Flow Demand Sensitivity" begin
@@ -87,21 +87,21 @@ using Test
         demand = calc_demand_vector(net_data)
         prob = DCOPFProblem(net, demand)
 
-        dva_dz = calc_sensitivity(prob, :va, :z)
-        @test dva_dz isa Sensitivity
-        @test dva_dz.formulation == :dcopf
-        @test size(dva_dz) == (net.n, net.m)
+        dva_dsw = calc_sensitivity(prob, :va, :sw)
+        @test dva_dsw isa Sensitivity
+        @test dva_dsw.formulation == :dcopf
+        @test size(dva_dsw) == (net.n, net.m)
 
-        dg_dz = calc_sensitivity(prob, :pg, :z)
-        @test dg_dz isa Sensitivity
-        @test dg_dz.formulation == :dcopf
-        @test dg_dz.operand == :pg
-        @test size(dg_dz) == (net.k, net.m)
+        dg_dsw = calc_sensitivity(prob, :pg, :sw)
+        @test dg_dsw isa Sensitivity
+        @test dg_dsw.formulation == :dcopf
+        @test dg_dsw.operand == :pg
+        @test size(dg_dsw) == (net.k, net.m)
 
-        df_dz = calc_sensitivity(prob, :f, :z)
-        @test df_dz isa Sensitivity
-        @test df_dz.formulation == :dcopf
-        @test size(df_dz) == (net.m, net.m)
+        df_dsw = calc_sensitivity(prob, :f, :sw)
+        @test df_dsw isa Sensitivity
+        @test df_dsw.formulation == :dcopf
+        @test size(df_dsw) == (net.m, net.m)
     end
 
     @testset "DC OPF Demand Sensitivity" begin
@@ -137,9 +137,9 @@ using Test
         @test size(Y) == (ac_net.n, ac_net.n)
 
         # With switching
-        z = ones(ac_net.m)
-        z[1] = 0.0  # Open first branch
-        Y_switched = admittance_matrix(ac_net, z)
+        sw = ones(ac_net.m)
+        sw[1] = 0.0  # Open first branch
+        Y_switched = admittance_matrix(ac_net, sw)
         @test Y_switched != Y
     end
 
@@ -196,10 +196,10 @@ using Test
         @test sens.parameter == :d
 
         # Test that metadata is accessible as fields
-        dva_dz = calc_sensitivity(prob, :va, :z)
-        @test dva_dz.formulation == :dcopf
-        @test dva_dz.operand == :va
-        @test dva_dz.parameter == :z
+        dva_dsw = calc_sensitivity(prob, :va, :sw)
+        @test dva_dsw.formulation == :dcopf
+        @test dva_dsw.operand == :va
+        @test dva_dsw.parameter == :sw
     end
 end
 

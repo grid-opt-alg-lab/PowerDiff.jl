@@ -85,18 +85,18 @@ function _get_dz_dcq!(prob::DCOPFProblem)::Matrix{Float64}
 end
 
 """
-    _get_dz_dz!(prob::DCOPFProblem) → Matrix{Float64}
+    _get_dz_dsw!(prob::DCOPFProblem) → Matrix{Float64}
 
 Get or compute the full KKT derivative matrix w.r.t. switching.
 """
-function _get_dz_dz!(prob::DCOPFProblem)::Matrix{Float64}
-    if isnothing(prob.cache.dz_dz)
+function _get_dz_dsw!(prob::DCOPFProblem)::Matrix{Float64}
+    if isnothing(prob.cache.dz_dsw)
         kkt_lu = _ensure_kkt_factor!(prob)
         sol = _ensure_solved!(prob)
         J_s = calc_kkt_jacobian_switching(prob, sol)
-        prob.cache.dz_dz = -(kkt_lu \ Matrix(J_s))
+        prob.cache.dz_dsw = -(kkt_lu \ Matrix(J_s))
     end
-    return prob.cache.dz_dz
+    return prob.cache.dz_dsw
 end
 
 """
@@ -342,7 +342,7 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     η_ref = vars.η_ref
 
     # Construct matrices
-    W = Diagonal(-net.b .* net.z)
+    W = Diagonal(-net.b .* net.sw)
     B_mat = net.A' * W * net.A
     WA = W * net.A
 
@@ -418,7 +418,7 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     )
 
     # Construct matrices
-    W = Diagonal(-net.b .* net.z)
+    W = Diagonal(-net.b .* net.sw)
     B_mat = sparse(net.A' * W * net.A)
     WA = sparse(W * net.A)
 
@@ -541,7 +541,7 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
     θ = sol.θ
 
     # Current switching state
-    s = net.z
+    s = net.sw
     b = net.b
     A = net.A
 
@@ -626,7 +626,7 @@ Update the network switching state and invalidate the sensitivity cache.
 - `s`: New switching state vector (length m), values in [0,1]
 
 # Warning
-This modifies `prob.network.z` and invalidates cached sensitivities, but does
+This modifies `prob.network.sw` and invalidates cached sensitivities, but does
 **not** rebuild the JuMP model. Calling `solve!(prob)` afterwards returns stale
 results because the JuMP constraints still reference the old switching state.
 Use this function only for KKT-based sensitivity cache invalidation. For
@@ -642,7 +642,7 @@ function update_switching!(prob::DCOPFProblem, s::AbstractVector)
     invalidate!(prob.cache)
 
     # Update network switching state
-    prob.network.z .= s
+    prob.network.sw .= s
 
     return prob
 end

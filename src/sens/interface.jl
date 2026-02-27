@@ -31,7 +31,7 @@ Invalid combinations throw ArgumentError.
 
 # Parameter Symbols
 - `:d` / `:pd`: Demand
-- `:z`: Switching states
+- `:sw`: Switching states
 - `:cq`, `:cl`: Cost coefficients (DC OPF)
 - `:fmax`: Flow limits (DC OPF)
 - `:b`: Susceptances (DC OPF)
@@ -71,7 +71,7 @@ const _PARAMETER_ALIASES = Dict{Symbol, Symbol}(
 )
 
 const _VALID_OPERANDS = Set([:va, :f, :pg, :lmp, :vm, :im, :v, :qg])
-const _VALID_PARAMETERS = Set([:d, :z, :cq, :cl, :fmax, :b, :p, :q])
+const _VALID_PARAMETERS = Set([:d, :sw, :cq, :cl, :fmax, :b, :p, :q])
 
 function _resolve_operand(s::Symbol)
     s = get(_OPERAND_ALIASES, s, s)
@@ -83,7 +83,7 @@ end
 function _resolve_parameter(s::Symbol)
     s = get(_PARAMETER_ALIASES, s, s)
     s in _VALID_PARAMETERS || throw(ArgumentError(
-        "Unknown parameter symbol :$s. Valid: :d, :pd, :z, :cq, :cl, :fmax, :b, :p, :q"))
+        "Unknown parameter symbol :$s. Valid: :d, :pd, :sw, :cq, :cl, :fmax, :b, :p, :q"))
     return s
 end
 
@@ -101,7 +101,7 @@ const _OPERAND_ELEMENT = Dict{Symbol, Symbol}(
 # Map parameter symbol to element type for cols
 const _PARAM_ELEMENT = Dict{Symbol, Symbol}(
     :d => :bus, :p => :bus, :q => :bus,
-    :z => :branch, :fmax => :branch, :b => :branch,
+    :sw => :branch, :fmax => :branch, :b => :branch,
     :cq => :gen, :cl => :gen,
 )
 
@@ -119,12 +119,12 @@ _formulation_symbol(::ACOPFProblem) = :acopf
 # =============================================================================
 
 _valid_combinations(::Type{<:DCPowerFlowState}) = [
-    (:va, :d), (:f, :d), (:va, :z), (:f, :z),
+    (:va, :d), (:f, :d), (:va, :sw), (:f, :sw),
 ]
 
 _valid_combinations(::Type{<:DCOPFProblem}) = [
     (:va, :d), (:pg, :d), (:f, :d), (:lmp, :d),
-    (:va, :z), (:pg, :z), (:f, :z), (:lmp, :z),
+    (:va, :sw), (:pg, :sw), (:f, :sw), (:lmp, :sw),
     (:va, :cq), (:pg, :cq), (:f, :cq), (:lmp, :cq),
     (:va, :cl), (:pg, :cl), (:f, :cl), (:lmp, :cl),
     (:va, :fmax), (:pg, :fmax), (:f, :fmax), (:lmp, :fmax),
@@ -136,7 +136,7 @@ _valid_combinations(::Type{<:ACPowerFlowState}) = [
 ]
 
 _valid_combinations(::Type{<:ACOPFProblem}) = [
-    (:vm, :z), (:va, :z), (:pg, :z), (:qg, :z),
+    (:vm, :sw), (:va, :sw), (:pg, :sw), (:qg, :sw),
 ]
 
 # =============================================================================
@@ -187,12 +187,12 @@ function _calc_sensitivity_matrix(state::DCPowerFlowState, op::Symbol, param::Sy
     if param === :d
         sens = calc_sensitivity_demand(state)
         return op === :va ? sens.dva_dd : sens.df_dd
-    else  # :z
+    else  # :sw
         sens = calc_sensitivity_switching(state)
         if op === :va
-            return sens.dva_dz
+            return sens.dva_dsw
         else  # :f
-            return sens.df_dz
+            return sens.df_dsw
         end
     end
 end
@@ -204,7 +204,7 @@ end
 # Map parameter symbols to cached derivative functions
 const _DC_OPF_CACHE_FN = Dict{Symbol, Function}(
     :d    => _get_dz_dd!,
-    :z    => _get_dz_dz!,
+    :sw   => _get_dz_dsw!,
     :cq   => _get_dz_dcq!,
     :cl   => _get_dz_dcl!,
     :fmax => _get_dz_dfmax!,
@@ -240,8 +240,8 @@ end
 # =============================================================================
 
 function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, param::Symbol)
-    param === :z || throw(ArgumentError(
-        "ACOPFProblem currently only supports :z parameter, got :$param"))
+    param === :sw || throw(ArgumentError(
+        "ACOPFProblem currently only supports :sw parameter, got :$param"))
     dx_ds = _get_ac_dx_ds!(prob)
     idx = ac_kkt_indices(prob)
     if op === :vm

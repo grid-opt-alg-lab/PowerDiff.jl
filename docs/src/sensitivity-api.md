@@ -28,7 +28,7 @@ Parameter symbols specify what we differentiate with respect to.
 | Symbol | Description | Formulations |
 |--------|-------------|------------|
 | `:d` / `:pd` | Demand | DCPowerFlowState, DCOPFProblem |
-| `:z` | Switching states | DCPowerFlowState, DCOPFProblem, ACOPFProblem |
+| `:sw` | Switching states | DCPowerFlowState, DCOPFProblem, ACOPFProblem |
 | `:cq`, `:cl` | Cost coefficients (quadratic, linear) | DCOPFProblem |
 | `:fmax` | Flow limits | DCOPFProblem |
 | `:b` | Susceptances | DCOPFProblem |
@@ -38,14 +38,14 @@ Parameter symbols specify what we differentiate with respect to.
 
 ### DC Power Flow (4 combinations)
 
-| | `:d` | `:z` |
+| | `:d` | `:sw` |
 |---|---|---|
 | `:va` | ✓ | ✓ |
 | `:f` | ✓ | ✓ |
 
 ### DC OPF (24 combinations)
 
-| | `:d` | `:z` | `:cq` | `:cl` | `:fmax` | `:b` |
+| | `:d` | `:sw` | `:cq` | `:cl` | `:fmax` | `:b` |
 |---|---|---|---|---|---|---|
 | `:va` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `:pg` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -62,7 +62,7 @@ Parameter symbols specify what we differentiate with respect to.
 
 ### AC OPF (4 combinations)
 
-| | `:z` |
+| | `:sw` |
 |---|---|
 | `:vm` | ✓ |
 | `:va` | ✓ |

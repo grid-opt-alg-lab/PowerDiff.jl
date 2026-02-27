@@ -38,38 +38,38 @@ using Test
     @testset "Switching sensitivity computation" begin
         prob = ACOPFProblem(pm_data; silent=true)
 
-        dvm_dz = calc_sensitivity(prob, :vm, :z)
-        dva_dz = calc_sensitivity(prob, :va, :z)
-        dpg_dz = calc_sensitivity(prob, :pg, :z)
-        dqg_dz = calc_sensitivity(prob, :qg, :z)
+        dvm_dsw = calc_sensitivity(prob, :vm, :sw)
+        dva_dsw = calc_sensitivity(prob, :va, :sw)
+        dpg_dsw = calc_sensitivity(prob, :pg, :sw)
+        dqg_dsw = calc_sensitivity(prob, :qg, :sw)
 
-        @test size(dvm_dz) == (5, 7)
-        @test size(dva_dz) == (5, 7)
-        @test size(dpg_dz) == (5, 7)
-        @test size(dqg_dz) == (5, 7)
+        @test size(dvm_dsw) == (5, 7)
+        @test size(dva_dsw) == (5, 7)
+        @test size(dpg_dsw) == (5, 7)
+        @test size(dqg_dsw) == (5, 7)
 
         # Sensitivities should be finite
-        @test all(isfinite.(Matrix(dvm_dz)))
-        @test all(isfinite.(Matrix(dva_dz)))
-        @test all(isfinite.(Matrix(dpg_dz)))
-        @test all(isfinite.(Matrix(dqg_dz)))
+        @test all(isfinite.(Matrix(dvm_dsw)))
+        @test all(isfinite.(Matrix(dva_dsw)))
+        @test all(isfinite.(Matrix(dpg_dsw)))
+        @test all(isfinite.(Matrix(dqg_dsw)))
 
     end
 
     @testset "Symbol-based API" begin
         prob = ACOPFProblem(pm_data; silent=true)
 
-        dvm_dz = calc_sensitivity(prob, :vm, :z)
-        @test size(dvm_dz) == (5, 7)
+        dvm_dsw = calc_sensitivity(prob, :vm, :sw)
+        @test size(dvm_dsw) == (5, 7)
 
-        dva_dz = calc_sensitivity(prob, :va, :z)
-        @test size(dva_dz) == (5, 7)
+        dva_dsw = calc_sensitivity(prob, :va, :sw)
+        @test size(dva_dsw) == (5, 7)
 
-        dpg_dz = calc_sensitivity(prob, :pg, :z)
-        @test size(dpg_dz) == (5, 7)
+        dpg_dsw = calc_sensitivity(prob, :pg, :sw)
+        @test size(dpg_dsw) == (5, 7)
 
-        dqg_dz = calc_sensitivity(prob, :qg, :z)
-        @test size(dqg_dz) == (5, 7)
+        dqg_dsw = calc_sensitivity(prob, :qg, :sw)
+        @test size(dqg_dsw) == (5, 7)
 
     end
 
@@ -96,17 +96,17 @@ using Test
 
     @testset "Finite-difference verification" begin
         prob = ACOPFProblem(pm_data; silent=true)
-        dvm_dz = calc_sensitivity(prob, :vm, :z)
-        dpg_dz = calc_sensitivity(prob, :pg, :z)
-        dva_dz = calc_sensitivity(prob, :va, :z)
-        dqg_dz = calc_sensitivity(prob, :qg, :z)
+        dvm_dsw = calc_sensitivity(prob, :vm, :sw)
+        dpg_dsw = calc_sensitivity(prob, :pg, :sw)
+        dva_dsw = calc_sensitivity(prob, :va, :sw)
+        dqg_dsw = calc_sensitivity(prob, :qg, :sw)
         sol_base = prob.cache.solution
 
         ε = 1e-5
         for e in 1:min(3, prob.network.m)
-            # Build perturbed problem with z[e] -= ε baked into JuMP model
+            # Build perturbed problem with sw[e] -= ε baked into JuMP model
             net_pert = ACNetwork(pm_data)
-            net_pert.z[e] -= ε
+            net_pert.sw[e] -= ε
             prob_pert = ACOPFProblem(net_pert, pm_data; silent=true)
             sol_pert = solve!(prob_pert)
 
@@ -117,25 +117,25 @@ using Test
 
             # Verify voltage magnitude sensitivities
             if norm(fd_dvm) > 1e-10
-                rel_error = norm(Matrix(dvm_dz)[:, e] - fd_dvm) / norm(fd_dvm)
+                rel_error = norm(Matrix(dvm_dsw)[:, e] - fd_dvm) / norm(fd_dvm)
                 @test rel_error < 1e-3
             end
 
             # Verify generation sensitivities
             if norm(fd_dpg) > 1e-10
-                rel_error = norm(Matrix(dpg_dz)[:, e] - fd_dpg) / norm(fd_dpg)
+                rel_error = norm(Matrix(dpg_dsw)[:, e] - fd_dpg) / norm(fd_dpg)
                 @test rel_error < 1e-3
             end
 
             # Verify voltage angle sensitivities
             if norm(fd_dva) > 1e-10
-                rel_error = norm(Matrix(dva_dz)[:, e] - fd_dva) / norm(fd_dva)
+                rel_error = norm(Matrix(dva_dsw)[:, e] - fd_dva) / norm(fd_dva)
                 @test rel_error < 1e-3
             end
 
             # Verify reactive generation sensitivities
             if norm(fd_dqg) > 1e-10
-                rel_error = norm(Matrix(dqg_dz)[:, e] - fd_dqg) / norm(fd_dqg)
+                rel_error = norm(Matrix(dqg_dsw)[:, e] - fd_dqg) / norm(fd_dqg)
                 @test rel_error < 1e-3
             end
         end
@@ -145,16 +145,16 @@ using Test
         prob = ACOPFProblem(pm_data; silent=true)
 
         # First call computes and caches
-        dvm_dz = calc_sensitivity(prob, :vm, :z)
-        @test size(dvm_dz) == (5, 7)
+        dvm_dsw = calc_sensitivity(prob, :vm, :sw)
+        @test size(dvm_dsw) == (5, 7)
         @test !isnothing(prob.cache.dx_ds)
 
         # Subsequent calls reuse cache (no re-solve)
-        dva_dz = calc_sensitivity(prob, :va, :z)
-        dpg_dz = calc_sensitivity(prob, :pg, :z)
-        dqg_dz = calc_sensitivity(prob, :qg, :z)
-        @test size(dva_dz) == (5, 7)
-        @test size(dpg_dz) == (5, 7)
-        @test size(dqg_dz) == (5, 7)
+        dva_dsw = calc_sensitivity(prob, :va, :sw)
+        dpg_dsw = calc_sensitivity(prob, :pg, :sw)
+        dqg_dsw = calc_sensitivity(prob, :qg, :sw)
+        @test size(dva_dsw) == (5, 7)
+        @test size(dpg_dsw) == (5, 7)
+        @test size(dqg_dsw) == (5, 7)
     end
 end

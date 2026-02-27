@@ -21,8 +21,8 @@ g_{\min} \leq g &\leq g_{\max} & (\rho_{\text{lb}}, \rho_{\text{ub}}) \\
 ```
 
 where:
-- ``L = A^\top \text{diag}(-b \circ z) A`` is the susceptance-weighted Laplacian
-- ``W = \text{diag}(-b \circ z)`` is the branch weight matrix
+- ``L = A^\top \text{diag}(-b \circ \text{sw}) A`` is the susceptance-weighted Laplacian
+- ``W = \text{diag}(-b \circ \text{sw})`` is the branch weight matrix
 - ``A`` is the ``m \times n`` incidence matrix (branches × buses)
 - ``G_{\text{inc}}`` is the ``n \times k`` generator-bus incidence matrix
 - ``\tau`` is a small regularization parameter
@@ -40,10 +40,10 @@ where ``L^+`` is the pseudoinverse of the Laplacian and ``p = g - d`` is the net
 Switching sensitivity follows from matrix perturbation theory:
 
 ```math
-\frac{\partial \theta}{\partial z_e} = -L^+ \frac{\partial L}{\partial z_e} \theta
+\frac{\partial \theta}{\partial \text{sw}_e} = -L^+ \frac{\partial L}{\partial \text{sw}_e} \theta
 ```
 
-where ``\frac{\partial L}{\partial z_e} = -b_e \, a_e a_e^\top`` is a rank-1 update from the incidence column of branch ``e``.
+where ``\frac{\partial L}{\partial \text{sw}_e} = -b_e \, a_e a_e^\top`` is a rank-1 update from the incidence column of branch ``e``.
 
 ## KKT System for Implicit Differentiation
 

@@ -305,30 +305,30 @@ function ACOPFProblem(
         tm = branch["tap"]^2
 
         # Scale by switching state
-        z_l = network.z[l]
+        sw_l = network.sw[l]
 
         # AC Power Flow Constraints (from side)
         p_fr_cons[l] = @constraint(model,
-            p_fr == z_l * ((g_br + g_fr_shunt)/tm * vm_fr^2 +
+            p_fr == sw_l * ((g_br + g_fr_shunt)/tm * vm_fr^2 +
                     (-g_br*tr + b_br*ti)/tm * (vm_fr * vm_to * cos(va_fr - va_to)) +
                     (-b_br*tr - g_br*ti)/tm * (vm_fr * vm_to * sin(va_fr - va_to)))
         )
 
         q_fr_cons[l] = @constraint(model,
-            q_fr == z_l * (-(b_br + b_fr_shunt)/tm * vm_fr^2 -
+            q_fr == sw_l * (-(b_br + b_fr_shunt)/tm * vm_fr^2 -
                     (-b_br*tr - g_br*ti)/tm * (vm_fr * vm_to * cos(va_fr - va_to)) +
                     (-g_br*tr + b_br*ti)/tm * (vm_fr * vm_to * sin(va_fr - va_to)))
         )
 
         # AC Power Flow Constraints (to side)
         p_to_cons[l] = @constraint(model,
-            p_to == z_l * ((g_br + g_to_shunt) * vm_to^2 +
+            p_to == sw_l * ((g_br + g_to_shunt) * vm_to^2 +
                     (-g_br*tr - b_br*ti)/tm * (vm_to * vm_fr * cos(va_to - va_fr)) +
                     (-b_br*tr + g_br*ti)/tm * (vm_to * vm_fr * sin(va_to - va_fr)))
         )
 
         q_to_cons[l] = @constraint(model,
-            q_to == z_l * (-(b_br + b_to_shunt) * vm_to^2 -
+            q_to == sw_l * (-(b_br + b_to_shunt) * vm_to^2 -
                     (-b_br*tr + g_br*ti)/tm * (vm_to * vm_fr * cos(va_fr - va_to)) +
                     (-g_br*tr - b_br*ti)/tm * (vm_to * vm_fr * sin(va_to - va_fr)))
         )

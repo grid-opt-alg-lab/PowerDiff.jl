@@ -160,8 +160,8 @@ This uses the formula from matrix perturbation theory (RandomizedSwitching patte
 
 # Returns
 NamedTuple with:
-- `dva_dz`: Jacobian ∂va/∂z (n × m) - voltage angles w.r.t. switching
-- `df_dz`: Jacobian ∂f/∂z (m × m) - flows w.r.t. switching
+- `dva_dsw`: Jacobian ∂va/∂sw (n × m) - voltage angles w.r.t. switching
+- `df_dsw`: Jacobian ∂f/∂sw (m × m) - flows w.r.t. switching
 """
 function calc_sensitivity_switching(state::DCPowerFlowState)
     net = state.net
@@ -179,9 +179,9 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
     θ_raw = L_pinv * p_balanced
 
     # Preallocate
-    dva_dz = zeros(n, m)
+    dva_dsw = zeros(n, m)
 
-    # For each edge e, compute ∂va/∂zₑ
+    # For each edge e, compute ∂va/∂swₑ
     for e in 1:m
         # Get incidence column for edge e: a_e = A[e, :]
         # Note: A is m × n, so we get the e-th row
@@ -196,27 +196,27 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
 
         # Account for centering: va = va_raw - va_raw[ref]
         # So ∂va/∂zₑ = ∂va_raw/∂zₑ - (∂va_raw/∂zₑ)[ref] · 1
-        dva_dz[:, e] = dva_raw_dzₑ .- dva_raw_dzₑ[ref]
+        dva_dsw[:, e] = dva_raw_dzₑ .- dva_raw_dzₑ[ref]
     end
 
-    # Flow sensitivity: f = W · A · va where W = Diag(-b ⊙ z)
-    # fₑ = -bₑ · zₑ · (A[e,:] · va)
+    # Flow sensitivity: f = W · A · va where W = Diag(-b ⊙ sw)
+    # fₑ = -bₑ · swₑ · (A[e,:] · va)
     #
-    # ∂fₑ/∂zₑ' has two components:
-    # 1. Direct effect (if e' = e): ∂fₑ/∂zₑ = -bₑ · (A[e,:] · va)
-    # 2. Indirect effect via va: ∂fₑ/∂zₑ' = -bₑ · zₑ · (A[e,:] · ∂va/∂zₑ')
-    df_dz = zeros(m, m)
+    # ∂fₑ/∂swₑ' has two components:
+    # 1. Direct effect (if e' = e): ∂fₑ/∂swₑ = -bₑ · (A[e,:] · va)
+    # 2. Indirect effect via va: ∂fₑ/∂swₑ' = -bₑ · swₑ · (A[e,:] · ∂va/∂swₑ')
+    df_dsw = zeros(m, m)
 
-    W = Diagonal(-net.b .* net.z)
+    W = Diagonal(-net.b .* net.sw)
     for e_prime in 1:m
         # Indirect effect: all edges feel the change in va
-        df_dz[:, e_prime] = W * net.A * dva_dz[:, e_prime]
+        df_dsw[:, e_prime] = W * net.A * dva_dsw[:, e_prime]
 
         # Direct effect: only edge e_prime
-        df_dz[e_prime, e_prime] += -net.b[e_prime] * dot(net.A[e_prime, :], state.θ)
+        df_dsw[e_prime, e_prime] += -net.b[e_prime] * dot(net.A[e_prime, :], state.θ)
     end
 
-    return (dva_dz=dva_dz, df_dz=df_dz)
+    return (dva_dsw=dva_dsw, df_dsw=df_dsw)
 end
 
 """
@@ -246,7 +246,7 @@ function calc_sensitivity_demand(state::DCPowerFlowState)
     dva_dd = -state.L_pinv
 
     # ∂f/∂d = W · A · ∂va/∂d
-    W = Diagonal(-net.b .* net.z)
+    W = Diagonal(-net.b .* net.sw)
     df_dd = W * net.A * dva_dd
 
     return (dva_dd=dva_dd, df_dd=df_dd)
