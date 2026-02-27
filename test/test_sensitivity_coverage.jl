@@ -28,7 +28,8 @@ using Test
         for (op, param, expected_size) in combos
             @testset "$op w.r.t. $param" begin
                 S = calc_sensitivity(pf, op, param)
-                @test S isa Sensitivity{DCPF}
+                @test S isa Sensitivity
+                @test S.formulation == :dcpf
                 @test size(S) == expected_size
                 @test all(isfinite, Matrix(S))
             end
@@ -66,7 +67,8 @@ using Test
                 expected_cols = param_sizes[param]
                 @testset "$op w.r.t. $param" begin
                     S = calc_sensitivity(prob, op, param)
-                    @test S isa Sensitivity{DCOPF}
+                    @test S isa Sensitivity
+                    @test S.formulation == :dcopf
                     @test size(S) == (expected_rows, expected_cols)
                     @test all(isfinite, Matrix(S))
                 end
@@ -96,7 +98,8 @@ using Test
         for (op, param, expected_size) in combos
             @testset "$op w.r.t. $param" begin
                 S = calc_sensitivity(state, op, param)
-                @test S isa Sensitivity{ACPF}
+                @test S isa Sensitivity
+                @test S.formulation == :acpf
                 @test size(S) == expected_size
                 @test all(isfinite, Matrix(S))
             end
@@ -120,7 +123,8 @@ using Test
         for (op, param, expected_size) in combos
             @testset "$op w.r.t. $param" begin
                 S = calc_sensitivity(prob, op, param)
-                @test S isa Sensitivity{ACOPF}
+                @test S isa Sensitivity
+                @test S.formulation == :acopf
                 @test size(S) == expected_size
                 @test all(isfinite, Matrix(S))
             end

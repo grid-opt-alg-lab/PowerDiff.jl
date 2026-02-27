@@ -2,33 +2,32 @@
 # Sensitivity Result Types
 # =============================================================================
 #
-# Main sensitivity type with type parameters for dispatch:
-#   Sensitivity{F <: AbstractFormulation, O <: AbstractOperand, P <: AbstractParameter}
+# Main sensitivity type with symbol metadata fields:
+#   Sensitivity{T} carries formulation/operand/parameter as Symbol fields
 #
 # DC OPF sensitivities use cached KKT derivatives for efficiency.
 # AC power flow types are kept for voltage/current sensitivity functions.
 
 # =============================================================================
-# Main Parameterized Sensitivity Type
+# Main Sensitivity Type
 # =============================================================================
 
 """
-    Sensitivity{F, O, P, T} <: AbstractMatrix{T}
+    Sensitivity{T} <: AbstractMatrix{T}
 
-Sensitivity matrix with type parameters enabling dispatch on formulation,
-operand, and parameter.
+Sensitivity matrix with symbol metadata for formulation, operand, and parameter.
 
 Implements the AbstractMatrix interface for seamless matrix operations while
 providing bidirectional index mappings between internal indices and element IDs.
 
-# Type Parameters
-- `F <: AbstractFormulation`: Formulation tag (DCOPF, ACOPF, DCPF, ACPF)
-- `O <: AbstractOperand`: Operand tag (VoltageAngle, VoltageMagnitude, Generation, LMP, Flow, etc.)
-- `P <: AbstractParameter`: Parameter tag (Demand, Switching, QuadraticCost, LinearCost, FlowLimit, Susceptance, etc.)
+# Type Parameter
 - `T <: Number`: Element type (Float64, ComplexF64)
 
 # Fields
 - `matrix::Matrix{T}`: The sensitivity matrix data
+- `formulation::Symbol`: Formulation tag (:dcpf, :dcopf, :acpf, :acopf)
+- `operand::Symbol`: Operand tag (:va, :vm, :pg, :qg, :f, :lmp, :im, :v)
+- `parameter::Symbol`: Parameter tag (:d, :z, :cq, :cl, :fmax, :b, :p, :q)
 - `row_to_id::Vector{Int}`: Maps internal row index → external element ID
 - `id_to_row::Dict{Int,Int}`: Maps external element ID → internal row index
 - `col_to_id::Vector{Int}`: Maps internal col index → external element ID
@@ -36,32 +35,20 @@ providing bidirectional index mappings between internal indices and element IDs.
 
 # Examples
 ```julia
-# Get a typed sensitivity result
-sens = calc_sensitivity(prob, LMP(), Demand())  # Returns Sensitivity{DCOPF, LMP, Demand, Float64}
-
-# Use like a normal matrix
-size(sens)          # (n, n)
-sens[2, 3]          # Access element
-Matrix(sens)        # Get raw matrix
-
-# Index mapping (PowerModels-style)
-sens.row_to_id[2]   # External bus ID for row 2
-sens.id_to_row[14]  # Internal row index for bus 14
-
-# Dispatch on type (3-parameter matching still works)
-process(s::Sensitivity{DCOPF, LMP, Demand}) = "DC OPF LMP-demand sensitivity"
-process(s::Sensitivity{F, LMP, Demand}) where F = "Any formulation LMP-demand"
-process(s::Sensitivity{F, O, Switching}) where {F, O} = "Any switching sensitivity"
-
-# Complex voltage phasor sensitivity
-dv_dp = calc_sensitivity(ac_state, :v, :p)  # Sensitivity{ACPF, Voltage, ActivePower, ComplexF64}
+sens = calc_sensitivity(prob, :lmp, :d)
+sens.formulation  # :dcopf
+sens.operand      # :lmp
+sens.parameter    # :d
+size(sens)        # (n, n)
+sens[2, 3]        # Access element
+Matrix(sens)      # Get raw matrix
 ```
 """
-struct Sensitivity{F <: AbstractFormulation,
-                   O <: AbstractOperand,
-                   P <: AbstractParameter,
-                   T <: Number} <: AbstractMatrix{T}
+struct Sensitivity{T <: Number} <: AbstractMatrix{T}
     matrix::Matrix{T}
+    formulation::Symbol
+    operand::Symbol
+    parameter::Symbol
     row_to_id::Vector{Int}
     id_to_row::Dict{Int,Int}
     col_to_id::Vector{Int}
@@ -69,14 +56,18 @@ struct Sensitivity{F <: AbstractFormulation,
 end
 
 # Convenience constructor from mappings tuple — infers T from matrix element type
-function Sensitivity{F, O, P}(
+function Sensitivity(
     matrix::Matrix{T},
+    formulation::Symbol,
+    operand::Symbol,
+    parameter::Symbol,
     row_mapping::Tuple{Vector{Int}, Dict{Int,Int}},
     col_mapping::Tuple{Vector{Int}, Dict{Int,Int}}
-) where {F <: AbstractFormulation, O <: AbstractOperand, P <: AbstractParameter, T <: Number}
+) where {T <: Number}
     row_to_id, id_to_row = row_mapping
     col_to_id, id_to_col = col_mapping
-    return Sensitivity{F, O, P, T}(matrix, row_to_id, id_to_row, col_to_id, id_to_col)
+    return Sensitivity{T}(matrix, formulation, operand, parameter,
+                          row_to_id, id_to_row, col_to_id, id_to_col)
 end
 
 # =============================================================================
@@ -97,55 +88,23 @@ Base.:*(s::Sensitivity, v::AbstractVector) = s.matrix * v
 Base.:*(m::AbstractMatrix, s::Sensitivity) = m * s.matrix
 
 # Pretty printing
-function Base.show(io::IO, ::MIME"text/plain", s::Sensitivity{F, O, P, T}) where {F, O, P, T}
+function Base.show(io::IO, ::MIME"text/plain", s::Sensitivity{T}) where {T}
     if T === Float64
-        print(io, "Sensitivity{$F, $O, $P}")
+        print(io, "Sensitivity(:$(s.formulation), :$(s.operand), :$(s.parameter))")
     else
-        print(io, "Sensitivity{$F, $O, $P, $T}")
+        print(io, "Sensitivity{$T}(:$(s.formulation), :$(s.operand), :$(s.parameter))")
     end
     println(io, " $(size(s, 1))×$(size(s, 2)):")
     Base.print_matrix(io, s.matrix)
 end
 
-function Base.show(io::IO, s::Sensitivity{F, O, P, T}) where {F, O, P, T}
+function Base.show(io::IO, s::Sensitivity{T}) where {T}
     if T === Float64
-        print(io, "Sensitivity{$F, $O, $P}($(size(s, 1))×$(size(s, 2)))")
+        print(io, "Sensitivity(:$(s.formulation), :$(s.operand), :$(s.parameter), $(size(s, 1))×$(size(s, 2)))")
     else
-        print(io, "Sensitivity{$F, $O, $P, $T}($(size(s, 1))×$(size(s, 2)))")
+        print(io, "Sensitivity{$T}(:$(s.formulation), :$(s.operand), :$(s.parameter), $(size(s, 1))×$(size(s, 2)))")
     end
 end
-
-# =============================================================================
-# Type Accessors
-# =============================================================================
-
-"""
-    formulation(::Sensitivity{F,O,P}) where {F,O,P} → F
-
-Get the formulation type parameter.
-"""
-formulation(::Sensitivity{F,O,P}) where {F,O,P} = F
-
-"""
-    operand(::Sensitivity{F,O,P}) where {F,O,P} → O
-
-Get the operand type parameter.
-"""
-operand(::Sensitivity{F,O,P}) where {F,O,P} = O
-
-"""
-    parameter(::Sensitivity{F,O,P}) where {F,O,P} → P
-
-Get the parameter type parameter.
-"""
-parameter(::Sensitivity{F,O,P}) where {F,O,P} = P
-
-"""
-    eltype(::Sensitivity{F,O,P,T}) where {F,O,P,T} → T
-
-Get the element type.
-"""
-Base.eltype(::Type{<:Sensitivity{F,O,P,T}}) where {F,O,P,T} = T
 
 # =============================================================================
 # DC Power Flow Bundled Types (kept for DCPowerFlowState which doesn't use OPF cache)

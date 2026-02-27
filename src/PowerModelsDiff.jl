@@ -15,10 +15,9 @@ const PM = PowerModels
 const MOI = JuMP.MOI
 
 # =============================================================================
-# Abstract type hierarchy and singleton tags
+# Abstract type hierarchy
 # =============================================================================
 include("types/abstract.jl")
-include("types/tags.jl")
 
 # =============================================================================
 # Core type definitions (modular structure)
@@ -27,7 +26,7 @@ include("types/dc_network.jl")      # DCNetwork, DCPowerFlowState, DCOPFSolution
 include("types/dc_opf_problem.jl")  # DCOPFProblem + constructors
 include("types/ac_network.jl")      # ACNetwork, ACPowerFlowState
 include("types/ac_opf_problem.jl")  # ACOPFProblem, ACOPFSolution + constructors
-include("types/sensitivities.jl")   # Sensitivity{F,O,P} and DC power flow bundled types
+include("types/sensitivities.jl")   # Sensitivity{T} and DC power flow bundled types
 
 # =============================================================================
 # Power flow and graph utilities
@@ -80,24 +79,10 @@ export AbstractPowerNetwork, AbstractPowerFlowState, AbstractOPFSolution
 export AbstractOPFProblem
 
 # -----------------------------------------------------------------------------
-# Singleton Type Tags (for Sensitivity{F,O,P} dispatch)
-# -----------------------------------------------------------------------------
-export AbstractFormulation, AbstractOperand, AbstractParameter
-# Formulation tags
-export DCOPF, ACOPF, DCPF, ACPF
-# Operand tags
-export VoltageAngle, VoltageMagnitude, Generation, ReactiveGeneration
-export Flow, LMP, CurrentMagnitude, Voltage
-# Parameter tags
-export Demand, Switching, QuadraticCost, LinearCost
-export FlowLimit, Susceptance, ActivePower, ReactivePower
-
-# -----------------------------------------------------------------------------
-# Unified Sensitivity Interface (primary API)
+# Sensitivity Interface
 # -----------------------------------------------------------------------------
 export calc_sensitivity
 export Sensitivity
-export formulation, operand, parameter
 
 # -----------------------------------------------------------------------------
 # DC Power Flow Types

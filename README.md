@@ -147,10 +147,13 @@ S[i,j] = ∂(operand element i) / ∂(parameter element j)
 To find which bus a generator is at: `net["gen"]["$i"]["gen_bus"]`
 To find branch endpoints: `net["branch"]["$j"]["f_bus"]` and `net["branch"]["$j"]["t_bus"]`
 
-The `Sensitivity{F,O,P}` return type also carries bidirectional index mappings:
+The `Sensitivity{T}` return type also carries symbol metadata and bidirectional index mappings:
 
 ```julia
 sens = calc_sensitivity(prob, :lmp, :d)
+sens.formulation          # :dcopf
+sens.operand              # :lmp
+sens.parameter            # :d
 sens[2, 3]                # ∂(LMP at bus 2) / ∂(demand at bus 3)
 sens.row_to_id[2]         # External bus ID for row 2
 sens.id_to_row[14]        # Internal row index for bus 14
@@ -189,17 +192,15 @@ end
 
 ### Sensitivity Results
 
-The API returns `Sensitivity{F,O,P}` which acts as a matrix with type tags for dispatch:
+The API returns `Sensitivity{T}` which acts as a matrix with symbol metadata:
 
 ```julia
 sens = calc_sensitivity(prob, :lmp, :d)
-typeof(sens)  # Sensitivity{DCOPF, LMP, Demand}
-size(sens)    # (n, n)
-sens * v      # Matrix operations work
-
-# Type-based dispatch
-process(s::Sensitivity{DCOPF, LMP, Demand}) = "DC OPF LMP-demand"
-process(s::Sensitivity{F, O, Switching}) where {F, O} = "Any switching"
+sens.formulation  # :dcopf
+sens.operand      # :lmp
+sens.parameter    # :d
+size(sens)        # (n, n)
+sens * v          # Matrix operations work
 ```
 
 Bundled sensitivity types for internal use:

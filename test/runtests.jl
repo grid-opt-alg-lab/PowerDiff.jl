@@ -151,10 +151,10 @@ end
         solve!(prob)
 
         # Use the type-based interface
-        dva_dd = calc_sensitivity(prob, VoltageAngle(), Demand())
-        dg_dd = calc_sensitivity(prob, Generation(), Demand())
-        df_dd = calc_sensitivity(prob, Flow(), Demand())
-        dlmp_dd = calc_sensitivity(prob, LMP(), Demand())
+        dva_dd = calc_sensitivity(prob, :va, :d)
+        dg_dd = calc_sensitivity(prob, :pg, :d)
+        df_dd = calc_sensitivity(prob, :f, :d)
+        dlmp_dd = calc_sensitivity(prob, :lmp, :d)
 
         @test size(dva_dd) == (dc_net.n, dc_net.n)
         @test size(dg_dd) == (dc_net.k, dc_net.n)
@@ -184,10 +184,10 @@ end
         solve!(prob)
 
         # Compute switching sensitivities using type-based interface
-        dva_dz = calc_sensitivity(prob, VoltageAngle(), Switching())
-        dg_dz = calc_sensitivity(prob, Generation(), Switching())
-        df_dz = calc_sensitivity(prob, Flow(), Switching())
-        dlmp_dz = calc_sensitivity(prob, LMP(), Switching())
+        dva_dz = calc_sensitivity(prob, :va, :z)
+        dg_dz = calc_sensitivity(prob, :pg, :z)
+        df_dz = calc_sensitivity(prob, :f, :z)
+        dlmp_dz = calc_sensitivity(prob, :lmp, :z)
 
         @test size(dva_dz) == (dc_net.n, dc_net.m)
         @test size(dg_dz) == (dc_net.k, dc_net.m)
@@ -316,9 +316,9 @@ end
         # Compute analytical sensitivity using type-based interface
         prob = DCOPFProblem(dc_net, d)
         sol_base = solve!(prob)
-        dg_dd = calc_sensitivity(prob, Generation(), Demand())
-        dva_dd = calc_sensitivity(prob, VoltageAngle(), Demand())
-        df_dd = calc_sensitivity(prob, Flow(), Demand())
+        dg_dd = calc_sensitivity(prob, :pg, :d)
+        dva_dd = calc_sensitivity(prob, :va, :d)
+        df_dd = calc_sensitivity(prob, :f, :d)
 
         # Find a bus with demand
         bus_idx = findfirst(d .> 0)
@@ -368,7 +368,7 @@ end
         solve!(prob)
 
         # Use the type-based interface
-        dg_dd = calc_sensitivity(prob, Generation(), Demand())
+        dg_dd = calc_sensitivity(prob, :pg, :d)
 
         # For each demand bus, generation participation factors should sum to 1
         # This is because total generation must equal total demand
@@ -410,8 +410,8 @@ end
     @test abs(lmps[1] - lmps[2]) < 0.1  # Nearly equal (no congestion)
 
     # Verify sensitivities using type-based interface
-    dg_dd = calc_sensitivity(prob, Generation(), Demand())
-    dva_dd = calc_sensitivity(prob, VoltageAngle(), Demand())
+    dg_dd = calc_sensitivity(prob, :pg, :d)
+    dva_dd = calc_sensitivity(prob, :va, :d)
     @test Matrix(dg_dd)[1, 2] ≈ 1.0 atol=0.01  # dg1/dd2 = 1
     # dtheta2/dd2 = 1/b = 0.1 (same sign as theta2)
     @test abs(Matrix(dva_dd)[2, 2]) ≈ 0.1 atol=0.01
@@ -503,10 +503,10 @@ end
         solve!(prob)
 
         # Use the type-based interface
-        dg_dcl = calc_sensitivity(prob, Generation(), LinearCost())
-        dg_dcq = calc_sensitivity(prob, Generation(), QuadraticCost())
-        dlmp_dcl = calc_sensitivity(prob, LMP(), LinearCost())
-        dlmp_dcq = calc_sensitivity(prob, LMP(), QuadraticCost())
+        dg_dcl = calc_sensitivity(prob, :pg, :cl)
+        dg_dcq = calc_sensitivity(prob, :pg, :cq)
+        dlmp_dcl = calc_sensitivity(prob, :lmp, :cl)
+        dlmp_dcq = calc_sensitivity(prob, :lmp, :cq)
 
         # Check dimensions
         @test size(dg_dcl) == (dc_net.k, dc_net.k)
@@ -536,7 +536,7 @@ end
     d = [0.0, 1.0]
     prob = DCOPFProblem(dc_net, d)
     sol_base = solve!(prob)
-    dg_dcl = calc_sensitivity(prob, Generation(), LinearCost())
+    dg_dcl = calc_sensitivity(prob, :pg, :cl)
 
     # Finite difference validation for linear cost
     delta = 1e-5
@@ -562,7 +562,7 @@ end
     lmp_base = calc_lmp(sol_base, dc_net)
     lmp_pert = calc_lmp(sol_pert, dc_net_pert)
     dlmp_dcl_numerical = (lmp_pert - lmp_base) / delta
-    dlmp_dcl = calc_sensitivity(prob, LMP(), LinearCost())
+    dlmp_dcl = calc_sensitivity(prob, :lmp, :cl)
 
     if norm(dlmp_dcl_numerical) > 1e-10
         rel_error_lmp = norm(Matrix(dlmp_dcl)[:, 1] - dlmp_dcl_numerical) / norm(dlmp_dcl_numerical)
