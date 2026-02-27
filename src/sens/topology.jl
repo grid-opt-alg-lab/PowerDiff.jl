@@ -147,11 +147,11 @@ end
 
 Compute switching sensitivity for DC power flow (not OPF).
 
-For DC power flow θ = L(z)⁺ p, the sensitivity of angles w.r.t. switching is:
+For DC power flow θ = L(sw)⁺ p, the sensitivity of angles w.r.t. switching is:
 
-    ∂θ/∂zₑ = -L⁺ · (∂L/∂zₑ) · θ
+    ∂θ/∂swₑ = -L⁺ · (∂L/∂swₑ) · θ
 
-where ∂L/∂zₑ = -bₑ · (aₑ · aₑ') is the rank-1 outer product of incidence column.
+where ∂L/∂swₑ = -bₑ · (aₑ · aₑ') is the rank-1 outer product of incidence column.
 
 This uses the formula from matrix perturbation theory (RandomizedSwitching pattern).
 

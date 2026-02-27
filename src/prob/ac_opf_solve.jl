@@ -9,6 +9,8 @@
 
 Solve the AC OPF problem and return an ACOPFSolution.
 
+Invalidates the sensitivity cache since the solution may have changed.
+
 # Returns
 ACOPFSolution containing optimal primal and dual variables.
 
@@ -16,12 +18,20 @@ ACOPFSolution containing optimal primal and dual variables.
 Error if optimization does not converge to optimal/locally optimal solution.
 """
 function solve!(prob::ACOPFProblem)
+    # Invalidate sensitivity cache since we're re-solving
+    invalidate!(prob.cache)
+
     optimize!(prob.model)
 
     status = termination_status(prob.model)
     @assert status in [MOI.OPTIMAL, MOI.LOCALLY_SOLVED] "AC OPF failed with status: $status"
 
-    return _extract_ac_opf_solution(prob)
+    sol = _extract_ac_opf_solution(prob)
+
+    # Cache the solution for sensitivity computations
+    prob.cache.solution = sol
+
+    return sol
 end
 
 """
@@ -129,12 +139,13 @@ Update the network switching state and invalidate the sensitivity cache.
 - `prob`: ACOPFProblem to update
 - `sw`: New switching state vector (length m), values in [0,1]
 
-# Note
+# Warning
 This modifies `prob.network.sw` and invalidates cached sensitivities.
 The JuMP model constraints embed the previous sw values as coefficients,
-so the problem must be rebuilt for exact re-optimization. However, the
+so the problem **must** be rebuilt for exact re-optimization. However, the
 KKT-based sensitivity analysis (which uses its own `ac_kkt` function
-with the current `network.sw`) works correctly without a model rebuild.
+with the current `network.sw`) works correctly **not** requiring a model rebuild.
+See GitHub issue #5.
 """
 function update_switching!(prob::ACOPFProblem, sw::AbstractVector)
     m = prob.network.m

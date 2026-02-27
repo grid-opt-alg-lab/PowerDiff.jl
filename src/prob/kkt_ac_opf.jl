@@ -207,8 +207,8 @@ end
 Compute all branch flows given voltage state and switching state.
 Returns vectors of p_fr, q_fr, p_to, q_to indexed by branch number.
 
-The switching variable z_l multiplies each flow, so z_l=0 means the branch
-contributes zero flow (open), z_l=1 means full flow (closed).
+The switching variable sw_l multiplies each flow, so sw_l=0 means the branch
+contributes zero flow (open), sw_l=1 means full flow (closed).
 """
 function _compute_branch_flows(va, vm, net::ACNetwork, ref, sw)
     m = net.m

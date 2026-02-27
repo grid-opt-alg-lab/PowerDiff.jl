@@ -177,7 +177,7 @@ src/
 │   ├── dc_opf_problem.jl       # DCOPFProblem, DCSensitivityCache + constructors
 │   ├── ac_network.jl           # ACNetwork, ACPowerFlowState
 │   ├── ac_opf_problem.jl       # ACOPFProblem, ACOPFSolution, ACSensitivityCache + constructors
-│   └── sensitivities.jl        # Sensitivity{T}, bundled types (DCPFSwitchingSens, ACOPFSwitchingSens)
+│   └── sensitivities.jl        # Sensitivity{T} <: AbstractMatrix{T}
 ├── prob/
 │   ├── dc_opf.jl               # DC OPF solve!, update_demand!
 │   ├── kkt_dc_opf.jl           # DC KKT system, Jacobians, cached parameter derivatives

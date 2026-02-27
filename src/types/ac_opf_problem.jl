@@ -295,7 +295,7 @@ function ACOPFProblem(
         va_fr = va[branch["f_bus"]]
         va_to = va[branch["t_bus"]]
 
-        # Branch parameters (incorporating switching state z)
+        # Branch parameters (incorporating switching state sw)
         g_br, b_br = PM.calc_branch_y(branch)
         tr, ti = PM.calc_branch_t(branch)
         g_fr_shunt = branch["g_fr"]

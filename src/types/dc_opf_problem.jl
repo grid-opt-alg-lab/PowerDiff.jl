@@ -48,7 +48,10 @@ mutable struct DCSensitivityCache
 end
 
 # Deprecation alias
-const SensitivityCache = DCSensitivityCache
+function SensitivityCache(args...)
+    Base.depwarn("`SensitivityCache` is deprecated, use `DCSensitivityCache` instead.", :SensitivityCache)
+    return DCSensitivityCache(args...)
+end
 
 """
     DCSensitivityCache()

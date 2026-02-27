@@ -38,7 +38,7 @@ prob = DCOPFProblem(dc_net, d)
 solve!(prob)
 
 dlmp_dd = calc_sensitivity(prob, :lmp, :d)   # dLMP/dd (n x n)
-dpg_dz  = calc_sensitivity(prob, :pg, :z)    # dg/dz (k x m)
+dpg_dsw = calc_sensitivity(prob, :pg, :sw)   # dg/dsw (k x m)
 
 dlmp_dd.formulation  # :dcopf
 dlmp_dd[2, 3]        # dLMP_2 / dd_3

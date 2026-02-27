@@ -76,14 +76,14 @@ const _VALID_PARAMETERS = Set([:d, :sw, :cq, :cl, :fmax, :b, :p, :q])
 function _resolve_operand(s::Symbol)
     s = get(_OPERAND_ALIASES, s, s)
     s in _VALID_OPERANDS || throw(ArgumentError(
-        "Unknown operand symbol :$s. Valid: :va, :f, :pg, :g, :lmp, :vm, :im, :v, :qg"))
+        "Unknown operand symbol :$s. Valid: :va, :f, :pg, :lmp, :vm, :im, :v, :qg (alias: :g → :pg)"))
     return s
 end
 
 function _resolve_parameter(s::Symbol)
     s = get(_PARAMETER_ALIASES, s, s)
     s in _VALID_PARAMETERS || throw(ArgumentError(
-        "Unknown parameter symbol :$s. Valid: :d, :pd, :sw, :cq, :cl, :fmax, :b, :p, :q"))
+        "Unknown parameter symbol :$s. Valid: :d, :sw, :cq, :cl, :fmax, :b, :p, :q (alias: :pd → :d)"))
     return s
 end
 
