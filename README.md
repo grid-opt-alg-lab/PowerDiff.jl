@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/src/assets/logo.svg" width="200" alt="PowerModelsDiff.jl">
+</p>
+
 # PowerModelsDiff.jl
 
 A Julia package for differentiable power system analysis. Provides automatic differentiation capabilities for the power flow equations, optimal power flow (OPF) problems, and sensitivity analysis of power networks.
