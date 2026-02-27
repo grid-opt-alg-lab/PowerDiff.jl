@@ -182,14 +182,14 @@ Compute the Jacobian of the KKT operator using ForwardDiff.
 
 # Arguments
 - `prob`: ACOPFProblem
-- `sol`: Optional pre-computed solution. If not provided, calls solve!(prob).
+- `sol`: Optional pre-computed solution. If not provided, ensures the problem is solved (reusing cached solution if available).
 
 # Returns
 Matrix ∂K/∂z where z is the flattened variable vector.
 """
 function calc_ac_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothing}=nothing)
     if isnothing(sol)
-        sol = solve!(prob)
+        sol = _ensure_ac_solved!(prob)
     end
 
     z0 = ac_flatten_variables(sol, prob)

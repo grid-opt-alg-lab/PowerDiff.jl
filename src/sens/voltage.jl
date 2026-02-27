@@ -31,10 +31,10 @@ to compute the sensitivity matrices.
 
 # Returns
 NamedTuple with fields:
-- `∂v_∂p`: Complex phasor voltage sensitivity to active power (n × n)
-- `∂v_∂q`: Complex phasor voltage sensitivity to reactive power (n × n)
-- `∂vm_∂p`: Voltage magnitude sensitivity to active power (n × n)
-- `∂vm_∂q`: Voltage magnitude sensitivity to reactive power (n × n)
+- `dv_dp`: Complex phasor voltage sensitivity to active power (n × n)
+- `dv_dq`: Complex phasor voltage sensitivity to reactive power (n × n)
+- `dvm_dp`: Voltage magnitude sensitivity to active power (n × n)
+- `dvm_dq`: Voltage magnitude sensitivity to reactive power (n × n)
 
 # Example
 ```julia
@@ -42,7 +42,7 @@ Y = calc_basic_admittance_matrix(net)
 v = calc_basic_bus_voltage(net)
 sens = calc_voltage_power_sensitivities(v, Y)
 # How does voltage at bus 3 change when active power at bus 2 increases?
-dvdp = sens.∂vm_∂p[3, 2]
+dvdp = sens.dvm_dp[3, 2]
 ```
 """
 function calc_voltage_power_sensitivities(

@@ -33,10 +33,10 @@ where I_ℓ is the current on branch ℓ connecting buses i and j.
 
 # Returns
 NamedTuple with fields:
-- `∂I_∂p`: Complex current phasor sensitivity to active power (m × n)
-- `∂I_∂q`: Complex current phasor sensitivity to reactive power (m × n)
-- `∂Im_∂p`: Current magnitude sensitivity to active power (m × n)
-- `∂Im_∂q`: Current magnitude sensitivity to reactive power (m × n)
+- `dI_dp`: Complex current phasor sensitivity to active power (m × n)
+- `dI_dq`: Complex current phasor sensitivity to reactive power (m × n)
+- `dIm_dp`: Current magnitude sensitivity to active power (m × n)
+- `dIm_dq`: Current magnitude sensitivity to reactive power (m × n)
 
 # Example
 ```julia
@@ -44,7 +44,7 @@ Y = calc_basic_admittance_matrix(net)
 v = calc_basic_bus_voltage(net)
 sens = calc_current_power_sensitivities(v, Y, net["branch"])
 # How does current on line 2 change when active power at bus 3 increases?
-dI_dp = sens.∂Im_∂p[2, 3]
+dI_dp = sens.dIm_dp[2, 3]
 ```
 """
 function calc_current_power_sensitivities(

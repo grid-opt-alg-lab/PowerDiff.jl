@@ -392,7 +392,7 @@ Compute the sparse Jacobian of the KKT operator analytically.
 
 # Arguments
 - `prob`: DCOPFProblem
-- `sol`: Optional pre-computed solution. If not provided, calls solve!(prob).
+- `sol`: Optional pre-computed solution. If not provided, ensures the problem is solved (reusing cached solution if available).
 
 # Returns
 Sparse matrix ∂K/∂z where z is the flattened variable vector.
@@ -401,7 +401,7 @@ This analytical Jacobian is more efficient than ForwardDiff for large problems.
 """
 function calc_kkt_jacobian(prob::DCOPFProblem; sol::Union{DCOPFSolution,Nothing}=nothing)
     if isnothing(sol)
-        sol = solve!(prob)
+        sol = _ensure_solved!(prob)
     end
     return calc_kkt_jacobian(prob.network, prob.d, prob, sol)
 end
