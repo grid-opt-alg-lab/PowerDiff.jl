@@ -201,8 +201,10 @@ src/
 test/
 ├── runtests.jl                 # Main test runner
 ├── test_ac_opf_sens.jl         # AC OPF sensitivity tests
+├── test_ac_pf_verification.jl  # AC PF finite-difference verification
 ├── test_sensitivity_coverage.jl # Exhaustive (operand, parameter) coverage tests
 ├── test_dc_opf_verification.jl # DC OPF finite-difference verification
+├── test_update_switching.jl    # update_switching! correctness tests
 ├── unified/
 │   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
 │   └── test_sensitivity_verification.jl  # ForwardDiff verification
@@ -243,4 +245,5 @@ docs/
 **Sensitivity Verification**
 - All sensitivities are verified against ForwardDiff or finite differences in tests
 - `test/unified/test_sensitivity_verification.jl`: DC PF (ForwardDiff), DC OPF demand/switching (FD), AC PF
+- `test/test_ac_pf_verification.jl`: AC PF (finite-difference against Newton re-solve)
 - `test/test_dc_opf_verification.jl`: DC OPF for cost, flow limit, susceptance, and remaining combos

@@ -15,7 +15,7 @@ Sparse matrix of size (kkt_dims x k).
 
 # Notes
 Only the stationarity condition for g depends on cl:
-  K_g = Cq * g + cl - G_inc' * nu_bal - rho_lb + rho_ub
+  K_g = 2*Cq * g + cl - G_inc' * nu_bal - rho_lb + rho_ub
   dK_g/dcl = I_k (identity matrix)
 """
 function calc_kkt_jacobian_cost_linear(net::DCNetwork)

@@ -209,11 +209,14 @@ function ACOPFProblem(
     @assert haskey(pm_data, "basic_network") && pm_data["basic_network"] == true "Network must be a basic network"
 
     if optimizer === Clarabel.Optimizer
-        @warn "Clarabel is a convex solver and cannot solve nonconvex AC OPF. " *
-              "Use Ipopt.Optimizer (default) or another NLP solver."
+        throw(ArgumentError(
+            "Clarabel is a convex solver and cannot solve nonconvex AC OPF. " *
+            "Use Ipopt.Optimizer (default) or another NLP solver."
+        ))
     end
 
     # Build PowerModels reference structure
+    pm_data = deepcopy(pm_data)
     PM.standardize_cost_terms!(pm_data, order=2)
     PM.calc_thermal_limits!(pm_data)
     ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]

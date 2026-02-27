@@ -5,7 +5,7 @@
 The DC OPF uses the susceptance-weighted Laplacian to model power flow:
 
 ```math
-\min_{g, \theta, f} \quad \frac{1}{2} g^\top C_q g + c_l^\top g + \frac{\tau^2}{2} \|f\|^2
+\min_{g, \theta, f} \quad g^\top C_q g + c_l^\top g + \frac{\tau^2}{2} \|f\|^2
 ```
 
 subject to:
