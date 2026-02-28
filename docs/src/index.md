@@ -16,7 +16,7 @@ A Julia package for differentiable power system analysis. Compute sensitivities 
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/samtalki/PowerModelsDiff.jl")
+Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerModelsDiff.jl")
 ```
 
 ## Quick Example
