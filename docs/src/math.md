@@ -5,17 +5,18 @@
 The DC OPF uses the susceptance-weighted Laplacian to model power flow:
 
 ```math
-\min_{g, \theta, f} \quad g^\top C_q g + c_l^\top g + \frac{\tau^2}{2} \|f\|^2
+\min_{g, \theta, f, \text{psh}} \quad g^\top C_q g + c_l^\top g + c_{\text{shed}}^\top \text{psh} + \frac{\tau^2}{2} \|f\|^2
 ```
 
 subject to:
 
 ```math
 \begin{aligned}
-G_{\text{inc}} g - d &= L \theta & (\nu_{\text{bal}}) \\
+G_{\text{inc}} g + \text{psh} - d &= L \theta & (\nu_{\text{bal}}) \\
 f &= W A \theta & (\nu_{\text{flow}}) \\
 -f_{\max} \leq f &\leq f_{\max} & (\lambda_{\text{lb}}, \lambda_{\text{ub}}) \\
 g_{\min} \leq g &\leq g_{\max} & (\rho_{\text{lb}}, \rho_{\text{ub}}) \\
+0 \leq \text{psh} &\leq d & (\mu_{\text{lb}}, \mu_{\text{ub}}) \\
 \theta_{\text{ref}} &= 0 & (\eta_{\text{ref}})
 \end{aligned}
 ```
@@ -25,6 +26,7 @@ where:
 - ``W = \text{diag}(-b \circ \text{sw})`` is the branch weight matrix
 - ``A`` is the ``m \times n`` incidence matrix (branches × buses)
 - ``G_{\text{inc}}`` is the ``n \times k`` generator-bus incidence matrix
+- ``c_{\text{shed}}`` is the load-shedding cost vector
 - ``\tau`` is a small regularization parameter
 
 ## DC Power Flow
@@ -60,10 +62,10 @@ By the implicit function theorem:
 The KKT variable vector ``z`` is structured as:
 
 ```math
-z = [\theta, g, f, \lambda_{\text{lb}}, \lambda_{\text{ub}}, \rho_{\text{lb}}, \rho_{\text{ub}}, \nu_{\text{bal}}, \nu_{\text{flow}}, \eta_{\text{ref}}]
+z = [\theta, g, f, \text{psh}, \lambda_{\text{lb}}, \lambda_{\text{ub}}, \rho_{\text{lb}}, \rho_{\text{ub}}, \mu_{\text{lb}}, \mu_{\text{ub}}, \nu_{\text{bal}}, \nu_{\text{flow}}, \eta_{\text{ref}}]
 ```
 
-with total dimension ``2n + 4m + 3k + 1``.
+with total dimension ``5n + 4m + 3k + 1``.
 
 The KKT Jacobian ``\partial K / \partial z`` is computed analytically as a sparse matrix. Parameter Jacobians ``\partial K / \partial p`` are computed for each parameter type (demand, switching, cost, flow limits, susceptances).
 

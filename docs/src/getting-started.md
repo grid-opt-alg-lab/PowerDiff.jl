@@ -62,7 +62,7 @@ congestion = calc_congestion_component(sol, dc_net)
 
 ### OPF Sensitivities
 
-DC OPF supports sensitivities for all four operands (`:va`, `:pg`, `:f`, `:lmp`) with respect to six parameters (`:d`, `:sw`, `:cq`, `:cl`, `:fmax`, `:b`):
+DC OPF supports sensitivities for all five operands (`:va`, `:pg`, `:f`, `:psh`, `:lmp`) with respect to six parameters (`:d`, `:sw`, `:cq`, `:cl`, `:fmax`, `:b`):
 
 ```julia
 dlmp_dd  = calc_sensitivity(prob, :lmp, :d)    # dLMP/dd (n x n)
@@ -70,6 +70,8 @@ dpg_dd   = calc_sensitivity(prob, :pg, :d)     # dg/dd (k x n)
 dpg_dcq  = calc_sensitivity(prob, :pg, :cq)    # dg/dcq (k x k)
 dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)   # dLMP/dsw (n x m)
 df_dfmax = calc_sensitivity(prob, :f, :fmax)   # df/dfmax (m x m)
+dpsh_dd  = calc_sensitivity(prob, :psh, :d)    # dpsh/dd (n x n)
+dpsh_dsw = calc_sensitivity(prob, :psh, :sw)   # dpsh/dsw (n x m)
 ```
 
 ### Using the `Sensitivity{T}` Result

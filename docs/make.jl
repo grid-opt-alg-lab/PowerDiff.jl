@@ -7,7 +7,7 @@ format_opts = if site_build
     # Build for personal website: pretty URLs, canonical link, no edit links
     Documenter.HTML(
         prettyurls = true,
-        canonical = "https://samueltalkington.com/research/PowerModelsDiff.jl/",
+        canonical = "https://samueltalkington.com/research/pmdiff/",
         edit_link = nothing,
     )
 else
