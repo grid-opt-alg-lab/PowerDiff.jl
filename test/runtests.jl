@@ -79,7 +79,7 @@ end
 
         # Test power balance (approximately)
         B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
-        power_imbalance = dc_net.G_inc * sol.g - d - B_mat * sol.θ
+        power_imbalance = dc_net.G_inc * sol.g + sol.psh - d - B_mat * sol.θ
         @test norm(power_imbalance) < 1e-4
     end
 end
@@ -119,7 +119,7 @@ end
 
         # Test dimensions
         dim = kkt_dims(dc_net)
-        @test dim == 2*dc_net.n + 4*dc_net.m + 3*dc_net.k + 1
+        @test dim == 5*dc_net.n + 4*dc_net.m + 3*dc_net.k + 1
 
         # Test flatten/unflatten round-trip
         z = flatten_variables(sol, prob)
@@ -133,11 +133,10 @@ end
         # Test KKT residuals (should be near zero at optimum)
         K = kkt(z, prob, d)
         # Note: complementary slackness won't be exactly zero due to interior point solver
-        # Check stationarity and feasibility conditions
-        n, m, k = dc_net.n, dc_net.m, dc_net.k
+        # Check stationarity and feasibility conditions using centralized indices
+        idx = kkt_indices(dc_net)
         # Primal feasibility should be very tight
-        idx_power_bal = n + k + 3m + 2k + 1 : n + k + 3m + 2k + n
-        @test norm(K[idx_power_bal]) < 1e-4
+        @test norm(K[idx.ν_bal]) < 1e-4
     end
 end
 
@@ -383,12 +382,15 @@ end
 
         # Use the type-based interface
         dg_dd = calc_sensitivity(prob, :pg, :d)
+        dpsh_dd = calc_sensitivity(prob, :psh, :d)
 
-        # For each demand bus, generation participation factors should sum to 1
-        # This is because total generation must equal total demand
+        # For each demand bus, generation + shedding participation factors should sum to 1
+        # From power balance: G_inc * g + psh - d = B * θ
+        # Summing (1'B = 0): sum(g) + sum(psh) = sum(d), so sum(∂g/∂d_j) + sum(∂psh/∂d_j) = 1
         for i in 1:dc_net.n
-            pf_sum = sum(Matrix(dg_dd)[:, i])
-            @test abs(pf_sum - 1.0) < 0.01  # Should sum to 1 (power balance)
+            gen_sum = sum(Matrix(dg_dd)[:, i])
+            psh_sum = sum(Matrix(dpsh_dd)[:, i])
+            @test abs(gen_sum + psh_sum - 1.0) < 0.01
         end
     end
 end
@@ -677,10 +679,13 @@ end
             @test all(isfinite, Matrix(S))
         end
 
-        # Participation factors sum to 1
+        # Participation factors sum to 1 (generation + shedding)
         dg_dd = calc_sensitivity(prob, :pg, :d)
+        dpsh_dd = calc_sensitivity(prob, :psh, :d)
         for i in 1:dc_net.n
-            @test abs(sum(Matrix(dg_dd)[:, i]) - 1.0) < 0.01
+            gen_sum = sum(Matrix(dg_dd)[:, i])
+            psh_sum = sum(Matrix(dpsh_dd)[:, i])
+            @test abs(gen_sum + psh_sum - 1.0) < 0.01
         end
 
         # AC power flow on case14
@@ -800,3 +805,4 @@ include("test_sensitivity_coverage.jl")
 include("test_dc_opf_verification.jl")
 include("test_ac_pf_verification.jl")
 include("test_update_switching.jl")
+include("test_psh.jl")

@@ -30,6 +30,7 @@ function solve!(prob::DCOPFProblem)
     θ_val = value.(prob.θ)
     g_val = value.(prob.g)
     f_val = value.(prob.f)
+    psh_val = value.(prob.psh)
 
     # Extract dual variables
     ν_bal = dual.(prob.cons.power_bal)
@@ -38,10 +39,24 @@ function solve!(prob::DCOPFProblem)
     λ_lb = dual.(prob.cons.line_lb)
     ρ_ub = dual.(prob.cons.gen_ub)
     ρ_lb = dual.(prob.cons.gen_lb)
+    μ_lb = dual.(prob.cons.shed_lb)
+    μ_ub = dual.(prob.cons.shed_ub)
+
+    # Post-process load shedding for strict complementarity.
+    # Interior-point solvers give psh ≈ ε > 0 even when shedding is inactive.
+    # Snap to strict complementarity for clean KKT sensitivity computation.
+    for i in eachindex(psh_val)
+        if psh_val[i] < 1e-6
+            psh_val[i] = 0.0
+            μ_ub[i] = 0.0
+        else
+            μ_lb[i] = 0.0
+        end
+    end
 
     obj = objective_value(prob.model)
 
-    sol = DCOPFSolution(θ_val, g_val, f_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, obj)
+    sol = DCOPFSolution(θ_val, g_val, f_val, psh_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, μ_lb, μ_ub, obj)
 
     # Cache the solution for sensitivity computations
     prob.cache.solution = sol
@@ -70,6 +85,7 @@ function update_demand!(prob::DCOPFProblem, d::AbstractVector)
     # Update constraint RHS
     for i in 1:n
         set_normalized_rhs(prob.cons.power_bal[i], d[i])
+        set_normalized_rhs(prob.cons.shed_ub[i], d[i])
     end
 
     return prob

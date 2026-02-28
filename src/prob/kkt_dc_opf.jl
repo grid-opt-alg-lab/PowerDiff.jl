@@ -31,7 +31,12 @@ function _ensure_kkt_factor!(prob::DCOPFProblem)::LinearAlgebra.LU
     if isnothing(prob.cache.kkt_factor)
         sol = _ensure_solved!(prob)
         J_z = calc_kkt_jacobian(prob; sol=sol)
-        prob.cache.kkt_factor = lu(Matrix(J_z))
+        # Small Tikhonov regularization for numerical stability.
+        # Degenerate complementarity (e.g. psh=0 at buses with d=0) can
+        # produce zero diagonal entries; the regularization prevents exact
+        # singularity without meaningfully affecting sensitivity accuracy.
+        dim = size(J_z, 1)
+        prob.cache.kkt_factor = lu(Matrix(J_z) + 1e-10 * I(dim))
     end
     return prob.cache.kkt_factor
 end
@@ -49,7 +54,8 @@ Uses cached value if available, otherwise computes and caches.
 function _get_dz_dd!(prob::DCOPFProblem)::Matrix{Float64}
     if isnothing(prob.cache.dz_dd)
         kkt_lu = _ensure_kkt_factor!(prob)
-        J_d = calc_kkt_jacobian_demand(prob.network)
+        sol = _ensure_solved!(prob)
+        J_d = calc_kkt_jacobian_demand(prob.network, prob.d, sol)
         prob.cache.dz_dd = -(kkt_lu \ Matrix(J_d))
     end
     return prob.cache.dz_dd
@@ -152,6 +158,8 @@ function _extract_sensitivity(prob::DCOPFProblem, dz_dp::Matrix{Float64}, operan
         return Matrix(dz_dp[idx.g, :])
     elseif operand === :f
         return Matrix(dz_dp[idx.f, :])
+    elseif operand === :psh
+        return Matrix(dz_dp[idx.psh, :])
     elseif operand === :lmp
         return Matrix(dz_dp[idx.ν_bal, :])
     else
@@ -170,19 +178,19 @@ end
 Compute the dimension of the flattened KKT variable vector.
 
 The KKT system includes:
-- Primal: θ (n), g (k), f (m)
-- Dual (inequality): λ_lb (m), λ_ub (m), ρ_lb (k), ρ_ub (k)
+- Primal: θ (n), g (k), f (m), psh (n)
+- Dual (inequality): λ_lb (m), λ_ub (m), ρ_lb (k), ρ_ub (k), μ_lb (n), μ_ub (n)
 - Dual (equality): ν_bal (n), ν_flow (m)
 - Reference bus constraint: 1
 
-Total: n + k + m + 2m + 2k + n + m + 1 = 2n + 4m + 3k + 1
+Total: 5n + 4m + 3k + 1
 """
 kkt_dims(prob::DCOPFProblem) = kkt_dims(prob.network)
 
 function kkt_dims(net::DCNetwork)
     n, m, k = net.n, net.m, net.k
-    # θ(n) + g(k) + f(m) + λ_lb(m) + λ_ub(m) + ρ_lb(k) + ρ_ub(k) + ν_bal(n) + ν_flow(m) + ref(1)
-    return 2n + 4m + 3k + 1
+    # θ(n) + g(k) + f(m) + psh(n) + λ_lb(m) + λ_ub(m) + ρ_lb(k) + ρ_ub(k) + μ_lb(n) + μ_ub(n) + ν_bal(n) + ν_flow(m) + ref(1)
+    return 5n + 4m + 3k + 1
 end
 
 """
@@ -192,7 +200,7 @@ Compute all KKT variable indices from network dimensions.
 Single source of truth for index calculations.
 
 # Variable ordering
-[θ(n), g(k), f(m), λ_lb(m), λ_ub(m), ρ_lb(k), ρ_ub(k), ν_bal(n), ν_flow(m), η_ref(1)]
+[θ(n), g(k), f(m), psh(n), λ_lb(m), λ_ub(m), ρ_lb(k), ρ_ub(k), μ_lb(n), μ_ub(n), ν_bal(n), ν_flow(m), η_ref(1)]
 
 # Returns
 NamedTuple with index ranges for each variable block.
@@ -202,18 +210,22 @@ function kkt_indices(n::Int, m::Int, k::Int)
     idx_θ = (i+1):(i+n); i += n
     idx_g = (i+1):(i+k); i += k
     idx_f = (i+1):(i+m); i += m
+    idx_psh = (i+1):(i+n); i += n
     idx_λ_lb = (i+1):(i+m); i += m
     idx_λ_ub = (i+1):(i+m); i += m
     idx_ρ_lb = (i+1):(i+k); i += k
     idx_ρ_ub = (i+1):(i+k); i += k
+    idx_μ_lb = (i+1):(i+n); i += n
+    idx_μ_ub = (i+1):(i+n); i += n
     idx_ν_bal = (i+1):(i+n); i += n
     idx_ν_flow = (i+1):(i+m); i += m
     idx_η = i + 1
 
     return (
-        θ = idx_θ, g = idx_g, f = idx_f,
+        θ = idx_θ, g = idx_g, f = idx_f, psh = idx_psh,
         λ_lb = idx_λ_lb, λ_ub = idx_λ_ub,
         ρ_lb = idx_ρ_lb, ρ_ub = idx_ρ_ub,
+        μ_lb = idx_μ_lb, μ_ub = idx_μ_ub,
         ν_bal = idx_ν_bal, ν_flow = idx_ν_flow, η = idx_η
     )
 end
@@ -231,7 +243,7 @@ kkt_indices(prob::DCOPFProblem) = kkt_indices(prob.network)
 Flatten solution primal and dual variables into a single vector for KKT evaluation.
 
 # Variable ordering
-[θ; g; f; λ_lb; λ_ub; ρ_lb; ρ_ub; ν_bal; ν_flow; η_ref]
+[θ; g; f; psh; λ_lb; λ_ub; ρ_lb; ρ_ub; μ_lb; μ_ub; ν_bal; ν_flow; η_ref]
 
 where η_ref is the dual for the reference bus constraint (set to 0).
 """
@@ -243,10 +255,13 @@ function flatten_variables(sol::DCOPFSolution, prob::DCOPFProblem)
         sol.θ,
         sol.g,
         sol.f,
+        sol.psh,
         sol.λ_lb,
         sol.λ_ub,
         sol.ρ_lb,
         sol.ρ_ub,
+        sol.μ_lb,
+        sol.μ_ub,
         sol.ν_bal,
         sol.ν_flow,
         [η_ref]
@@ -259,7 +274,7 @@ end
 Unflatten KKT variable vector into named components.
 
 # Returns
-NamedTuple with fields: θ, g, f, λ_lb, λ_ub, ρ_lb, ρ_ub, ν_bal, ν_flow, η_ref
+NamedTuple with fields: θ, g, f, psh, λ_lb, λ_ub, ρ_lb, ρ_ub, μ_lb, μ_ub, ν_bal, ν_flow, η_ref
 """
 function unflatten_variables(z::AbstractVector, prob::DCOPFProblem)
     return unflatten_variables(z, prob.network)
@@ -272,10 +287,13 @@ function unflatten_variables(z::AbstractVector, net::DCNetwork)
     θ = z[i+1:i+n]; i += n
     g = z[i+1:i+k]; i += k
     f = z[i+1:i+m]; i += m
+    psh = z[i+1:i+n]; i += n
     λ_lb = z[i+1:i+m]; i += m
     λ_ub = z[i+1:i+m]; i += m
     ρ_lb = z[i+1:i+k]; i += k
     ρ_ub = z[i+1:i+k]; i += k
+    μ_lb = z[i+1:i+n]; i += n
+    μ_ub = z[i+1:i+n]; i += n
     ν_bal = z[i+1:i+n]; i += n
     ν_flow = z[i+1:i+m]; i += m
     η_ref = z[i+1]
@@ -284,10 +302,13 @@ function unflatten_variables(z::AbstractVector, net::DCNetwork)
         θ = θ,
         g = g,
         f = f,
+        psh = psh,
         λ_lb = λ_lb,
         λ_ub = λ_ub,
         ρ_lb = ρ_lb,
         ρ_ub = ρ_ub,
+        μ_lb = μ_lb,
+        μ_ub = μ_ub,
         ν_bal = ν_bal,
         ν_flow = ν_flow,
         η_ref = η_ref
@@ -335,9 +356,10 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     vars = unflatten_variables(z, net)
 
     # Extract variables
-    θ, g, f = vars.θ, vars.g, vars.f
+    θ, g, f, psh = vars.θ, vars.g, vars.f, vars.psh
     λ_lb, λ_ub = vars.λ_lb, vars.λ_ub
     ρ_lb, ρ_ub = vars.ρ_lb, vars.ρ_ub
+    μ_lb, μ_ub = vars.μ_lb, vars.μ_ub
     ν_bal, ν_flow = vars.ν_bal, vars.ν_flow
     η_ref = vars.η_ref
 
@@ -355,30 +377,36 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     K_θ = B_mat' * ν_bal + WA' * ν_flow + e_ref * η_ref
 
     # 2. Stationarity w.r.t. g
-    # Objective is cq_i * g_i^2 + cl_i * g_i, so ∂obj/∂g_i = 2*cq_i*g_i + cl_i
     K_g = 2 * Diagonal(net.cq) * g + net.cl - net.G_inc' * ν_bal - ρ_lb + ρ_ub
 
     # 3. Stationarity w.r.t. f
     K_f = net.τ^2 * f - ν_flow - λ_lb + λ_ub
 
-    # 4. Complementary slackness: flow bounds
+    # 4. Stationarity w.r.t. psh
+    K_psh = net.c_shed - ν_bal - μ_lb + μ_ub
+
+    # 5. Complementary slackness: flow bounds
     K_λ_lb = λ_lb .* (f + net.fmax)
     K_λ_ub = λ_ub .* (net.fmax - f)
 
-    # 5. Complementary slackness: generation bounds
+    # 6. Complementary slackness: generation bounds
     K_ρ_lb = ρ_lb .* (g - net.gmin)
     K_ρ_ub = ρ_ub .* (net.gmax - g)
 
-    # 6. Primal feasibility: power balance
-    K_power_bal = net.G_inc * g - d - B_mat * θ
+    # 7. Complementary slackness: load shedding bounds
+    K_μ_lb = μ_lb .* psh
+    K_μ_ub = μ_ub .* (d - psh)
 
-    # 7. Primal feasibility: flow definition
+    # 8. Primal feasibility: power balance (G_inc * g + psh - d = B * θ)
+    K_power_bal = net.G_inc * g + psh - d - B_mat * θ
+
+    # 9. Primal feasibility: flow definition
     K_flow_def = f - WA * θ
 
-    # 8. Reference bus
+    # 10. Reference bus
     K_ref = θ[net.ref_bus]
 
-    return vcat(K_θ, K_g, K_f, K_λ_lb, K_λ_ub, K_ρ_lb, K_ρ_ub, K_power_bal, K_flow_def, [K_ref])
+    return vcat(K_θ, K_g, K_f, K_psh, K_λ_lb, K_λ_ub, K_ρ_lb, K_ρ_ub, K_μ_lb, K_μ_ub, K_power_bal, K_flow_def, [K_ref])
 end
 
 # =============================================================================
@@ -411,9 +439,10 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     dim = kkt_dims(net)
 
     vars = (
-        θ = sol.θ, g = sol.g, f = sol.f,
+        θ = sol.θ, g = sol.g, f = sol.f, psh = sol.psh,
         λ_lb = sol.λ_lb, λ_ub = sol.λ_ub,
         ρ_lb = sol.ρ_lb, ρ_ub = sol.ρ_ub,
+        μ_lb = sol.μ_lb, μ_ub = sol.μ_ub,
         ν_bal = sol.ν_bal
     )
 
@@ -431,25 +460,31 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
 
     J = spzeros(dim, dim)
 
-    # ∂K_θ/∂... (row block 1: indices 1:n)
+    # ∂K_θ/∂...
     # K_θ = B' * ν_bal + WA' * ν_flow + e_ref * η_ref
     J[idx.θ, idx.ν_bal] = B_mat'
     J[idx.θ, idx.ν_flow] = WA'
     J[idx.θ, idx.η] = e_ref
 
-    # ∂K_g/∂... (row block 2: indices n+1:n+k)
+    # ∂K_g/∂...
     # K_g = 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub
     J[idx.g, idx.g] = 2 * sparse(Diagonal(net.cq))
     J[idx.g, idx.ρ_lb] = -sparse(I, k, k)
     J[idx.g, idx.ρ_ub] = sparse(I, k, k)
     J[idx.g, idx.ν_bal] = -net.G_inc'
 
-    # ∂K_f/∂... (row block 3: indices n+k+1:n+k+m)
+    # ∂K_f/∂...
     # K_f = τ² * f - ν_flow - λ_lb + λ_ub
     J[idx.f, idx.f] = net.τ^2 * sparse(I, m, m)
     J[idx.f, idx.λ_lb] = -sparse(I, m, m)
     J[idx.f, idx.λ_ub] = sparse(I, m, m)
     J[idx.f, idx.ν_flow] = -sparse(I, m, m)
+
+    # ∂K_psh/∂...
+    # K_psh = c_shed - ν_bal - μ_lb + μ_ub
+    J[idx.psh, idx.ν_bal] = -sparse(I, n, n)
+    J[idx.psh, idx.μ_lb] = -sparse(I, n, n)
+    J[idx.psh, idx.μ_ub] = sparse(I, n, n)
 
     # ∂K_λ_lb/∂... (complementary slackness for lower flow bound)
     # K_λ_lb = λ_lb .* (f + fmax)
@@ -471,10 +506,21 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     J[idx.ρ_ub, idx.g] = -sparse(Diagonal(vars.ρ_ub))
     J[idx.ρ_ub, idx.ρ_ub] = sparse(Diagonal(net.gmax .- vars.g))
 
+    # ∂K_μ_lb/∂... (complementary slackness for lower shedding bound)
+    # K_μ_lb = μ_lb .* psh
+    J[idx.μ_lb, idx.psh] = sparse(Diagonal(vars.μ_lb))
+    J[idx.μ_lb, idx.μ_lb] = sparse(Diagonal(vars.psh))
+
+    # ∂K_μ_ub/∂... (complementary slackness for upper shedding bound)
+    # K_μ_ub = μ_ub .* (d - psh)
+    J[idx.μ_ub, idx.psh] = -sparse(Diagonal(vars.μ_ub))
+    J[idx.μ_ub, idx.μ_ub] = sparse(Diagonal(d .- vars.psh))
+
     # ∂K_power_bal/∂... (primal feasibility: power balance)
-    # K_power_bal = G_inc * g - d - B * θ
+    # K_power_bal = G_inc * g + psh - d - B * θ
     J[idx.ν_bal, idx.θ] = -B_mat
     J[idx.ν_bal, idx.g] = net.G_inc
+    J[idx.ν_bal, idx.psh] = sparse(I, n, n)
 
     # ∂K_flow_def/∂... (primal feasibility: flow definition)
     # K_flow_def = f - WA * θ
@@ -488,22 +534,25 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
 end
 
 """
-    calc_kkt_jacobian_demand(net::DCNetwork)
+    calc_kkt_jacobian_demand(net::DCNetwork, d::AbstractVector, sol::DCOPFSolution)
 
 Compute the Jacobian of KKT conditions with respect to demand ∂K/∂d.
 
 # Returns
 Sparse matrix of size (kkt_dims × n).
 """
-function calc_kkt_jacobian_demand(net::DCNetwork)
+function calc_kkt_jacobian_demand(net::DCNetwork, d::AbstractVector, sol::DCOPFSolution)
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
     idx = kkt_indices(n, m, k)
 
-    # ∂K/∂d only affects the power balance equation: K_power_bal = G_inc * g - d - B * θ
-    # ∂K_power_bal/∂d = -I
     J_d = spzeros(dim, n)
+
+    # ∂K_power_bal/∂d = -I (from K_power_bal = G_inc * g + psh - d - B * θ)
     J_d[idx.ν_bal, :] = -sparse(I, n, n)
+
+    # ∂K_μ_ub/∂d = Diag(μ_ub) (from K_μ_ub = μ_ub .* (d - psh))
+    J_d[idx.μ_ub, :] = sparse(Diagonal(sol.μ_ub))
 
     return J_d
 end

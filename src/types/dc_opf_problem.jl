@@ -91,7 +91,7 @@ B-θ formulation of DC OPF wrapped around a JuMP model.
 # Fields
 - `model`: JuMP Model
 - `network`: DCNetwork data
-- `θ`, `g`, `f`: Variable references for phase angles, generation, flows
+- `θ`, `g`, `f`, `psh`: Variable references for phase angles, generation, flows, load shedding
 - `d`: Demand parameter (can be updated for sensitivity analysis)
 - `cons`: Named tuple of constraint references
 - `cache`: Mutable sensitivity cache for avoiding redundant KKT solves
@@ -104,6 +104,7 @@ mutable struct DCOPFProblem <: AbstractOPFProblem
     θ::Vector{VariableRef}
     g::Vector{VariableRef}
     f::Vector{VariableRef}
+    psh::Vector{VariableRef}
     d::Vector{Float64}
     cons::NamedTuple
     cache::DCSensitivityCache
@@ -138,7 +139,7 @@ function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.
     @assert length(d) == network.n "Demand vector length must match number of buses"
 
     prob = DCOPFProblem(
-        JuMP.Model(), network, VariableRef[], VariableRef[], VariableRef[],
+        JuMP.Model(), network, VariableRef[], VariableRef[], VariableRef[], VariableRef[],
         Float64.(d), (;), DCSensitivityCache(), optimizer, silent
     )
     _rebuild_jump_model!(prob)
@@ -168,16 +169,18 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     @variable(model, θ[1:n])
     @variable(model, g[1:k])
     @variable(model, f[1:m])
+    @variable(model, psh[1:n])
 
-    # Objective: quadratic generation cost + regularization on flows
+    # Objective: quadratic generation cost + regularization on flows + shedding penalty
     @objective(model, Min,
         sum(network.cq[i] * g[i]^2 + network.cl[i] * g[i] for i in 1:k) +
-        (1/2) * network.τ^2 * sum(f[i]^2 for i in 1:m)
+        (1/2) * network.τ^2 * sum(f[i]^2 for i in 1:m) +
+        sum(network.c_shed[i] * psh[i] for i in 1:n)
     )
 
     # Constraints
-    # Power balance: G_inc * g - d = B * θ
-    power_bal = @constraint(model, network.G_inc * g .- d .== B_mat * θ)
+    # Power balance: G_inc * g + psh - d = B * θ
+    power_bal = @constraint(model, network.G_inc * g .+ psh .- d .== B_mat * θ)
 
     # Flow definition: f = W * A * θ
     flow_def = @constraint(model, f .== W * network.A * θ)
@@ -190,6 +193,10 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     gen_lb = @constraint(model, g .>= network.gmin)
     gen_ub = @constraint(model, g .<= network.gmax)
 
+    # Load shedding bounds: 0 ≤ psh ≤ d
+    shed_lb = @constraint(model, psh .>= 0)
+    shed_ub = @constraint(model, psh .<= d)
+
     # Reference bus
     ref_con = @constraint(model, θ[network.ref_bus] == 0.0)
 
@@ -200,6 +207,7 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     prob.θ = θ
     prob.g = g
     prob.f = f
+    prob.psh = psh
     prob.cons = (
         power_bal = power_bal,
         flow_def = flow_def,
@@ -207,6 +215,8 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
         line_ub = line_ub,
         gen_lb = gen_lb,
         gen_ub = gen_ub,
+        shed_lb = shed_lb,
+        shed_ub = shed_ub,
         ref = ref_con,
         phase_diff = phase_diff
     )

@@ -41,22 +41,22 @@ using Test
         @test_throws ArgumentError calc_sensitivity(pf, :vm, :d)
     end
 
-    @testset "DC OPF — all 24 combinations" begin
+    @testset "DC OPF — all 30 combinations" begin
         net = DCNetwork(net_data)
         d = calc_demand_vector(net_data)
         prob = DCOPFProblem(net, d)
         solve!(prob)
 
-        operands = [:va, :pg, :f, :lmp]
+        operands = [:va, :pg, :f, :psh, :lmp]
         params = [:d, :sw, :cl, :cq, :fmax, :b]
 
         # Expected sizes for each operand
-        op_sizes = Dict(:va => net.n, :pg => net.k, :f => net.m, :lmp => net.n)
+        op_sizes = Dict(:va => net.n, :pg => net.k, :f => net.m, :psh => net.n, :lmp => net.n)
         # Expected sizes for each parameter
         param_sizes = Dict(:d => net.n, :sw => net.m, :cl => net.k, :cq => net.k,
                            :fmax => net.m, :b => net.m)
 
-        # 4 operands × 6 parameters = 24 combinations
+        # 5 operands × 6 parameters = 30 combinations
 
         for op in operands
             for param in params
