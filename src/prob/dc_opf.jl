@@ -4,6 +4,11 @@
 #
 # Functions for solving DC OPF problems and updating parameters.
 
+# Threshold for snapping near-boundary psh/dual values to strict complementarity.
+# Interior-point solvers leave psh ≈ ε > 0 even when a bound is active; snapping
+# below this tolerance forces clean KKT structure.
+const COMPLEMENTARITY_SNAP_TOL = 1e-6
+
 """
     solve!(prob::DCOPFProblem)
 
@@ -47,11 +52,11 @@ function solve!(prob::DCOPFProblem)
     # Snap to strict complementarity for clean KKT sensitivity computation.
     d = prob.d
     for i in eachindex(psh_val)
-        if psh_val[i] < 1e-6
+        if psh_val[i] < COMPLEMENTARITY_SNAP_TOL
             # Lower bound active: psh = 0
             psh_val[i] = 0.0
             μ_ub[i] = 0.0
-        elseif d[i] - psh_val[i] < 1e-6
+        elseif d[i] - psh_val[i] < COMPLEMENTARITY_SNAP_TOL
             # Upper bound active: psh = d
             psh_val[i] = d[i]
             μ_lb[i] = 0.0

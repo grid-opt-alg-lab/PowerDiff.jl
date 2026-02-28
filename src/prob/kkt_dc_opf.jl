@@ -31,12 +31,21 @@ function _ensure_kkt_factor!(prob::DCOPFProblem)::LinearAlgebra.LU
     if isnothing(prob.cache.kkt_factor)
         sol = _ensure_solved!(prob)
         J_z = calc_kkt_jacobian(prob; sol=sol)
-        # Small Tikhonov regularization for numerical stability.
-        # Degenerate complementarity (e.g. psh=0 at buses with d=0) can
-        # produce zero diagonal entries; the regularization prevents exact
-        # singularity without meaningfully affecting sensitivity accuracy.
-        dim = size(J_z, 1)
-        prob.cache.kkt_factor = lu(Matrix(J_z) + 1e-10 * I(dim))
+        J_dense = Matrix(J_z)
+        # Tikhonov regularization only when needed: degenerate complementarity
+        # (e.g. psh=0 at buses with d=0) can produce exact singularity.
+        prob.cache.kkt_factor = try
+            lu(J_dense)
+        catch e
+            if e isa LinearAlgebra.SingularException
+                for i in axes(J_dense, 1)
+                    J_dense[i, i] += 1e-10
+                end
+                lu(J_dense)
+            else
+                rethrow(e)
+            end
+        end
     end
     return prob.cache.kkt_factor
 end
@@ -147,7 +156,7 @@ Extract a single sensitivity matrix from the full KKT derivative.
 # Arguments
 - `prob`: The DC OPF problem
 - `dz_dp`: Full derivative matrix from KKT system
-- `operand`: Which operand to extract (:va, :pg, :f, :lmp)
+- `operand`: Which operand to extract (:va, :pg, :f, :psh, :lmp)
 """
 function _extract_sensitivity(prob::DCOPFProblem, dz_dp::Matrix{Float64}, operand::Symbol)::Matrix{Float64}
     idx = kkt_indices(prob)
@@ -281,37 +290,14 @@ function unflatten_variables(z::AbstractVector, prob::DCOPFProblem)
 end
 
 function unflatten_variables(z::AbstractVector, net::DCNetwork)
-    n, m, k = net.n, net.m, net.k
-
-    i = 0
-    θ = z[i+1:i+n]; i += n
-    g = z[i+1:i+k]; i += k
-    f = z[i+1:i+m]; i += m
-    psh = z[i+1:i+n]; i += n
-    λ_lb = z[i+1:i+m]; i += m
-    λ_ub = z[i+1:i+m]; i += m
-    ρ_lb = z[i+1:i+k]; i += k
-    ρ_ub = z[i+1:i+k]; i += k
-    μ_lb = z[i+1:i+n]; i += n
-    μ_ub = z[i+1:i+n]; i += n
-    ν_bal = z[i+1:i+n]; i += n
-    ν_flow = z[i+1:i+m]; i += m
-    η_ref = z[i+1]
-
+    idx = kkt_indices(net)
     return (
-        θ = θ,
-        g = g,
-        f = f,
-        psh = psh,
-        λ_lb = λ_lb,
-        λ_ub = λ_ub,
-        ρ_lb = ρ_lb,
-        ρ_ub = ρ_ub,
-        μ_lb = μ_lb,
-        μ_ub = μ_ub,
-        ν_bal = ν_bal,
-        ν_flow = ν_flow,
-        η_ref = η_ref
+        θ = z[idx.θ], g = z[idx.g], f = z[idx.f], psh = z[idx.psh],
+        λ_lb = z[idx.λ_lb], λ_ub = z[idx.λ_ub],
+        ρ_lb = z[idx.ρ_lb], ρ_ub = z[idx.ρ_ub],
+        μ_lb = z[idx.μ_lb], μ_ub = z[idx.μ_ub],
+        ν_bal = z[idx.ν_bal], ν_flow = z[idx.ν_flow],
+        η_ref = z[idx.η]
     )
 end
 

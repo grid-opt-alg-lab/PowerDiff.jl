@@ -1,44 +1,41 @@
 # Load-shedding (:psh) operand tests
 
-using Test
-using LinearAlgebra
-using SparseArrays
-using PowerModelsDiff
-using PowerModels
-
-PowerModels.silence()
-
-const PM_DATA_DIR_PSH = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
+# Local helper for the 2-bus topology used by multiple testsets
+function _make_2bus_psh(; gmax=0.5, cq=0.0, cl=10.0, τ=0.0)
+    n, m, k = 2, 1, 1
+    A = sparse([1.0 -1.0])
+    G_inc = sparse(reshape([1.0, 0.0], 2, 1))
+    b = [-10.0]
+    DCNetwork(n, m, k, A, G_inc, b;
+        fmax=[100.0], gmax=[gmax], gmin=[0.0],
+        cl=[cl], cq=[cq], c_shed=[1e4, 1e4],
+        ref_bus=1, τ=τ)
+end
 
 @testset "Load Shedding (psh)" begin
 
     @testset "psh ≈ 0 when feasible (case5)" begin
-        net_data = PowerModels.make_basic_network(PowerModels.parse_file(joinpath(PM_DATA_DIR_PSH, "case5.m")))
-        dc_net = DCNetwork(net_data)
-        d = calc_demand_vector(net_data)
-        prob = DCOPFProblem(dc_net, d)
-        sol = solve!(prob)
+        net_data = load_test_case("case5.m")
+        if isnothing(net_data)
+            @test_skip false
+        else
+            dc_net = DCNetwork(net_data)
+            d = calc_demand_vector(net_data)
+            prob = DCOPFProblem(dc_net, d)
+            sol = solve!(prob)
 
-        # With normal demand and sufficient generation, no shedding needed
-        @test all(abs.(sol.psh) .< 1e-4)
+            # With normal demand and sufficient generation, no shedding needed
+            @test all(abs.(sol.psh) .< 1e-4)
 
-        # Power balance still holds: G_inc * g + psh - d ≈ B * θ
-        B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
-        residual = dc_net.G_inc * sol.g + sol.psh - d - B_mat * sol.θ
-        @test norm(residual) < 1e-4
+            # Power balance still holds: G_inc * g + psh - d ≈ B * θ
+            B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
+            residual = dc_net.G_inc * sol.g + sol.psh - d - B_mat * sol.θ
+            @test norm(residual) < 1e-4
+        end
     end
 
     @testset "psh > 0: insufficient generation (2-bus)" begin
-        # 2-bus: generator at bus 1 with gmax < demand at bus 2
-        n, m, k = 2, 1, 1
-        A = sparse([1.0 -1.0])
-        G_inc = sparse(reshape([1.0, 0.0], 2, 1))
-        b = [-10.0]
-
-        dc_net = DCNetwork(n, m, k, A, G_inc, b;
-            fmax=[100.0], gmax=[0.5], gmin=[0.0],
-            cl=[10.0], cq=[0.0], c_shed=[1e4, 1e4],
-            ref_bus=1, τ=0.0)
+        dc_net = _make_2bus_psh(gmax=0.5)
 
         d = [0.0, 1.0]  # 1 MW demand at bus 2, but gmax = 0.5
         prob = DCOPFProblem(dc_net, d)
@@ -84,20 +81,10 @@ const PM_DATA_DIR_PSH = joinpath(dirname(pathof(PowerModels)), "..", "test", "da
         @test norm(residual) < 1e-4
     end
 
-    @testset "Karen's consistency formula" begin
-        # Verify that psh ≈ d - G_inc*g - B*θ holds implicitly from the power balance
-        # i.e., G_inc*g + psh - d = B*θ → psh = d - G_inc*g + B*θ... no wait:
-        # G_inc*g + psh - d = B*θ → psh = d + B*θ - G_inc*g
-        # This is equivalent to the power balance being satisfied.
-        n, m, k = 2, 1, 1
-        A = sparse([1.0 -1.0])
-        G_inc = sparse(reshape([1.0, 0.0], 2, 1))
-        b = [-10.0]
-
-        dc_net = DCNetwork(n, m, k, A, G_inc, b;
-            fmax=[100.0], gmax=[0.7], gmin=[0.0],
-            cl=[10.0], cq=[0.0], c_shed=[1e4, 1e4],
-            ref_bus=1, τ=0.0)
+    @testset "psh satisfies power balance rearrangement" begin
+        # Rearranging the power balance G_inc*g + psh - d = B*θ
+        # gives psh = d + B*θ - G_inc*g.
+        dc_net = _make_2bus_psh(gmax=0.7)
 
         d = [0.0, 1.0]
         prob = DCOPFProblem(dc_net, d)
@@ -110,15 +97,7 @@ const PM_DATA_DIR_PSH = joinpath(dirname(pathof(PowerModels)), "..", "test", "da
 
     @testset "KKT residuals" begin
         # Test with active shedding
-        n, m, k = 2, 1, 1
-        A = sparse([1.0 -1.0])
-        G_inc = sparse(reshape([1.0, 0.0], 2, 1))
-        b = [-10.0]
-
-        dc_net = DCNetwork(n, m, k, A, G_inc, b;
-            fmax=[100.0], gmax=[0.5], gmin=[0.0],
-            cl=[10.0], cq=[1.0], c_shed=[1e4, 1e4],
-            ref_bus=1, τ=0.01)
+        dc_net = _make_2bus_psh(gmax=0.5, cq=1.0, τ=0.01)
 
         d = [0.0, 1.0]
         prob = DCOPFProblem(dc_net, d)
@@ -133,10 +112,7 @@ const PM_DATA_DIR_PSH = joinpath(dirname(pathof(PowerModels)), "..", "test", "da
         @test norm(K[idx.ν_flow]) < 1e-4
 
         # Also test with inactive shedding (feasible case)
-        dc_net2 = DCNetwork(n, m, k, A, G_inc, b;
-            fmax=[100.0], gmax=[10.0], gmin=[0.0],
-            cl=[10.0], cq=[1.0], c_shed=[1e4, 1e4],
-            ref_bus=1, τ=0.01)
+        dc_net2 = _make_2bus_psh(gmax=10.0, cq=1.0, τ=0.01)
 
         d2 = [0.0, 1.0]
         prob2 = DCOPFProblem(dc_net2, d2)
@@ -150,15 +126,8 @@ const PM_DATA_DIR_PSH = joinpath(dirname(pathof(PowerModels)), "..", "test", "da
     end
 
     @testset "FD verification: ∂psh/∂d" begin
-        n, m, k = 2, 1, 1
-        A = sparse([1.0 -1.0])
-        G_inc = sparse(reshape([1.0, 0.0], 2, 1))
-        b = [-10.0]
-
-        dc_net = DCNetwork(n, m, k, A, G_inc, b;
-            fmax=[100.0], gmax=[0.5], gmin=[0.0],
-            cl=[10.0], cq=[1.0], c_shed=[1e4, 1e4],
-            ref_bus=1, τ=0.01)
+        dc_net = _make_2bus_psh(gmax=0.5, cq=1.0, τ=0.01)
+        n = dc_net.n
 
         d = [0.0, 1.0]
         prob = DCOPFProblem(dc_net, d)
@@ -240,20 +209,24 @@ const PM_DATA_DIR_PSH = joinpath(dirname(pathof(PowerModels)), "..", "test", "da
     end
 
     @testset "Sensitivity types and dimensions" begin
-        net_data = PowerModels.make_basic_network(PowerModels.parse_file(joinpath(PM_DATA_DIR_PSH, "case5.m")))
-        dc_net = DCNetwork(net_data)
-        d = calc_demand_vector(net_data)
-        prob = DCOPFProblem(dc_net, d)
-        solve!(prob)
+        net_data = load_test_case("case5.m")
+        if isnothing(net_data)
+            @test_skip false
+        else
+            dc_net = DCNetwork(net_data)
+            d = calc_demand_vector(net_data)
+            prob = DCOPFProblem(dc_net, d)
+            solve!(prob)
 
-        for param in [:d, :sw, :cq, :cl, :fmax, :b]
-            S = calc_sensitivity(prob, :psh, param)
-            @test S isa Sensitivity
-            @test S.formulation == :dcopf
-            @test S.operand == :psh
-            @test S.parameter == param
-            @test size(S, 1) == dc_net.n
-            @test all(isfinite, Matrix(S))
+            for param in [:d, :sw, :cq, :cl, :fmax, :b]
+                S = calc_sensitivity(prob, :psh, param)
+                @test S isa Sensitivity
+                @test S.formulation == :dcopf
+                @test S.operand == :psh
+                @test S.parameter == param
+                @test size(S, 1) == dc_net.n
+                @test all(isfinite, Matrix(S))
+            end
         end
     end
 

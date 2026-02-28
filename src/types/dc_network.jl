@@ -116,6 +116,10 @@ end
 
 const DEFAULT_TAU = 1e-2
 
+# Shedding cost = multiplier × peak marginal generation cost, so the solver
+# only sheds when generation capacity is physically insufficient.
+const DEFAULT_SHED_COST_MULTIPLIER = 10
+
 # =============================================================================
 # DCNetwork Constructors
 # =============================================================================
@@ -175,7 +179,7 @@ function DCNetwork(net::Dict; τ::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,In
 
     # Load-shedding cost: high penalty to discourage shedding when feasible
     marginal_cost_ub = max(maximum(2cq .* gmax .+ cl), 1.0)
-    c_shed = fill(10 * marginal_cost_ub, n)
+    c_shed = fill(DEFAULT_SHED_COST_MULTIPLIER * marginal_cost_ub, n)
 
     # Reference bus
     if isnothing(ref_bus)
