@@ -166,23 +166,27 @@ const PM_DATA_DIR_PSH = joinpath(dirname(pathof(PowerModels)), "..", "test", "da
 
         dpsh_dd = calc_sensitivity(prob, :psh, :d)
 
-        # Finite difference
+        # Finite difference — verify each column where the active set is stable.
+        # Skip buses with d=0: both psh bounds collapse to 0 ≤ psh ≤ 0,
+        # making the active set change discontinuously under perturbation.
         delta = 1e-5
-        bus_idx = 2  # perturb demand at bus 2
-        d_pert = copy(d)
-        d_pert[bus_idx] += delta
+        for bus_idx in 1:n
+            d[bus_idx] == 0.0 && continue
 
-        prob_pert = DCOPFProblem(dc_net, d_pert)
-        sol_pert = solve!(prob_pert)
+            d_pert = copy(d)
+            d_pert[bus_idx] += delta
 
-        dpsh_dd_fd = (sol_pert.psh - sol_base.psh) / delta
+            prob_pert = DCOPFProblem(dc_net, d_pert)
+            sol_pert = solve!(prob_pert)
 
-        if norm(dpsh_dd_fd) > 1e-10
-            rel_error = norm(Matrix(dpsh_dd)[:, bus_idx] - dpsh_dd_fd) / norm(dpsh_dd_fd)
-            @test rel_error < 0.05
-        else
-            # If shedding is inactive at both points, sensitivity should be near zero
-            @test norm(Matrix(dpsh_dd)[:, bus_idx]) < 1e-4
+            dpsh_dd_fd = (sol_pert.psh - sol_base.psh) / delta
+
+            if norm(dpsh_dd_fd) > 1e-6
+                rel_error = norm(Matrix(dpsh_dd)[:, bus_idx] - dpsh_dd_fd) / norm(dpsh_dd_fd)
+                @test rel_error < 0.01
+            else
+                @test norm(Matrix(dpsh_dd)[:, bus_idx]) < 1e-4
+            end
         end
     end
 

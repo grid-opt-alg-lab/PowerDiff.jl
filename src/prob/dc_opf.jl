@@ -45,12 +45,20 @@ function solve!(prob::DCOPFProblem)
     # Post-process load shedding for strict complementarity.
     # Interior-point solvers give psh ≈ ε > 0 even when shedding is inactive.
     # Snap to strict complementarity for clean KKT sensitivity computation.
+    d = prob.d
     for i in eachindex(psh_val)
         if psh_val[i] < 1e-6
+            # Lower bound active: psh = 0
             psh_val[i] = 0.0
             μ_ub[i] = 0.0
-        else
+        elseif d[i] - psh_val[i] < 1e-6
+            # Upper bound active: psh = d
+            psh_val[i] = d[i]
             μ_lb[i] = 0.0
+        else
+            # Strictly interior: both bounds inactive
+            μ_lb[i] = 0.0
+            μ_ub[i] = 0.0
         end
     end
 

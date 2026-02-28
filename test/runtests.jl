@@ -390,7 +390,7 @@ end
         for i in 1:dc_net.n
             gen_sum = sum(Matrix(dg_dd)[:, i])
             psh_sum = sum(Matrix(dpsh_dd)[:, i])
-            @test abs(gen_sum + psh_sum - 1.0) < 0.01
+            @test abs(gen_sum + psh_sum - 1.0) < 1e-4
         end
     end
 end
@@ -685,7 +685,7 @@ end
         for i in 1:dc_net.n
             gen_sum = sum(Matrix(dg_dd)[:, i])
             psh_sum = sum(Matrix(dpsh_dd)[:, i])
-            @test abs(gen_sum + psh_sum - 1.0) < 0.01
+            @test abs(gen_sum + psh_sum - 1.0) < 1e-4
         end
 
         # AC power flow on case14
