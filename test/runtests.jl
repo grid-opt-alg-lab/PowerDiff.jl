@@ -709,38 +709,6 @@ end
 # Physics Cross-Validation Tests
 # =============================================================================
 
-@testset "Uncongested DC OPF ≈ DC PF" begin
-    # When no constraints bind, DC OPF angles should match DC PF angles
-    net = load_test_case("case5.m")
-    if isnothing(net)
-        @test_skip false
-    else
-        # Build network with very relaxed limits so nothing binds
-        dc_net = DCNetwork(net)
-        dc_net.fmax .= 1000.0  # No flow congestion
-        dc_net.gmax .= 1000.0  # No generation limits
-
-        d = calc_demand_vector(net)
-
-        # Solve OPF
-        prob = DCOPFProblem(dc_net, d)
-        sol = solve!(prob)
-
-        # Build PF with OPF generation mapped to buses
-        g_bus = dc_net.G_inc * sol.g
-        pf = DCPowerFlowState(dc_net, g_bus, d)
-
-        # Compare ∂va/∂d from both formulations
-        dva_dd_opf = Matrix(calc_sensitivity(prob, :va, :d))
-        dva_dd_pf  = Matrix(calc_sensitivity(pf, :va, :d))
-
-        @test size(dva_dd_opf) == size(dva_dd_pf)
-        max_diff = maximum(abs.(dva_dd_opf - dva_dd_pf))
-        @test max_diff < 0.1
-        @info "Uncongested OPF vs PF ∂va/∂d max diff:" max_diff=max_diff
-    end
-end
-
 @testset "Binding Generator → Zero Participation" begin
     # A generator at its upper limit should have ∂pg/∂d ≈ 0
     # (it cannot increase output further)

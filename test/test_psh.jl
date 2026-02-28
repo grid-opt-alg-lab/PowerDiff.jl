@@ -230,4 +230,28 @@ end
         end
     end
 
+    @testset "Degenerate complementarity (d=0 everywhere)" begin
+        # When d=0 at all buses, both shedding bounds collapse to 0 ≤ psh ≤ 0.
+        # This triggers Tikhonov regularization in the KKT factorization.
+        dc_net = _make_2bus_psh(gmax=10.0, cq=1.0, τ=0.01)
+        d_zero = [0.0, 0.0]
+        prob = DCOPFProblem(dc_net, d_zero)
+        sol = solve!(prob)
+
+        # No load → no shedding
+        @test all(abs.(sol.psh) .< 1e-6)
+
+        # All psh sensitivities should be finite (regularization keeps KKT invertible)
+        for param in [:d, :sw, :cq, :cl, :fmax, :b]
+            S = calc_sensitivity(prob, :psh, param)
+            @test all(isfinite, Matrix(S))
+        end
+
+        # Other operands should also produce finite sensitivities
+        for op in [:va, :pg, :f, :lmp]
+            S = calc_sensitivity(prob, op, :d)
+            @test all(isfinite, Matrix(S))
+        end
+    end
+
 end

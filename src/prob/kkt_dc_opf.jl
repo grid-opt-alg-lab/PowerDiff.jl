@@ -38,10 +38,15 @@ function _ensure_kkt_factor!(prob::DCOPFProblem)::LinearAlgebra.LU
             lu(J_dense)
         catch e
             if e isa LinearAlgebra.SingularException
+                @warn "KKT Jacobian is singular; applying Tikhonov perturbation (1e-10)"
                 for i in axes(J_dense, 1)
                     J_dense[i, i] += 1e-10
                 end
-                lu(J_dense)
+                try
+                    lu(J_dense)
+                catch e2
+                    error("KKT Jacobian remains singular after Tikhonov perturbation: $(e2)")
+                end
             else
                 rethrow(e)
             end
@@ -312,14 +317,16 @@ Evaluate the KKT conditions for the B-θ DC OPF problem.
 
 The KKT system for DC OPF:
 ```
-min  g' Cq g + cl' g + (τ²/2) ||f||²
-s.t. G_inc * g - d = B * θ     (ν_bal)
-     f = W * A * θ              (ν_flow)
-     f ≥ -fmax                  (λ_lb)
-     f ≤ fmax                   (λ_ub)
-     g ≥ gmin                   (ρ_lb)
-     g ≤ gmax                   (ρ_ub)
-     θ[ref] = 0                 (η_ref)
+min  g' Cq g + cl' g + c_shed' * psh + (τ²/2) ||f||²
+s.t. G_inc * g + psh - d = B * θ   (ν_bal)
+     f = W * A * θ                  (ν_flow)
+     f ≥ -fmax                      (λ_lb)
+     f ≤ fmax                       (λ_ub)
+     g ≥ gmin                       (ρ_lb)
+     g ≤ gmax                       (ρ_ub)
+     0 ≤ psh                        (μ_lb)
+     psh ≤ d                        (μ_ub)
+     θ[ref] = 0                     (η_ref)
 ```
 
 # Returns
@@ -327,11 +334,13 @@ Vector of KKT residuals (should be zero at optimum):
 1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + e_ref * η_ref = 0
 2. Stationarity w.r.t. g: 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub = 0
 3. Stationarity w.r.t. f: τ² * f - ν_flow - λ_lb + λ_ub = 0
-4. Complementary slackness for flow bounds
-5. Complementary slackness for gen bounds
-6. Primal feasibility: power balance
-7. Primal feasibility: flow definition
-8. Reference bus constraint
+4. Stationarity w.r.t. psh: c_shed - ν_bal - μ_lb + μ_ub = 0
+5. Complementary slackness for flow bounds
+6. Complementary slackness for gen bounds
+7. Complementary slackness for shedding bounds
+8. Primal feasibility: power balance
+9. Primal feasibility: flow definition
+10. Reference bus constraint
 """
 function kkt(z::AbstractVector, prob::DCOPFProblem, d::AbstractVector)
     return kkt(z, prob.network, d)
@@ -607,7 +616,7 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
         # Actually, for sensitivity analysis via implicit function theorem,
         # we need ∂K/∂s evaluated at the solution, treating primal/dual vars as fixed.
 
-        # 2. ∂K_power_bal/∂s_e: K_power_bal = G_inc * g - d - B * θ
+        # 2. ∂K_power_bal/∂s_e: K_power_bal = G_inc * g + psh - d - B * θ
         # ∂K_power_bal/∂s_e = -∂B/∂s_e * θ = -(-b_e * A[e,:]' * A[e,:]) * θ
         #                    = b_e * (A[e,:]' * (A[e,:] * θ))
         #                    = b_e * A[e,:]' * (A * θ)[e]

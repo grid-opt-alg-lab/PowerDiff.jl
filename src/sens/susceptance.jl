@@ -25,7 +25,7 @@ Susceptance b affects:
 
 The affected KKT conditions are:
 - K_theta = B' * nu_bal + (WA)' * nu_flow + e_ref * eta_ref
-- K_power_bal = G_inc * g - d - B * theta
+- K_power_bal = G_inc * g + psh - d - B * theta
 - K_flow_def = f - W * A * theta
 
 Derivatives:
@@ -69,7 +69,7 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
 
         J_b[idx.θ, e] = dK_theta_from_nu_bal + dK_theta_from_nu_flow
 
-        # 2. dK_power_bal/db_e: K_power_bal = G_inc * g - d - B * theta
+        # 2. dK_power_bal/db_e: K_power_bal = G_inc * g + psh - d - B * theta
         # dK_power_bal/db_e = -dB/db_e * theta = -(-sw_e * A[e,:]' * A[e,:]) * theta
         #                    = sw_e * A[e,:]' * (A[e,:] . theta)
         #                    = sw_e * A_e_vec * Atheta_e

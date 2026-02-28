@@ -51,12 +51,20 @@ function solve!(prob::DCOPFProblem)
     # Interior-point solvers give psh ≈ ε > 0 even when shedding is inactive.
     # Snap to strict complementarity for clean KKT sensitivity computation.
     d = prob.d
+    TOL = COMPLEMENTARITY_SNAP_TOL
     for i in eachindex(psh_val)
-        if psh_val[i] < COMPLEMENTARITY_SNAP_TOL
+        if d[i] < -TOL
+            @warn "Negative demand at bus $i (d=$(d[i])); psh snap may be unreliable"
+        end
+        if abs(d[i]) < TOL
+            # Degenerate: both bounds collapse to 0 ≤ psh ≤ 0
+            psh_val[i] = 0.0
+            # Keep both duals from solver (both bounds active)
+        elseif psh_val[i] < TOL
             # Lower bound active: psh = 0
             psh_val[i] = 0.0
             μ_ub[i] = 0.0
-        elseif d[i] - psh_val[i] < COMPLEMENTARITY_SNAP_TOL
+        elseif d[i] - psh_val[i] < TOL
             # Upper bound active: psh = d
             psh_val[i] = d[i]
             μ_lb[i] = 0.0
@@ -82,7 +90,7 @@ end
 
 Update the demand parameter in the DC OPF problem.
 
-This modifies the RHS of power balance constraints for re-solving with new demand.
+This modifies the RHS of power balance and shedding upper-bound constraints for re-solving with new demand.
 Invalidates the sensitivity cache since parameters have changed.
 """
 function update_demand!(prob::DCOPFProblem, d::AbstractVector)

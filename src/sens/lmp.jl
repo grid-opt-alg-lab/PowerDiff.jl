@@ -1,7 +1,7 @@
 # Locational Marginal Price (LMP) Computation
 #
 # In the B-θ DC OPF formulation, the power balance constraint is:
-#     G_inc * g - d = L * θ
+#     G_inc * g + psh - d = L * θ
 # where L = A' * Diag(-b .* sw) * A is the susceptance-weighted Laplacian.
 #
 # The LMP at bus i equals the power balance dual ν_bal[i]. The network topology
