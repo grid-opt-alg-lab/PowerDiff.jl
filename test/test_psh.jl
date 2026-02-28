@@ -12,6 +12,24 @@ function _make_2bus_psh(; gmax=0.5, cq=0.0, cl=10.0, τ=0.0)
         ref_bus=1, τ=τ)
 end
 
+# Helper: load case14 with tightened flow limits so congestion forces shedding.
+#
+# With original generator capacities (total 7.724 >> demand 2.59), tight flow limits
+# prevent power delivery to some buses, causing congestion-induced shedding while
+# keeping most generators interior (not at bounds). This avoids the degenerate
+# complementarity that occurs when all generators are at their upper bounds
+# (singular KKT matrix from zero diagonals in ρ_ub rows).
+#
+# fmax_scale=0.03 produces ~0.05 MW of shedding with 4 interior generators.
+function _make_case14_shedding(; fmax_scale=0.03)
+    net_data = load_test_case("case14.m")
+    isnothing(net_data) && return nothing
+    dc_net = DCNetwork(net_data)
+    d = calc_demand_vector(net_data)
+    dc_net.fmax .*= fmax_scale
+    return (; net_data, dc_net, d, fmax_scale)
+end
+
 @testset "Load Shedding (psh)" begin
 
     @testset "psh ≈ 0 when feasible (case5)" begin
@@ -125,96 +143,254 @@ end
         @test norm(K2[idx2.ν_flow]) < 1e-4
     end
 
-    @testset "FD verification: ∂psh/∂d" begin
-        dc_net = _make_2bus_psh(gmax=0.5, cq=1.0, τ=0.01)
-        n = dc_net.n
+    # =========================================================================
+    # Finite-Difference Verification on case14
+    #
+    # Uses congestion-based shedding (tight fmax) on case14. This keeps most
+    # generators interior (not at bounds), ensuring a well-conditioned KKT
+    # Jacobian. Generation-insufficiency scenarios push all generators to their
+    # upper bounds, creating singular KKT matrices that amplify errors.
+    # =========================================================================
 
-        d = [0.0, 1.0]
-        prob = DCOPFProblem(dc_net, d)
-        sol_base = solve!(prob)
+    @testset "FD verification: ∂psh/∂d (case14)" begin
+        setup = _make_case14_shedding()
+        if isnothing(setup)
+            @test_skip false
+        else
+            (; dc_net, d) = setup
 
-        dpsh_dd = calc_sensitivity(prob, :psh, :d)
+            prob = DCOPFProblem(dc_net, d)
+            sol_base = solve!(prob)
+            @test sum(sol_base.psh) > 1e-3  # Confirm shedding is active
 
-        # Finite difference — verify each column where the active set is stable.
-        # Skip buses with d=0: both psh bounds collapse to 0 ≤ psh ≤ 0,
-        # making the active set change discontinuously under perturbation.
-        delta = 1e-5
-        for bus_idx in 1:n
-            d[bus_idx] == 0.0 && continue
+            dpsh_dd = calc_sensitivity(prob, :psh, :d)
 
-            d_pert = copy(d)
-            d_pert[bus_idx] += delta
+            # Finite difference — skip buses with d=0 (psh bounds collapse to [0,0]).
+            delta = 1e-5
+            for bus_idx in 1:dc_net.n
+                d[bus_idx] == 0.0 && continue
 
-            prob_pert = DCOPFProblem(dc_net, d_pert)
-            sol_pert = solve!(prob_pert)
+                d_pert = copy(d)
+                d_pert[bus_idx] += delta
 
-            dpsh_dd_fd = (sol_pert.psh - sol_base.psh) / delta
+                prob_pert = DCOPFProblem(dc_net, d_pert)
+                sol_pert = solve!(prob_pert)
 
-            if norm(dpsh_dd_fd) > 1e-6
-                rel_error = norm(Matrix(dpsh_dd)[:, bus_idx] - dpsh_dd_fd) / norm(dpsh_dd_fd)
-                @test rel_error < 0.01
-            else
-                @test norm(Matrix(dpsh_dd)[:, bus_idx]) < 1e-4
+                fd = (sol_pert.psh - sol_base.psh) / delta
+                analytical_col = Matrix(dpsh_dd)[:, bus_idx]
+
+                if norm(fd) > 1e-6
+                    rel_err = norm(analytical_col - fd) / norm(fd)
+                    @test rel_err < 0.01
+                else
+                    @test norm(analytical_col) < 1e-4
+                end
             end
         end
     end
 
-    @testset "FD verification: ∂psh/∂sw" begin
-        # Use a 3-bus congested case where shedding is active
-        n, m, k = 3, 2, 1
-        A = sparse([
-            1.0  0.0 -1.0;
-            0.0  1.0 -1.0
-        ])
-        G_inc = sparse(reshape([1.0, 0.0, 0.0], 3, 1))
-        b = [-10.0, -10.0]
-
-        dc_net = DCNetwork(n, m, k, A, G_inc, b;
-            fmax=[0.3, 0.3],
-            gmax=[10.0], gmin=[0.0],
-            cl=[10.0], cq=[1.0], c_shed=[1e4, 1e4, 1e4],
-            ref_bus=1, τ=0.01)
-
-        d = [0.0, 0.0, 1.0]
-        prob = DCOPFProblem(dc_net, d)
-        sol_base = solve!(prob)
-
-        dpsh_dsw = calc_sensitivity(prob, :psh, :sw)
-
-        # Finite difference on switching state of branch 1
-        delta = 1e-5
-        branch_idx = 1
-        sw_pert = copy(dc_net.sw)
-        sw_pert[branch_idx] += delta
-
-        dc_net_pert = DCNetwork(n, m, k, A, G_inc, b;
-            sw=sw_pert,
-            fmax=[0.3, 0.3],
-            gmax=[10.0], gmin=[0.0],
-            cl=[10.0], cq=[1.0], c_shed=[1e4, 1e4, 1e4],
-            ref_bus=1, τ=0.01)
-
-        prob_pert = DCOPFProblem(dc_net_pert, d)
-        sol_pert = solve!(prob_pert)
-
-        dpsh_dsw_fd = (sol_pert.psh - sol_base.psh) / delta
-
-        # Use absolute error for near-zero sensitivities (FD noise can dominate)
-        if norm(dpsh_dsw_fd) > 1e-4
-            rel_error = norm(Matrix(dpsh_dsw)[:, branch_idx] - dpsh_dsw_fd) / norm(dpsh_dsw_fd)
-            @test rel_error < 0.1
+    @testset "FD verification: ∂psh/∂sw (case14)" begin
+        setup = _make_case14_shedding()
+        if isnothing(setup)
+            @test_skip false
         else
-            @test norm(Matrix(dpsh_dsw)[:, branch_idx]) < 1e-2
+            (; net_data, dc_net, d, fmax_scale) = setup
+
+            prob = DCOPFProblem(dc_net, d)
+            sol_base = solve!(prob)
+            @test sum(sol_base.psh) > 1e-3  # Confirm shedding is active
+
+            dpsh_dsw = calc_sensitivity(prob, :psh, :sw)
+
+            delta = 1e-5
+            for branch_idx in 1:dc_net.m
+                dc_net_pert = DCNetwork(net_data)
+                dc_net_pert.fmax .*= fmax_scale
+                dc_net_pert.sw[branch_idx] += delta
+
+                prob_pert = DCOPFProblem(dc_net_pert, d)
+                sol_pert = solve!(prob_pert)
+
+                fd = (sol_pert.psh - sol_base.psh) / delta
+                analytical_col = Matrix(dpsh_dsw)[:, branch_idx]
+
+                if norm(fd) > 1e-4
+                    rel_err = norm(analytical_col - fd) / norm(fd)
+                    @test rel_err < 0.05
+                else
+                    @test norm(analytical_col) < 1e-2
+                end
+            end
+        end
+    end
+
+    @testset "Conservation: sum(∂pg/∂sw) + sum(∂psh/∂sw) = 0" begin
+        setup = _make_case14_shedding()
+        if isnothing(setup)
+            @test_skip false
+        else
+            (; dc_net, d) = setup
+
+            prob = DCOPFProblem(dc_net, d)
+            solve!(prob)
+
+            dpg_dsw = Matrix(calc_sensitivity(prob, :pg, :sw))
+            dpsh_dsw = Matrix(calc_sensitivity(prob, :psh, :sw))
+
+            # From power balance: sum(g) + sum(psh) = sum(d).
+            # Since d doesn't depend on sw: sum(∂pg/∂sw_j) + sum(∂psh/∂sw_j) = 0.
+            for j in 1:dc_net.m
+                @test abs(sum(dpg_dsw[:, j]) + sum(dpsh_dsw[:, j])) < 1e-4
+            end
+        end
+    end
+
+    @testset "FD verification: ∂psh/∂cq (case14)" begin
+        setup = _make_case14_shedding()
+        if isnothing(setup)
+            @test_skip false
+        else
+            (; net_data, dc_net, d, fmax_scale) = setup
+
+            prob = DCOPFProblem(dc_net, d)
+            sol_base = solve!(prob)
+            @test sum(sol_base.psh) > 1e-3
+
+            dpsh_dcq = calc_sensitivity(prob, :psh, :cq)
+
+            delta = 1e-5
+            for gen_idx in 1:dc_net.k
+                dc_net_pert = DCNetwork(net_data)
+                dc_net_pert.fmax .*= fmax_scale
+                dc_net_pert.cq[gen_idx] += delta
+
+                prob_pert = DCOPFProblem(dc_net_pert, d)
+                sol_pert = solve!(prob_pert)
+
+                fd = (sol_pert.psh - sol_base.psh) / delta
+                analytical_col = Matrix(dpsh_dcq)[:, gen_idx]
+
+                if norm(fd) > 1e-6
+                    rel_err = norm(analytical_col - fd) / norm(fd)
+                    @test rel_err < 0.05
+                else
+                    @test norm(analytical_col) < 1e-4
+                end
+            end
+        end
+    end
+
+    @testset "FD verification: ∂psh/∂cl (case14)" begin
+        setup = _make_case14_shedding()
+        if isnothing(setup)
+            @test_skip false
+        else
+            (; net_data, dc_net, d, fmax_scale) = setup
+
+            prob = DCOPFProblem(dc_net, d)
+            sol_base = solve!(prob)
+            @test sum(sol_base.psh) > 1e-3
+
+            dpsh_dcl = calc_sensitivity(prob, :psh, :cl)
+
+            delta = 1e-5
+            for gen_idx in 1:dc_net.k
+                dc_net_pert = DCNetwork(net_data)
+                dc_net_pert.fmax .*= fmax_scale
+                dc_net_pert.cl[gen_idx] += delta
+
+                prob_pert = DCOPFProblem(dc_net_pert, d)
+                sol_pert = solve!(prob_pert)
+
+                fd = (sol_pert.psh - sol_base.psh) / delta
+                analytical_col = Matrix(dpsh_dcl)[:, gen_idx]
+
+                if norm(fd) > 1e-6
+                    rel_err = norm(analytical_col - fd) / norm(fd)
+                    @test rel_err < 0.05
+                else
+                    @test norm(analytical_col) < 1e-4
+                end
+            end
+        end
+    end
+
+    @testset "FD verification: ∂psh/∂fmax (case14)" begin
+        setup = _make_case14_shedding()
+        if isnothing(setup)
+            @test_skip false
+        else
+            (; net_data, dc_net, d, fmax_scale) = setup
+
+            prob = DCOPFProblem(dc_net, d)
+            sol_base = solve!(prob)
+            @test sum(sol_base.psh) > 1e-3
+
+            dpsh_dfmax = calc_sensitivity(prob, :psh, :fmax)
+
+            delta = 1e-5
+            for branch_idx in 1:dc_net.m
+                dc_net_pert = DCNetwork(net_data)
+                dc_net_pert.fmax .*= fmax_scale
+                dc_net_pert.fmax[branch_idx] += delta
+
+                prob_pert = DCOPFProblem(dc_net_pert, d)
+                sol_pert = solve!(prob_pert)
+
+                fd = (sol_pert.psh - sol_base.psh) / delta
+                analytical_col = Matrix(dpsh_dfmax)[:, branch_idx]
+
+                if norm(fd) > 1e-6
+                    rel_err = norm(analytical_col - fd) / norm(fd)
+                    @test rel_err < 0.05
+                else
+                    @test norm(analytical_col) < 1e-4
+                end
+            end
+        end
+    end
+
+    @testset "FD verification: ∂psh/∂b (case14)" begin
+        setup = _make_case14_shedding()
+        if isnothing(setup)
+            @test_skip false
+        else
+            (; net_data, dc_net, d, fmax_scale) = setup
+
+            prob = DCOPFProblem(dc_net, d)
+            sol_base = solve!(prob)
+            @test sum(sol_base.psh) > 1e-3
+
+            dpsh_db = calc_sensitivity(prob, :psh, :b)
+
+            delta = 1e-5
+            for branch_idx in 1:dc_net.m
+                dc_net_pert = DCNetwork(net_data)
+                dc_net_pert.fmax .*= fmax_scale
+                dc_net_pert.b[branch_idx] += delta
+
+                prob_pert = DCOPFProblem(dc_net_pert, d)
+                sol_pert = solve!(prob_pert)
+
+                fd = (sol_pert.psh - sol_base.psh) / delta
+                analytical_col = Matrix(dpsh_db)[:, branch_idx]
+
+                if norm(fd) > 1e-6
+                    rel_err = norm(analytical_col - fd) / norm(fd)
+                    @test rel_err < 0.05
+                else
+                    @test norm(analytical_col) < 1e-4
+                end
+            end
         end
     end
 
     @testset "Sensitivity types and dimensions" begin
-        net_data = load_test_case("case5.m")
-        if isnothing(net_data)
+        setup = _make_case14_shedding()
+        if isnothing(setup)
             @test_skip false
         else
-            dc_net = DCNetwork(net_data)
-            d = calc_demand_vector(net_data)
+            (; dc_net, d) = setup
             prob = DCOPFProblem(dc_net, d)
             solve!(prob)
 

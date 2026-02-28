@@ -117,7 +117,8 @@ end
 const DEFAULT_TAU = 1e-2
 
 # Shedding cost = multiplier × peak marginal generation cost, so the solver
-# only sheds when generation capacity is physically insufficient.
+# only sheds when generation capacity is physically insufficient or flow
+# constraints prevent delivery.
 const DEFAULT_SHED_COST_MULTIPLIER = 10
 
 # =============================================================================
@@ -210,6 +211,8 @@ function DCNetwork(
     ref_bus::Int=1,
     τ::Float64=DEFAULT_TAU
 )
+    @assert length(c_shed) == n "c_shed length ($(length(c_shed))) must match number of buses ($n)"
+    @assert all(c_shed .> 0) "c_shed must be strictly positive at all buses"
     return DCNetwork(
         n, m, k,
         sparse(Float64.(A)), sparse(Float64.(G_inc)),
