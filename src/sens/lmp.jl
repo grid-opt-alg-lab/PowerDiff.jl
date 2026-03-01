@@ -11,7 +11,7 @@
 # LMP Decomposition (for analysis):
 #     LMP = ν_bal = energy_component + congestion_component
 # where:
-#     congestion_component = L⁺ A' Diag(-b .* sw) (λ_ub_std - λ_lb_std)
+#     congestion_component = L_r⁻¹ A_r' Diag(-b .* sw) (λ_ub_std - λ_lb_std)  (non-ref block)
 #     energy_component = ν_bal - congestion_component  (uniform for connected network)
 #
 # Sign conventions:
@@ -57,9 +57,11 @@ end
 Extract the congestion component of LMPs for analysis.
 
 From KKT conditions: L * ν_bal = A' * W * (λ_ub_std - λ_lb_std)
-Therefore: ν_bal = L⁺ A' W (λ_ub_std - λ_lb_std) + c·1
+Solving the reduced system (ref bus deleted):
+    congestion[non_ref] = L_r \\ (A' W (λ_ub_std - λ_lb_std))[non_ref]
 
-The congestion component is: L⁺ A' W (λ_ub_std - λ_lb_std)
+The congestion component captures price differentiation due to binding flow constraints,
+with the reference bus congestion component equal to zero.
 This represents price differentiation due to binding flow constraints.
 
 # Returns
@@ -68,11 +70,17 @@ Vector (length n) of congestion contributions to each bus's LMP.
 function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork)
     w = -net.b  # positive weights (b < 0 for inductive lines)
     L = calc_susceptance_matrix(net)
-    L_pinv = pinv(Matrix(L))
+    non_ref = setdiff(1:net.n, net.ref_bus)
+    L_r = L[non_ref, non_ref]
+
     # Convert JuMP duals to standard convention: λ_ub_std = -λ_ub_jmp
     λ_ub_std = -sol.λ_ub
     λ_lb_std = sol.λ_lb
-    return L_pinv * net.A' * Diagonal(w .* net.sw) * (λ_ub_std - λ_lb_std)
+    rhs_full = net.A' * Diagonal(w .* net.sw) * (λ_ub_std - λ_lb_std)
+
+    result = zeros(net.n)
+    result[non_ref] = L_r \ rhs_full[non_ref]
+    return result
 end
 
 """

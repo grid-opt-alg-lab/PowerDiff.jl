@@ -27,23 +27,20 @@ end
 Ensure the KKT Jacobian factorization is computed and cached.
 Returns the LU factorization for efficient repeated solves.
 """
-function _ensure_kkt_factor!(prob::DCOPFProblem)::LinearAlgebra.LU
+function _ensure_kkt_factor!(prob::DCOPFProblem)
     if isnothing(prob.cache.kkt_factor)
         sol = _ensure_solved!(prob)
         J_z = calc_kkt_jacobian(prob; sol=sol)
-        J_dense = Matrix(J_z)
         # Tikhonov regularization only when needed: degenerate complementarity
         # (e.g. psh=0 at buses with d=0) can produce exact singularity.
         prob.cache.kkt_factor = try
-            lu(J_dense)
+            lu(J_z)   # sparse LU (UmfpackLU)
         catch e
             if e isa LinearAlgebra.SingularException
                 @warn "KKT Jacobian is singular; applying Tikhonov perturbation (1e-10)"
-                for i in axes(J_dense, 1)
-                    J_dense[i, i] += 1e-10
-                end
+                J_reg = J_z + 1e-10 * sparse(I, size(J_z, 1), size(J_z, 1))
                 try
-                    lu(J_dense)
+                    lu(J_reg)
                 catch e2
                     error("KKT Jacobian remains singular after Tikhonov perturbation: $(e2)")
                 end
@@ -167,15 +164,15 @@ function _extract_sensitivity(prob::DCOPFProblem, dz_dp::Matrix{Float64}, operan
     idx = kkt_indices(prob)
 
     if operand === :va
-        return Matrix(dz_dp[idx.θ, :])
+        return dz_dp[idx.θ, :]
     elseif operand === :pg
-        return Matrix(dz_dp[idx.g, :])
+        return dz_dp[idx.g, :]
     elseif operand === :f
-        return Matrix(dz_dp[idx.f, :])
+        return dz_dp[idx.f, :]
     elseif operand === :psh
-        return Matrix(dz_dp[idx.psh, :])
+        return dz_dp[idx.psh, :]
     elseif operand === :lmp
-        return Matrix(dz_dp[idx.ν_bal, :])
+        return dz_dp[idx.ν_bal, :]
     else
         throw(ArgumentError("Unknown operand: $operand"))
     end
@@ -620,8 +617,7 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
         # ∂K_power_bal/∂s_e = -∂B/∂s_e * θ = -(-b_e * A[e,:]' * A[e,:]) * θ
         #                    = b_e * (A[e,:]' * (A[e,:] * θ))
         #                    = b_e * A[e,:]' * (A * θ)[e]
-        A_e = A[e, :]  # 1×n sparse row
-        A_e_vec = Vector(A_e[:])  # Convert to dense vector
+        A_e_vec = Vector(A[e, :])  # dense once, reuse below
         Aθ_e = (A * θ)[e]  # scalar: phase angle difference across branch e
         ∂K_power_bal_∂s_e = b[e] * A_e_vec * Aθ_e  # n×1 vector (scalar times vector)
         J_s[idx.ν_bal, e] = ∂K_power_bal_∂s_e
@@ -646,7 +642,6 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
         # ∂B'/∂s_e = -b_e * A[e,:]' * A[e,:]  (this is symmetric, same as ∂B/∂s_e)
         # For the outer product, we need: -b_e * (A[e,:] ⋅ ν_bal) * A[e,:]'
         # Because (A[e,:]' * A[e,:]) * ν_bal = A[e,:]' * (A[e,:] ⋅ ν_bal)
-        A_e_vec = Vector(A_e[:])  # Convert to dense vector for computation
         Ae_dot_ν = dot(A_e_vec, ν_bal)  # scalar
         ∂K_θ_from_ν_bal = -b[e] * A_e_vec * Ae_dot_ν  # n×1 vector
 

@@ -22,22 +22,18 @@ using Test
         dva_dsw = calc_sensitivity(pf_state, :va, :sw)
         df_dsw = calc_sensitivity(pf_state, :f, :sw)
 
-        # Define a function that computes theta as a function of z
+        # Define a function that computes theta as a function of sw
+        # Uses reduced Laplacian (ref bus deleted) to match the implementation.
         function theta_of_sw(sw_vec)
             A = net.A
             b = net.b
             L = transpose(A) * Diagonal(-b .* sw_vec) * A
-            L_pinv = pinv(Matrix(L))
+            non_ref = setdiff(1:net.n, net.ref_bus)
+            L_r = Matrix(L[non_ref, non_ref])
 
-            # Balance at slack bus
-            p_balanced = copy(pf_state.p)
-            p_balanced[net.ref_bus] = -sum(pf_state.p) + pf_state.p[net.ref_bus]
-
-            # Solve for theta
-            θ = L_pinv * p_balanced
-
-            # Center around reference bus
-            return θ .- θ[net.ref_bus]
+            θ = zeros(eltype(sw_vec), net.n)
+            θ[non_ref] = L_r \ pf_state.p[non_ref]
+            return θ
         end
 
         # Compute ForwardDiff Jacobian
@@ -73,13 +69,17 @@ using Test
         dva_dd = calc_sensitivity(pf_state, :va, :d)
 
         # Define a function that computes theta as a function of d
+        # Uses reduced Laplacian (ref bus deleted) to match the implementation.
         function theta_of_d(d_vec)
             A = net.A
             b = net.b
             L = transpose(A) * Diagonal(-b .* net.sw) * A
-            L_pinv = pinv(Matrix(L))
+            non_ref = setdiff(1:net.n, net.ref_bus)
+            L_r = Matrix(L[non_ref, non_ref])
             p = pf_state.g - d_vec  # Net injection
-            return L_pinv * p
+            θ = zeros(eltype(d_vec), net.n)
+            θ[non_ref] = L_r \ p[non_ref]
+            return θ
         end
 
         # Compute ForwardDiff Jacobian
@@ -100,14 +100,17 @@ using Test
         # Get analytical PTDF via API
         df_dd = calc_sensitivity(pf_state, :f, :d)
 
-        # Define flow as function of demand: f(d) = W · A · L⁺ · (g - d)
+        # Define flow as function of demand: f(d) = W · A · L_r⁻¹ · (g - d)
+        # Uses reduced Laplacian (ref bus deleted) to match the implementation.
         function flow_of_d(d_vec)
             A = net.A
             b = net.b
             L = transpose(A) * Diagonal(-b .* net.sw) * A
-            L_pinv = pinv(Matrix(L))
+            non_ref = setdiff(1:net.n, net.ref_bus)
+            L_r = Matrix(L[non_ref, non_ref])
             p = pf_state.g - d_vec  # Net injection
-            θ = L_pinv * p
+            θ = zeros(eltype(d_vec), net.n)
+            θ[non_ref] = L_r \ p[non_ref]
             W = Diagonal(-b .* net.sw)
             return W * A * θ
         end

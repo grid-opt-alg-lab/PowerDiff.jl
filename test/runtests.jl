@@ -603,7 +603,7 @@ end
 # Physics Property Tests
 # =============================================================================
 
-@testset "PTDF Row Conservation (Kirchhoff)" begin
+@testset "PTDF Kirchhoff (A' * PTDF = -I at non-ref)" begin
     net = load_test_case("case5.m")
     if isnothing(net)
         @test_skip false
@@ -615,12 +615,15 @@ end
         # PTDF: ∂f/∂d, rows are branches, cols are buses
         df_dd = calc_sensitivity(pf, :f, :d)
 
-        # For DC PF, the sum of PTDF entries along each row (for a given branch)
-        # should be approximately 0 for a lossless network.
-        # This reflects that a uniform load increase doesn't change flows (balanced by slack).
-        for ℓ in 1:dc_net.m
-            row_sum = sum(Matrix(df_dd)[ℓ, :])
-            @test abs(row_sum) < 1e-6
+        # Kirchhoff's current law: A' * f = p at non-ref buses, so
+        # A' * (∂f/∂d) = ∂p/∂d = -I at non-ref buses.
+        kirchhoff = Matrix(dc_net.A') * Matrix(df_dd)
+        non_ref = setdiff(1:dc_net.n, dc_net.ref_bus)
+        for i in non_ref
+            for j in 1:dc_net.n
+                expected = (i == j) ? -1.0 : 0.0
+                @test abs(kirchhoff[i, j] - expected) < 1e-6
+            end
         end
     end
 end
@@ -629,7 +632,7 @@ end
     # Verify the energy component is well-defined and the LMP decomposition identity
     # holds across different network configurations.
     # Note: energy component uniformity is a theoretical property of ideal LP with no
-    # degenerate constraints. In practice, numerical decomposition via L⁺ can introduce
+    # degenerate constraints. In practice, numerical decomposition via L_r can introduce
     # variation, so we only check basic sanity here.
     net = load_test_case("case5.m")
     if isnothing(net)
@@ -709,6 +712,31 @@ end
 # Physics Cross-Validation Tests
 # =============================================================================
 
+@testset "Uncongested DC OPF ≈ DC PF" begin
+    # When no constraints bind and psh ≈ 0, the OPF power balance reduces to
+    # G_inc*g - d ≈ B*θ. Taking the OPF dispatch g_star, computing
+    # p = G_inc*g_star - d, and solving DC PF gives θ_PF ≈ θ_OPF.
+    net = load_test_case("case5.m")
+    if isnothing(net)
+        @test_skip false
+    else
+        dc_net = DCNetwork(net)
+        dc_net.fmax .= 1000.0
+        dc_net.gmax .= 1000.0
+
+        d = calc_demand_vector(net)
+        prob = DCOPFProblem(dc_net, d)
+        sol = solve!(prob)
+
+        @test maximum(abs.(sol.psh)) < 1e-6  # no shedding
+
+        g_bus = dc_net.G_inc * sol.g
+        pf = DCPowerFlowState(dc_net, g_bus, d)
+
+        @test isapprox(sol.θ, pf.θ, atol=1e-4)
+    end
+end
+
 @testset "Binding Generator → Zero Participation" begin
     # A generator at its upper limit should have ∂pg/∂d ≈ 0
     # (it cannot increase output further)
@@ -739,7 +767,7 @@ end
     # For a connected lossless DC network with NO binding constraints (flow or
     # generator), all LMPs equal the common marginal cost and the energy component
     # (= LMP - congestion) should be perfectly uniform.  The congestion formula
-    # L⁺ A' W (λ_ub - λ_lb) only captures flow-constraint contributions, so
+    # L_r⁻¹ A_r' W (λ_ub - λ_lb) only captures flow-constraint contributions, so
     # uniformity only holds when generator bounds are also slack.
     net = load_test_case("case5.m")
     if isnothing(net)

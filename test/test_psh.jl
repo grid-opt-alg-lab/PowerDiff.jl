@@ -406,6 +406,14 @@ end
         end
     end
 
+    @testset "Negative demand warning" begin
+        dc_net = _make_2bus_psh(gmax=10.0)
+        @test_warn "Negative demand" DCOPFProblem(dc_net, [0.0, -0.5])
+
+        prob = DCOPFProblem(dc_net, [0.0, 1.0])
+        @test_warn "Negative demand" update_demand!(prob, [0.0, -0.5])
+    end
+
     @testset "Degenerate complementarity (d=0 everywhere)" begin
         # When d=0 at all buses, both shedding bounds collapse to 0 ≤ psh ≤ 0.
         # This triggers Tikhonov regularization in the KKT factorization.

@@ -31,21 +31,26 @@ where:
 
 ## DC Power Flow
 
-For non-OPF power flow with fixed generation, the voltage angles satisfy:
+For non-OPF power flow with fixed generation, the voltage angles satisfy the
+reduced system obtained by eliminating the reference (slack) bus:
 
 ```math
-\theta = L^+ p
+\theta_r = L_r^{-1} \, p_r
 ```
 
-where ``L^+`` is the pseudoinverse of the Laplacian and ``p = g - d`` is the net injection vector.
+where ``L_r`` is the Laplacian with the reference bus row and column deleted
+(invertible for a connected network), ``p_r`` is the net injection with the
+reference entry removed, and ``\theta_{\text{ref}} = 0``.
 
 Switching sensitivity follows from matrix perturbation theory:
 
 ```math
-\frac{\partial \theta}{\partial \text{sw}_e} = -L^+ \frac{\partial L}{\partial \text{sw}_e} \theta
+\frac{\partial \theta_r}{\partial \text{sw}_e}
+  = -L_r^{-1} \frac{\partial L_r}{\partial \text{sw}_e} \, \theta_r
 ```
 
-where ``\frac{\partial L}{\partial \text{sw}_e} = -b_e \, a_e a_e^\top`` is a rank-1 update from the incidence column of branch ``e``.
+where ``\frac{\partial L_r}{\partial \text{sw}_e} = -b_e \, a_{e,r} \, a_{e,r}^\top``
+is a rank-1 update from the incidence column of branch ``e`` restricted to non-reference buses.
 
 ## KKT System for Implicit Differentiation
 

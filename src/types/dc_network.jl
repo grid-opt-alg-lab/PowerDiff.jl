@@ -83,31 +83,35 @@ struct DCOPFSolution <: AbstractOPFSolution
 end
 
 """
-    DCPowerFlowState <: AbstractPowerFlowState
+    DCPowerFlowState{F} <: AbstractPowerFlowState
 
-DC power flow solution (phase angles from Laplacian solve, no optimization).
+DC power flow solution (phase angles from reduced-Laplacian solve, no optimization).
 Supports both generation and demand for flexible sensitivity analysis.
 
-Unlike DCOPFSolution, this represents a simple power flow solution theta = L^+ p
-without optimal dispatch or constraint handling.
+Unlike DCOPFSolution, this represents a simple power flow solution
+`θ_r = L_r \\ p_r` where `L_r` is the Laplacian with the reference bus row and
+column deleted (invertible for a connected network), without optimal dispatch or
+constraint handling.
 
 # Fields
 - `net`: DCNetwork data
-- `θ`: Phase angles (rad)
+- `θ`: Phase angles (rad), with `θ[ref_bus] = 0`
 - `p`: Net injection vector (p = g - d)
 - `g`: Generation vector
 - `d`: Demand vector
 - `f`: Branch flows (computed from θ)
-- `L_pinv`: Cached pseudoinverse of susceptance Laplacian (n × n)
+- `L_r_factor`: LU factorization of `L[non_ref, non_ref]`
+- `non_ref`: Indices of non-reference buses
 """
-struct DCPowerFlowState <: AbstractPowerFlowState
+struct DCPowerFlowState{F<:Factorization{Float64}} <: AbstractPowerFlowState
     net::DCNetwork
     θ::Vector{Float64}
     p::Vector{Float64}
     g::Vector{Float64}
     d::Vector{Float64}
     f::Vector{Float64}
-    L_pinv::Matrix{Float64}
+    L_r_factor::F
+    non_ref::Vector{Int}
 end
 
 # =============================================================================
@@ -312,13 +316,11 @@ end
 
 Solve DC power flow for given generation and demand.
 
-Computes phase angles θ by solving the linear system:
-    L * θ = p
-where L = A' * Diag(-b ⊙ sw) * A is the susceptance-weighted Laplacian
-and p = g - d is the net injection.
-
-The slack bus angle is set to zero, and the pseudoinverse is used for
-robustness (handles singular Laplacian from disconnected networks).
+Computes phase angles θ by solving the reduced system:
+    L_r * θ_r = p_r
+where L_r is the susceptance-weighted Laplacian with the reference bus row and
+column deleted (invertible for a connected network), and p_r is the net injection
+with the reference entry removed. The reference bus angle is zero by construction.
 
 # Arguments
 - `net`: DCNetwork containing topology and parameters
@@ -344,25 +346,20 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
     # Net injection
     p = Float64.(g) - Float64.(d)
 
-    # Build susceptance matrix and compute pseudoinverse (cache for sensitivity analysis)
+    # Build reduced Laplacian (delete reference bus row/col) and factorize
     L = calc_susceptance_matrix(net)
-    L_pinv = pinv(Matrix(L))
+    non_ref = setdiff(1:n, net.ref_bus)
+    F = lu(L[non_ref, non_ref])   # sparse LU (UmfpackLU)
 
-    # Solve θ = L⁺ p using cached pseudoinverse
-    # Set slack bus injection to ensure power balance
-    p_balanced = copy(p)
-    p_balanced[net.ref_bus] = -sum(p) + p[net.ref_bus]  # Slack absorbs imbalance
-
-    θ = L_pinv * p_balanced
-
-    # Center around reference bus
-    θ = θ .- θ[net.ref_bus]
+    # Solve reduced system: θ[non_ref] = L_r \ p[non_ref], θ[ref] = 0
+    θ = zeros(n)
+    θ[non_ref] = F \ p[non_ref]
 
     # Compute flows: f = W * A * θ where W = Diag(-b ⊙ sw)
     W = Diagonal(-net.b .* net.sw)
-    f = Vector(W * net.A * θ)
+    f = W * net.A * θ
 
-    return DCPowerFlowState(net, θ, p, Float64.(g), Float64.(d), f, L_pinv)
+    return DCPowerFlowState(net, θ, p, Float64.(g), Float64.(d), f, F, non_ref)
 end
 
 """

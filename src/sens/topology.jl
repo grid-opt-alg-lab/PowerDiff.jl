@@ -147,13 +147,13 @@ end
 
 Compute switching sensitivity for DC power flow (not OPF).
 
-For DC power flow θ = L(sw)⁺ p, the sensitivity of angles w.r.t. switching is:
+For DC power flow `θ_r = L_r⁻¹ p_r`, the sensitivity of angles w.r.t. switching is:
 
-    ∂θ/∂swₑ = -L⁺ · (∂L/∂swₑ) · θ
+    ∂θ_r/∂swₑ = -L_r⁻¹ · (∂L_r/∂swₑ) · θ_r
 
-where ∂L/∂swₑ = -bₑ · (aₑ · aₑ') is the rank-1 outer product of incidence column.
-
-This uses the formula from matrix perturbation theory (RandomizedSwitching pattern).
+where `∂L_r/∂swₑ = -bₑ · a_{e,r} · a_{e,r}'` is a rank-1 update from the incidence
+column of branch `e` restricted to non-reference buses, and `L_r` is the Laplacian
+with the reference bus row and column deleted.
 
 # Arguments
 - `state`: DCPowerFlowState containing the solved power flow
@@ -166,45 +166,27 @@ NamedTuple with:
 function calc_sensitivity_switching(state::DCPowerFlowState)
     net = state.net
     n, m = net.n, net.m
-    ref = net.ref_bus
+    nr = state.non_ref
 
-    # Use cached pseudoinverse from state (O(1) instead of O(n³))
-    L_pinv = state.L_pinv
-
-    # Balance p at slack bus as in DCPowerFlowState constructor
-    p_balanced = copy(state.p)
-    p_balanced[ref] = -sum(state.p) + state.p[ref]
-
-    # Compute raw θ (before centering)
-    θ_raw = L_pinv * p_balanced
+    θ_r = state.θ[nr]
 
     # Preallocate
     dva_dsw = zeros(n, m)
 
-    # For each edge e, compute ∂va/∂swₑ
+    # For each edge e, compute ∂va/∂swₑ via reduced-Laplacian backsolve
     for e in 1:m
-        # Get incidence column for edge e: a_e = A[e, :]
-        # Note: A is m × n, so we get the e-th row
-        aₑ = Vector(net.A[e, :])
+        # Incidence row restricted to non-reference buses (sparse for efficient dot)
+        a_e_r = net.A[e, nr]
 
-        # ∂L/∂swₑ = -bₑ · (aₑ · aₑ')
-        # This is a rank-1 matrix
-        ∂L_∂swₑ = -net.b[e] * (aₑ * aₑ')
-
-        # ∂va_raw/∂swₑ = -L⁺ · ∂L/∂swₑ · va_raw
-        dva_raw_dswₑ = -L_pinv * ∂L_∂swₑ * θ_raw
-
-        # Account for centering: va = va_raw - va_raw[ref]
-        # So ∂va/∂swₑ = ∂va_raw/∂swₑ - (∂va_raw/∂swₑ)[ref] · 1
-        dva_dsw[:, e] = dva_raw_dswₑ .- dva_raw_dswₑ[ref]
+        # ∂L_r/∂swₑ * θ_r = -bₑ * a_{e,r} * (a_{e,r}' * θ_r)
+        coeff = -net.b[e] * dot(a_e_r, θ_r)
+        rhs = Vector(coeff * a_e_r)   # dense RHS for UmfpackLU backsolve
+        dva_dsw[nr, e] = -(state.L_r_factor \ rhs)
+        # dva_dsw[ref, e] = 0 by construction
     end
 
     # Flow sensitivity: f = W · A · va where W = Diag(-b ⊙ sw)
-    # fₑ = -bₑ · swₑ · (A[e,:] · va)
-    #
-    # ∂fₑ/∂swₑ' has two components:
-    # 1. Direct effect (if e' = e): ∂fₑ/∂swₑ = -bₑ · (A[e,:] · va)
-    # 2. Indirect effect via va: ∂fₑ/∂swₑ' = -bₑ · swₑ · (A[e,:] · ∂va/∂swₑ')
+    # ∂f/∂swₑ' = W * A * ∂va/∂swₑ' + direct effect on edge e'
     df_dsw = zeros(m, m)
 
     W = Diagonal(-net.b .* net.sw)
@@ -224,11 +206,11 @@ end
 
 Compute demand sensitivity for DC power flow (not OPF).
 
-For DC power flow va = L(sw)⁺ p, the sensitivity of angles w.r.t. demand is:
+For DC power flow `θ_r = L_r⁻¹ p_r`, the sensitivity of angles w.r.t. demand is:
 
-    ∂va/∂d = -L⁺
+    ∂va/∂d = -L_r⁻¹  (embedded in the non-reference block)
 
-since p = g - d and ∂p/∂d = -I.
+since `p = g - d` and `∂p/∂d = -I`.
 
 # Arguments
 - `state`: DCPowerFlowState containing the solved power flow
@@ -240,10 +222,20 @@ NamedTuple with:
 """
 function calc_sensitivity_demand(state::DCPowerFlowState)
     net = state.net
+    n = net.n
+    nr = state.non_ref
 
-    # Use cached pseudoinverse from state (O(1) instead of O(n³))
-    # ∂va/∂d = -L⁺ (since ∂p/∂d = -I and va = L⁺ p)
-    dva_dd = -state.L_pinv
+    # dθ/dd: solve L_r * X = -I for the reduced block, embed in n×n
+    dva_dd = zeros(n, n)
+    n_r = length(nr)
+    L_r_inv = zeros(n_r, n_r)
+    e_j = zeros(n_r)
+    for j in 1:n_r
+        e_j[j] = 1.0
+        L_r_inv[:, j] = state.L_r_factor \ e_j
+        e_j[j] = 0.0
+    end
+    dva_dd[nr, nr] = -L_r_inv
 
     # ∂f/∂d = W · A · ∂va/∂d
     W = Diagonal(-net.b .* net.sw)

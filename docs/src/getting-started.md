@@ -15,7 +15,7 @@ net = PowerModels.make_basic_network(raw)
 
 ## DC Power Flow
 
-DC power flow computes voltage angles from the linear approximation ``\theta = L^+ p``, where ``L`` is the susceptance-weighted Laplacian.
+DC power flow computes voltage angles from the reduced system ``\theta_r = L_r^{-1} p_r``, where ``L_r`` is the susceptance-weighted Laplacian with the reference bus row and column deleted.
 
 ```julia
 dc_net = DCNetwork(net)

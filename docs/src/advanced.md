@@ -8,7 +8,7 @@ AbstractPowerNetwork
 └── ACNetwork           # AC with vectorized admittance
 
 AbstractPowerFlowState
-├── DCPowerFlowState    # DC power flow (θ = L⁺ * p)
+├── DCPowerFlowState    # DC power flow (θ_r = L_r \ p_r)
 ├── ACPowerFlowState    # AC power flow (complex voltages)
 └── AbstractOPFSolution
     ├── DCOPFSolution   # DC OPF with generation, flows, duals

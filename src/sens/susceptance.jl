@@ -50,8 +50,7 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
 
     for e in 1:m
         # For each branch e, compute dK/db_e
-        A_e = A[e, :]
-        A_e_vec = Vector(A_e[:])  # Convert to dense vector
+        A_e_vec = Vector(A[e, :])  # dense once, reuse below
         Atheta_e = (A * theta)[e]  # Phase angle difference across branch e
 
         # 1. dK_theta/db_e: K_theta = B' * nu_bal + (WA)' * nu_flow + e_ref * eta_ref

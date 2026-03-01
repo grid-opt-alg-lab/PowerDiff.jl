@@ -23,8 +23,8 @@ rows from the same cached `dz_d*` matrix — no recomputation needed.
 By contrast, `ACSensitivityCache` only needs 2 fields because AC OPF currently
 supports only switching (`:sw`) as a parameter, and `dz_dsw` already contains all
 operand rows. Power flow states (`DCPowerFlowState`, `ACPowerFlowState`) have no
-cache at all because their sensitivities are cheap direct algebra (pseudoinverse
-or Jacobian factorization is precomputed at construction time).
+cache at all because their sensitivities are cheap direct algebra (reduced-Laplacian
+factorization or Jacobian factorization is precomputed at construction time).
 
 # Fields
 - `solution`: Cached DCOPFSolution (or nothing if not yet solved)
@@ -38,7 +38,7 @@ or Jacobian factorization is precomputed at construction time).
 """
 mutable struct DCSensitivityCache
     solution::Union{Nothing,DCOPFSolution}
-    kkt_factor::Union{Nothing,LinearAlgebra.LU}
+    kkt_factor::Union{Nothing,Factorization}
     dz_dd::Union{Nothing,Matrix{Float64}}
     dz_dcl::Union{Nothing,Matrix{Float64}}
     dz_dcq::Union{Nothing,Matrix{Float64}}
@@ -137,6 +137,11 @@ solve!(prob)
 """
 function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.Optimizer, silent::Bool=true)
     @assert length(d) == network.n "Demand vector length must match number of buses"
+
+    neg_buses = findall(d .< 0)
+    if !isempty(neg_buses)
+        @warn "Negative demand at buses $neg_buses; shedding bounds 0 ≤ psh ≤ d will be infeasible at those buses"
+    end
 
     prob = DCOPFProblem(
         JuMP.Model(), network, VariableRef[], VariableRef[], VariableRef[], VariableRef[],
