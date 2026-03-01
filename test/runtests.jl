@@ -79,7 +79,7 @@ end
 
         # Test power balance (approximately)
         B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
-        power_imbalance = dc_net.G_inc * sol.g - d - B_mat * sol.θ
+        power_imbalance = dc_net.G_inc * sol.g + sol.psh - d - B_mat * sol.θ
         @test norm(power_imbalance) < 1e-4
     end
 end
@@ -119,7 +119,7 @@ end
 
         # Test dimensions
         dim = kkt_dims(dc_net)
-        @test dim == 2*dc_net.n + 4*dc_net.m + 3*dc_net.k + 1
+        @test dim == 5*dc_net.n + 4*dc_net.m + 3*dc_net.k + 1
 
         # Test flatten/unflatten round-trip
         z = flatten_variables(sol, prob)
@@ -133,11 +133,10 @@ end
         # Test KKT residuals (should be near zero at optimum)
         K = kkt(z, prob, d)
         # Note: complementary slackness won't be exactly zero due to interior point solver
-        # Check stationarity and feasibility conditions
-        n, m, k = dc_net.n, dc_net.m, dc_net.k
+        # Check stationarity and feasibility conditions using centralized indices
+        idx = kkt_indices(dc_net)
         # Primal feasibility should be very tight
-        idx_power_bal = n + k + 3m + 2k + 1 : n + k + 3m + 2k + n
-        @test norm(K[idx_power_bal]) < 1e-4
+        @test norm(K[idx.ν_bal]) < 1e-4
     end
 end
 
@@ -383,12 +382,15 @@ end
 
         # Use the type-based interface
         dg_dd = calc_sensitivity(prob, :pg, :d)
+        dpsh_dd = calc_sensitivity(prob, :psh, :d)
 
-        # For each demand bus, generation participation factors should sum to 1
-        # This is because total generation must equal total demand
+        # For each demand bus, generation + shedding participation factors should sum to 1
+        # From power balance: G_inc * g + psh - d = B * θ
+        # Summing (1'B = 0): sum(g) + sum(psh) = sum(d), so sum(∂g/∂d_j) + sum(∂psh/∂d_j) = 1
         for i in 1:dc_net.n
-            pf_sum = sum(Matrix(dg_dd)[:, i])
-            @test abs(pf_sum - 1.0) < 0.01  # Should sum to 1 (power balance)
+            gen_sum = sum(Matrix(dg_dd)[:, i])
+            psh_sum = sum(Matrix(dpsh_dd)[:, i])
+            @test abs(gen_sum + psh_sum - 1.0) < 1e-4
         end
     end
 end
@@ -601,7 +603,7 @@ end
 # Physics Property Tests
 # =============================================================================
 
-@testset "PTDF Row Conservation (Kirchhoff)" begin
+@testset "PTDF Kirchhoff (A' * PTDF = -I at non-ref)" begin
     net = load_test_case("case5.m")
     if isnothing(net)
         @test_skip false
@@ -613,12 +615,15 @@ end
         # PTDF: ∂f/∂d, rows are branches, cols are buses
         df_dd = calc_sensitivity(pf, :f, :d)
 
-        # For DC PF, the sum of PTDF entries along each row (for a given branch)
-        # should be approximately 0 for a lossless network.
-        # This reflects that a uniform load increase doesn't change flows (balanced by slack).
-        for ℓ in 1:dc_net.m
-            row_sum = sum(Matrix(df_dd)[ℓ, :])
-            @test abs(row_sum) < 1e-6
+        # Kirchhoff's current law: A' * f = p at non-ref buses, so
+        # A' * (∂f/∂d) = ∂p/∂d = -I at non-ref buses.
+        kirchhoff = Matrix(dc_net.A') * Matrix(df_dd)
+        non_ref = setdiff(1:dc_net.n, dc_net.ref_bus)
+        for i in non_ref
+            for j in 1:dc_net.n
+                expected = (i == j) ? -1.0 : 0.0
+                @test abs(kirchhoff[i, j] - expected) < 1e-6
+            end
         end
     end
 end
@@ -627,7 +632,7 @@ end
     # Verify the energy component is well-defined and the LMP decomposition identity
     # holds across different network configurations.
     # Note: energy component uniformity is a theoretical property of ideal LP with no
-    # degenerate constraints. In practice, numerical decomposition via L⁺ can introduce
+    # degenerate constraints. In practice, numerical decomposition via L_r can introduce
     # variation, so we only check basic sanity here.
     net = load_test_case("case5.m")
     if isnothing(net)
@@ -677,10 +682,13 @@ end
             @test all(isfinite, Matrix(S))
         end
 
-        # Participation factors sum to 1
+        # Participation factors sum to 1 (generation + shedding)
         dg_dd = calc_sensitivity(prob, :pg, :d)
+        dpsh_dd = calc_sensitivity(prob, :psh, :d)
         for i in 1:dc_net.n
-            @test abs(sum(Matrix(dg_dd)[:, i]) - 1.0) < 0.01
+            gen_sum = sum(Matrix(dg_dd)[:, i])
+            psh_sum = sum(Matrix(dpsh_dd)[:, i])
+            @test abs(gen_sum + psh_sum - 1.0) < 1e-4
         end
 
         # AC power flow on case14
@@ -705,34 +713,27 @@ end
 # =============================================================================
 
 @testset "Uncongested DC OPF ≈ DC PF" begin
-    # When no constraints bind, DC OPF angles should match DC PF angles
+    # When no constraints bind and psh ≈ 0, the OPF power balance reduces to
+    # G_inc*g - d ≈ B*θ. Taking the OPF dispatch g_star, computing
+    # p = G_inc*g_star - d, and solving DC PF gives θ_PF ≈ θ_OPF.
     net = load_test_case("case5.m")
     if isnothing(net)
         @test_skip false
     else
-        # Build network with very relaxed limits so nothing binds
         dc_net = DCNetwork(net)
-        dc_net.fmax .= 1000.0  # No flow congestion
-        dc_net.gmax .= 1000.0  # No generation limits
+        dc_net.fmax .= 1000.0
+        dc_net.gmax .= 1000.0
 
         d = calc_demand_vector(net)
-
-        # Solve OPF
         prob = DCOPFProblem(dc_net, d)
         sol = solve!(prob)
 
-        # Build PF with OPF generation mapped to buses
+        @test maximum(abs.(sol.psh)) < 1e-6  # no shedding
+
         g_bus = dc_net.G_inc * sol.g
         pf = DCPowerFlowState(dc_net, g_bus, d)
 
-        # Compare ∂va/∂d from both formulations
-        dva_dd_opf = Matrix(calc_sensitivity(prob, :va, :d))
-        dva_dd_pf  = Matrix(calc_sensitivity(pf, :va, :d))
-
-        @test size(dva_dd_opf) == size(dva_dd_pf)
-        max_diff = maximum(abs.(dva_dd_opf - dva_dd_pf))
-        @test max_diff < 0.1
-        @info "Uncongested OPF vs PF ∂va/∂d max diff:" max_diff=max_diff
+        @test isapprox(sol.θ, pf.θ, atol=1e-4)
     end
 end
 
@@ -766,7 +767,7 @@ end
     # For a connected lossless DC network with NO binding constraints (flow or
     # generator), all LMPs equal the common marginal cost and the energy component
     # (= LMP - congestion) should be perfectly uniform.  The congestion formula
-    # L⁺ A' W (λ_ub - λ_lb) only captures flow-constraint contributions, so
+    # L_r⁻¹ A_r' W (λ_ub - λ_lb) only captures flow-constraint contributions, so
     # uniformity only holds when generator bounds are also slack.
     net = load_test_case("case5.m")
     if isnothing(net)
@@ -800,3 +801,4 @@ include("test_sensitivity_coverage.jl")
 include("test_dc_opf_verification.jl")
 include("test_ac_pf_verification.jl")
 include("test_update_switching.jl")
+include("test_psh.jl")

@@ -10,13 +10,14 @@ A Julia package for differentiable power system analysis. Compute sensitivities 
 - **AC power flow sensitivities**: Voltage and current sensitivity w.r.t. power injections
 - **AC OPF sensitivities**: Switching sensitivity via implicit differentiation of KKT conditions
 - **LMP computation**: Locational marginal prices with energy/congestion decomposition
+- **Load shedding**: Sensitivity of optimal load curtailment w.r.t. demand, costs, and network constraints
 - **ForwardDiff verification**: All sensitivities verified against automatic differentiation
 
 ## Installation
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/samtalki/PowerModelsDiff.jl")
+Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerModelsDiff.jl")
 ```
 
 ## Quick Example

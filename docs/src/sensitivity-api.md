@@ -15,6 +15,7 @@ Operand symbols specify what quantity we differentiate.
 | `:va` | Voltage phase angles | DCPowerFlowState, DCOPFProblem, ACOPFProblem |
 | `:f` | Branch flows | DCPowerFlowState, DCOPFProblem |
 | `:pg` / `:g` | Generator active power | DCOPFProblem, ACOPFProblem |
+| `:psh` | Load shedding | DCOPFProblem |
 | `:qg` | Generator reactive power | ACOPFProblem |
 | `:lmp` | Locational marginal prices | DCOPFProblem |
 | `:vm` | Voltage magnitude | ACPowerFlowState, ACOPFProblem |
@@ -43,13 +44,14 @@ Parameter symbols specify what we differentiate with respect to.
 | `:va` | ✓ | ✓ |
 | `:f` | ✓ | ✓ |
 
-### DC OPF (24 combinations)
+### DC OPF (30 combinations)
 
 | | `:d` | `:sw` | `:cq` | `:cl` | `:fmax` | `:b` |
 |---|---|---|---|---|---|---|
 | `:va` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `:pg` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `:f` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `:psh` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `:lmp` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ### AC Power Flow (6 combinations)

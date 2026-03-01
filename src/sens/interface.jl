@@ -23,6 +23,7 @@ Invalid combinations throw ArgumentError.
 - `:va`: Voltage phase angles (DC PF, DC OPF, AC OPF)
 - `:f`: Branch flows (DC PF, DC OPF)
 - `:pg` / `:g`: Generator active power (DC OPF, AC OPF)
+- `:psh`: Load shedding (DC OPF only)
 - `:qg`: Generator reactive power (AC OPF)
 - `:lmp`: Locational marginal prices (DC OPF only)
 - `:vm`: Voltage magnitude (AC PF, AC OPF)
@@ -70,13 +71,13 @@ const _PARAMETER_ALIASES = Dict{Symbol, Symbol}(
     :pd => :d,
 )
 
-const _VALID_OPERANDS = Set([:va, :f, :pg, :lmp, :vm, :im, :v, :qg])
+const _VALID_OPERANDS = Set([:va, :f, :pg, :lmp, :psh, :vm, :im, :v, :qg])
 const _VALID_PARAMETERS = Set([:d, :sw, :cq, :cl, :fmax, :b, :p, :q])
 
 function _resolve_operand(s::Symbol)
     s = get(_OPERAND_ALIASES, s, s)
     s in _VALID_OPERANDS || throw(ArgumentError(
-        "Unknown operand symbol :$s. Valid: :va, :f, :pg, :lmp, :vm, :im, :v, :qg (alias: :g → :pg)"))
+        "Unknown operand symbol :$s. Valid: :va, :f, :pg, :psh, :lmp, :vm, :im, :v, :qg (alias: :g → :pg)"))
     return s
 end
 
@@ -93,7 +94,7 @@ end
 
 # Map operand symbol to element type for rows
 const _OPERAND_ELEMENT = Dict{Symbol, Symbol}(
-    :va => :bus, :vm => :bus, :v => :bus, :lmp => :bus,
+    :va => :bus, :vm => :bus, :v => :bus, :lmp => :bus, :psh => :bus,
     :f => :branch, :im => :branch,
     :pg => :gen, :qg => :gen,
 )
@@ -123,12 +124,12 @@ _valid_combinations(::Type{<:DCPowerFlowState}) = [
 ]
 
 _valid_combinations(::Type{<:DCOPFProblem}) = [
-    (:va, :d), (:pg, :d), (:f, :d), (:lmp, :d),
-    (:va, :sw), (:pg, :sw), (:f, :sw), (:lmp, :sw),
-    (:va, :cq), (:pg, :cq), (:f, :cq), (:lmp, :cq),
-    (:va, :cl), (:pg, :cl), (:f, :cl), (:lmp, :cl),
-    (:va, :fmax), (:pg, :fmax), (:f, :fmax), (:lmp, :fmax),
-    (:va, :b), (:pg, :b), (:f, :b), (:lmp, :b),
+    (:va, :d), (:pg, :d), (:f, :d), (:psh, :d), (:lmp, :d),
+    (:va, :sw), (:pg, :sw), (:f, :sw), (:psh, :sw), (:lmp, :sw),
+    (:va, :cq), (:pg, :cq), (:f, :cq), (:psh, :cq), (:lmp, :cq),
+    (:va, :cl), (:pg, :cl), (:f, :cl), (:psh, :cl), (:lmp, :cl),
+    (:va, :fmax), (:pg, :fmax), (:f, :fmax), (:psh, :fmax), (:lmp, :fmax),
+    (:va, :b), (:pg, :b), (:f, :b), (:psh, :b), (:lmp, :b),
 ]
 
 _valid_combinations(::Type{<:ACPowerFlowState}) = [

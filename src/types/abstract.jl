@@ -32,7 +32,7 @@ abstract type AbstractPowerNetwork end
 Abstract base type for power flow solutions (DC or AC).
 
 Concrete subtypes:
-- `DCPowerFlowState`: DC power flow solution (θ = L⁺p)
+- `DCPowerFlowState`: DC power flow solution (θ_r = L_r \\ p_r)
 - `ACPowerFlowState`: AC power flow solution (complex voltages)
 - `AbstractOPFSolution` and its subtypes
 """

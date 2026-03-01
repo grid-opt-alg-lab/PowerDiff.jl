@@ -1,0 +1,9 @@
+# Build artifacts
+docs/build/
+docs/Manifest.toml
+
+# Playwright MCP
+.playwright-mcp/
+
+# Development reference materials
+development/

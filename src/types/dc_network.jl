@@ -21,6 +21,7 @@ topology sensitivity analysis and integration with RandomizedSwitching tools.
 - `fmax`, `gmax`, `gmin`: Flow and generation limits
 - `Δθ_max`, `Δθ_min`: Phase angle difference limits
 - `cq`, `cl`: Quadratic and linear generation cost coefficients
+- `c_shed`: Load-shedding cost per bus (penalty for involuntary load curtailment)
 - `ref_bus`: Reference bus index (phase angle = 0)
 - `τ`: Regularization parameter for strong convexity
 """
@@ -39,6 +40,7 @@ struct DCNetwork <: AbstractPowerNetwork
     Δθ_min::Vector{Float64}
     cq::Vector{Float64}
     cl::Vector{Float64}
+    c_shed::Vector{Float64}
     ref_bus::Int
     τ::Float64
 end
@@ -56,51 +58,60 @@ Solution container for DC OPF problem, storing both primal and dual variables.
 - `θ`: Phase angles at each bus
 - `g`: Generator outputs
 - `f`: Line flows
+- `psh`: Load shedding at each bus
 - `ν_bal`: Power balance dual variables (nodal, used for LMP computation)
 - `ν_flow`: Flow definition dual variables
 - `λ_ub`, `λ_lb`: Line flow upper/lower bound duals
 - `ρ_ub`, `ρ_lb`: Generator upper/lower bound duals
+- `μ_lb`, `μ_ub`: Load shedding lower/upper bound duals
 - `objective`: Optimal objective value
 """
 struct DCOPFSolution <: AbstractOPFSolution
     θ::Vector{Float64}
     g::Vector{Float64}
     f::Vector{Float64}
+    psh::Vector{Float64}
     ν_bal::Vector{Float64}
     ν_flow::Vector{Float64}
     λ_ub::Vector{Float64}
     λ_lb::Vector{Float64}
     ρ_ub::Vector{Float64}
     ρ_lb::Vector{Float64}
+    μ_lb::Vector{Float64}
+    μ_ub::Vector{Float64}
     objective::Float64
 end
 
 """
-    DCPowerFlowState <: AbstractPowerFlowState
+    DCPowerFlowState{F} <: AbstractPowerFlowState
 
-DC power flow solution (phase angles from Laplacian solve, no optimization).
+DC power flow solution (phase angles from reduced-Laplacian solve, no optimization).
 Supports both generation and demand for flexible sensitivity analysis.
 
-Unlike DCOPFSolution, this represents a simple power flow solution theta = L^+ p
-without optimal dispatch or constraint handling.
+Unlike DCOPFSolution, this represents a simple power flow solution
+`θ_r = L_r \\ p_r` where `L_r` is the Laplacian with the reference bus row and
+column deleted (invertible for a connected network), without optimal dispatch or
+constraint handling.
 
 # Fields
 - `net`: DCNetwork data
-- `θ`: Phase angles (rad)
+- `θ`: Phase angles (rad), with `θ[ref_bus] = 0`
 - `p`: Net injection vector (p = g - d)
 - `g`: Generation vector
 - `d`: Demand vector
 - `f`: Branch flows (computed from θ)
-- `L_pinv`: Cached pseudoinverse of susceptance Laplacian (n × n)
+- `L_r_factor`: LU factorization of `L[non_ref, non_ref]`
+- `non_ref`: Indices of non-reference buses
 """
-struct DCPowerFlowState <: AbstractPowerFlowState
+struct DCPowerFlowState{F<:Factorization{Float64}} <: AbstractPowerFlowState
     net::DCNetwork
     θ::Vector{Float64}
     p::Vector{Float64}
     g::Vector{Float64}
     d::Vector{Float64}
     f::Vector{Float64}
-    L_pinv::Matrix{Float64}
+    L_r_factor::F
+    non_ref::Vector{Int}
 end
 
 # =============================================================================
@@ -108,6 +119,11 @@ end
 # =============================================================================
 
 const DEFAULT_TAU = 1e-2
+
+# Shedding cost = multiplier × peak marginal generation cost, so the solver
+# only sheds when generation capacity is physically insufficient or flow
+# constraints prevent delivery.
+const DEFAULT_SHED_COST_MULTIPLIER = 10
 
 # =============================================================================
 # DCNetwork Constructors
@@ -166,12 +182,16 @@ function DCNetwork(net::Dict; τ::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,In
     cq = [gen[string(i)]["cost"][1] for i in 1:k]
     cl = [gen[string(i)]["cost"][2] for i in 1:k]
 
+    # Load-shedding cost: high penalty to discourage shedding when feasible
+    marginal_cost_ub = max(maximum(2cq .* gmax .+ cl), 1.0)
+    c_shed = fill(DEFAULT_SHED_COST_MULTIPLIER * marginal_cost_ub, n)
+
     # Reference bus
     if isnothing(ref_bus)
         ref_bus = _find_reference_bus(net)
     end
 
-    return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, Δθ_max, Δθ_min, cq, cl, ref_bus, τ)
+    return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, Δθ_max, Δθ_min, cq, cl, c_shed, ref_bus, τ)
 end
 
 """
@@ -191,9 +211,12 @@ function DCNetwork(
     Δθ_min::AbstractVector=fill(-π, m),
     cq::AbstractVector=zeros(k),
     cl::AbstractVector=zeros(k),
+    c_shed::AbstractVector=fill(1e4, n),
     ref_bus::Int=1,
     τ::Float64=DEFAULT_TAU
 )
+    @assert length(c_shed) == n "c_shed length ($(length(c_shed))) must match number of buses ($n)"
+    @assert all(c_shed .> 0) "c_shed must be strictly positive at all buses"
     return DCNetwork(
         n, m, k,
         sparse(Float64.(A)), sparse(Float64.(G_inc)),
@@ -201,6 +224,7 @@ function DCNetwork(
         Float64.(fmax), Float64.(gmax), Float64.(gmin),
         Float64.(Δθ_max), Float64.(Δθ_min),
         Float64.(cq), Float64.(cl),
+        Float64.(c_shed),
         ref_bus, τ
     )
 end
@@ -292,13 +316,11 @@ end
 
 Solve DC power flow for given generation and demand.
 
-Computes phase angles θ by solving the linear system:
-    L * θ = p
-where L = A' * Diag(-b ⊙ sw) * A is the susceptance-weighted Laplacian
-and p = g - d is the net injection.
-
-The slack bus angle is set to zero, and the pseudoinverse is used for
-robustness (handles singular Laplacian from disconnected networks).
+Computes phase angles θ by solving the reduced system:
+    L_r * θ_r = p_r
+where L_r is the susceptance-weighted Laplacian with the reference bus row and
+column deleted (invertible for a connected network), and p_r is the net injection
+with the reference entry removed. The reference bus angle is zero by construction.
 
 # Arguments
 - `net`: DCNetwork containing topology and parameters
@@ -324,25 +346,20 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
     # Net injection
     p = Float64.(g) - Float64.(d)
 
-    # Build susceptance matrix and compute pseudoinverse (cache for sensitivity analysis)
+    # Build reduced Laplacian (delete reference bus row/col) and factorize
     L = calc_susceptance_matrix(net)
-    L_pinv = pinv(Matrix(L))
+    non_ref = setdiff(1:n, net.ref_bus)
+    F = lu(L[non_ref, non_ref])   # sparse LU (UmfpackLU)
 
-    # Solve θ = L⁺ p using cached pseudoinverse
-    # Set slack bus injection to ensure power balance
-    p_balanced = copy(p)
-    p_balanced[net.ref_bus] = -sum(p) + p[net.ref_bus]  # Slack absorbs imbalance
-
-    θ = L_pinv * p_balanced
-
-    # Center around reference bus
-    θ = θ .- θ[net.ref_bus]
+    # Solve reduced system: θ[non_ref] = L_r \ p[non_ref], θ[ref] = 0
+    θ = zeros(n)
+    θ[non_ref] = F \ p[non_ref]
 
     # Compute flows: f = W * A * θ where W = Diag(-b ⊙ sw)
     W = Diagonal(-net.b .* net.sw)
-    f = Vector(W * net.A * θ)
+    f = W * net.A * θ
 
-    return DCPowerFlowState(net, θ, p, Float64.(g), Float64.(d), f, L_pinv)
+    return DCPowerFlowState(net, θ, p, Float64.(g), Float64.(d), f, F, non_ref)
 end
 
 """

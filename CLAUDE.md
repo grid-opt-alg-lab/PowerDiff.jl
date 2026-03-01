@@ -69,6 +69,7 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 - `:va` - Voltage phase angles (DC PF, DC OPF, AC OPF)
 - `:f` - Branch flows (DC PF, DC OPF)
 - `:pg` or `:g` - Generator active power (DC OPF, AC OPF)
+- `:psh` - Load shedding (DC OPF)
 - `:qg` - Generator reactive power (AC OPF)
 - `:lmp` - Locational marginal prices (DC OPF)
 - `:vm` - Voltage magnitude (AC PF, AC OPF)
@@ -115,7 +116,7 @@ calc_sensitivity(pf_state, :lmp, :d)  # ERROR: no LMP for power flow
 Fields:
 - `matrix`: The sensitivity data (Matrix{T})
 - `formulation`: Symbol (:dcpf, :dcopf, :acpf, :acopf)
-- `operand`: Symbol (:va, :vm, :pg, :qg, :f, :lmp, :im, :v)
+- `operand`: Symbol (:va, :vm, :pg, :qg, :f, :psh, :lmp, :im, :v)
 - `parameter`: Symbol (:d, :sw, :cq, :cl, :fmax, :b, :p, :q)
 - `row_to_id`, `id_to_row`: Row index ↔ element ID
 - `col_to_id`, `id_to_col`: Column index ↔ element ID
@@ -139,9 +140,9 @@ Example: `dg_dsw[i,j]` = ∂(generation at generator i) / ∂(switching state of
 
 Uses susceptance-weighted Laplacian `L = A' * Diagonal(-b .* sw) * A`:
 
-- `DCNetwork`: Network data (topology `A`, susceptances `b`, switching `sw`, limits, costs)
+- `DCNetwork`: Network data (topology `A`, susceptances `b`, switching `sw`, limits, costs, `c_shed`)
 - `DCOPFProblem`: JuMP optimization wrapper with `DCSensitivityCache` for efficient KKT reuse
-- `DCOPFSolution`: Primal (θ, g, f) and dual variables (ν_bal for LMPs)
+- `DCOPFSolution`: Primal (θ, g, f, psh) and dual variables (ν_bal for LMPs)
 - `DCPowerFlowState`: Non-OPF power flow (θ = L⁺ * p, no optimization)
 
 ### AC OPF - Polar Formulation

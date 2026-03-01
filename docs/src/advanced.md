@@ -8,7 +8,7 @@ AbstractPowerNetwork
 └── ACNetwork           # AC with vectorized admittance
 
 AbstractPowerFlowState
-├── DCPowerFlowState    # DC power flow (θ = L⁺ * p)
+├── DCPowerFlowState    # DC power flow (θ_r = L_r \ p_r)
 ├── ACPowerFlowState    # AC power flow (complex voltages)
 └── AbstractOPFSolution
     ├── DCOPFSolution   # DC OPF with generation, flows, duals
@@ -35,6 +35,7 @@ Stores the DC network topology and parameters.
 | `fmax` | `Vector{Float64}` | Branch flow limits |
 | `gmax`, `gmin` | `Vector{Float64}` | Generator limits |
 | `cq`, `cl` | `Vector{Float64}` | Cost coefficients (quadratic, linear) |
+| `c_shed` | `Vector{Float64}` | Load-shedding cost per bus |
 | `ref_bus` | `Int` | Reference bus index |
 | `τ` | `Float64` | Regularization parameter |
 
