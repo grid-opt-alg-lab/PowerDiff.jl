@@ -138,10 +138,7 @@ solve!(prob)
 function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.Optimizer, silent::Bool=true)
     @assert length(d) == network.n "Demand vector length must match number of buses"
 
-    neg_buses = findall(d .< 0)
-    if !isempty(neg_buses)
-        @warn "Negative demand at buses $neg_buses; shedding bounds 0 ≤ psh ≤ d will be infeasible at those buses"
-    end
+    _warn_negative_demand(d)
 
     prob = DCOPFProblem(
         JuMP.Model(), network, VariableRef[], VariableRef[], VariableRef[], VariableRef[],

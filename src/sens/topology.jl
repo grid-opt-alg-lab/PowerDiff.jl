@@ -225,17 +225,11 @@ function calc_sensitivity_demand(state::DCPowerFlowState)
     n = net.n
     nr = state.non_ref
 
-    # dθ/dd: solve L_r * X = -I for the reduced block, embed in n×n
+    # dθ/dd: solve L_r * X = I for the reduced block, embed in n×n
+    # The output is inherently dense (L_r⁻¹), so we use a batched solve.
     dva_dd = zeros(n, n)
     n_r = length(nr)
-    L_r_inv = zeros(n_r, n_r)
-    e_j = zeros(n_r)
-    for j in 1:n_r
-        e_j[j] = 1.0
-        L_r_inv[:, j] = state.L_r_factor \ e_j
-        e_j[j] = 0.0
-    end
-    dva_dd[nr, nr] = -L_r_inv
+    dva_dd[nr, nr] = -(state.L_r_factor \ Matrix(1.0I, n_r, n_r))
 
     # ∂f/∂d = W · A · ∂va/∂d
     W = Diagonal(-net.b .* net.sw)

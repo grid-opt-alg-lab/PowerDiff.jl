@@ -10,6 +10,18 @@
 const COMPLEMENTARITY_SNAP_TOL = 1e-6
 
 """
+    _warn_negative_demand(d)
+
+Warn if any demand entries are negative, which makes shedding bounds infeasible.
+"""
+function _warn_negative_demand(d)
+    neg_buses = findall(d .< 0)
+    if !isempty(neg_buses)
+        @warn "Negative demand at buses $neg_buses; shedding bounds 0 ≤ psh ≤ d will be infeasible at those buses"
+    end
+end
+
+"""
     solve!(prob::DCOPFProblem)
 
 Solve the DC OPF problem and return a DCOPFSolution.
@@ -97,10 +109,7 @@ function update_demand!(prob::DCOPFProblem, d::AbstractVector)
     n = prob.network.n
     @assert length(d) == n "Demand vector length must match number of buses"
 
-    neg_buses = findall(d .< 0)
-    if !isempty(neg_buses)
-        @warn "Negative demand at buses $neg_buses; shedding bounds 0 ≤ psh ≤ d will be infeasible at those buses"
-    end
+    _warn_negative_demand(d)
 
     # Invalidate sensitivity cache since parameters changed
     invalidate!(prob.cache)

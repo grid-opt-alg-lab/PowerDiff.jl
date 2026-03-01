@@ -4,6 +4,9 @@
 #
 # Implements KKT conditions for implicit differentiation of DC OPF solutions.
 
+# Tikhonov regularization magnitude for singular KKT Jacobians
+const TIKHONOV_EPS = 1e-10
+
 # =============================================================================
 # Cached Solution and KKT Factorization Access
 # =============================================================================
@@ -37,8 +40,8 @@ function _ensure_kkt_factor!(prob::DCOPFProblem)
             lu(J_z)   # sparse LU (UmfpackLU)
         catch e
             if e isa LinearAlgebra.SingularException
-                @warn "KKT Jacobian is singular; applying Tikhonov perturbation (1e-10)"
-                J_reg = J_z + 1e-10 * sparse(I, size(J_z, 1), size(J_z, 1))
+                @warn "KKT Jacobian is singular; applying Tikhonov perturbation ($TIKHONOV_EPS)"
+                J_reg = J_z + TIKHONOV_EPS * sparse(I, size(J_z, 1), size(J_z, 1))
                 try
                     lu(J_reg)
                 catch e2
@@ -450,6 +453,11 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     # Build Jacobian blocks using centralized index calculation
     idx = kkt_indices(n, m, k)
 
+    # Cache sparse identity matrices (reused across blocks)
+    I_n = sparse(I, n, n)
+    I_m = sparse(I, m, m)
+    I_k = sparse(I, k, k)
+
     J = spzeros(dim, dim)
 
     # ∂K_θ/∂...
@@ -461,22 +469,22 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     # ∂K_g/∂...
     # K_g = 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub
     J[idx.g, idx.g] = 2 * sparse(Diagonal(net.cq))
-    J[idx.g, idx.ρ_lb] = -sparse(I, k, k)
-    J[idx.g, idx.ρ_ub] = sparse(I, k, k)
+    J[idx.g, idx.ρ_lb] = -I_k
+    J[idx.g, idx.ρ_ub] = I_k
     J[idx.g, idx.ν_bal] = -net.G_inc'
 
     # ∂K_f/∂...
     # K_f = τ² * f - ν_flow - λ_lb + λ_ub
-    J[idx.f, idx.f] = net.τ^2 * sparse(I, m, m)
-    J[idx.f, idx.λ_lb] = -sparse(I, m, m)
-    J[idx.f, idx.λ_ub] = sparse(I, m, m)
-    J[idx.f, idx.ν_flow] = -sparse(I, m, m)
+    J[idx.f, idx.f] = net.τ^2 * I_m
+    J[idx.f, idx.λ_lb] = -I_m
+    J[idx.f, idx.λ_ub] = I_m
+    J[idx.f, idx.ν_flow] = -I_m
 
     # ∂K_psh/∂...
     # K_psh = c_shed - ν_bal - μ_lb + μ_ub
-    J[idx.psh, idx.ν_bal] = -sparse(I, n, n)
-    J[idx.psh, idx.μ_lb] = -sparse(I, n, n)
-    J[idx.psh, idx.μ_ub] = sparse(I, n, n)
+    J[idx.psh, idx.ν_bal] = -I_n
+    J[idx.psh, idx.μ_lb] = -I_n
+    J[idx.psh, idx.μ_ub] = I_n
 
     # ∂K_λ_lb/∂... (complementary slackness for lower flow bound)
     # K_λ_lb = λ_lb .* (f + fmax)
@@ -512,12 +520,12 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     # K_power_bal = G_inc * g + psh - d - B * θ
     J[idx.ν_bal, idx.θ] = -B_mat
     J[idx.ν_bal, idx.g] = net.G_inc
-    J[idx.ν_bal, idx.psh] = sparse(I, n, n)
+    J[idx.ν_bal, idx.psh] = I_n
 
     # ∂K_flow_def/∂... (primal feasibility: flow definition)
     # K_flow_def = f - WA * θ
     J[idx.ν_flow, idx.θ] = -WA
-    J[idx.ν_flow, idx.f] = sparse(I, m, m)
+    J[idx.ν_flow, idx.f] = I_m
 
     # ∂K_ref/∂θ (reference bus)
     J[idx.η, net.ref_bus] = 1.0
@@ -591,65 +599,25 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
     # Use centralized index calculation
     idx = kkt_indices(n, m, k)
 
-    # ∂W/∂s_e = Diagonal with -b_e at position (e,e)
-    # ∂B/∂s_e = A' * ∂W/∂s_e * A = -b_e * A[e,:]' * A[e,:]
-    # ∂(WA)/∂s_e = ∂W/∂s_e * A = -b_e * e_e * A[e,:]  (only row e changes)
+    # Precompute A * θ once (invariant across branches)
+    Aθ = A * θ
+
+    ν_bal = sol.ν_bal
+    ν_flow = sol.ν_flow
 
     for e in 1:m
-        # For each branch e, compute ∂K/∂s_e
-
-        # 1. ∂K_θ/∂s_e: K_θ = B' * ν_bal + WA' * ν_flow + e_ref * η_ref
-        # ∂B'/∂s_e * ν_bal + ∂(WA')/∂s_e * ν_flow
-        # Note: B' = B (symmetric), so ∂B'/∂s_e = ∂B/∂s_e
-        # ∂B/∂s_e = -b_e * A[e,:]' * A[e,:]
-        # ∂(WA')/∂s_e = (∂(WA)/∂s_e)' where ∂(WA)/∂s_e has row e = -b_e * A[e,:]
-        # So ∂(WA')/∂s_e has column e = -b_e * A[e,:]'
-
-        # For K_θ: contribution from ν_bal through B depends on current ν_bal values
-        # For K_θ: contribution from ν_flow through WA' depends on current ν_flow values
-        # These involve ∂K_θ/∂s_e = ∂B/∂s_e * ν_bal + ∂(WA')/∂s_e * ν_flow
-        # But we need to evaluate at current solution...
-
-        # Actually, for sensitivity analysis via implicit function theorem,
-        # we need ∂K/∂s evaluated at the solution, treating primal/dual vars as fixed.
-
-        # 2. ∂K_power_bal/∂s_e: K_power_bal = G_inc * g + psh - d - B * θ
-        # ∂K_power_bal/∂s_e = -∂B/∂s_e * θ = -(-b_e * A[e,:]' * A[e,:]) * θ
-        #                    = b_e * (A[e,:]' * (A[e,:] * θ))
-        #                    = b_e * A[e,:]' * (A * θ)[e]
         A_e_vec = Vector(A[e, :])  # dense once, reuse below
-        Aθ_e = (A * θ)[e]  # scalar: phase angle difference across branch e
-        ∂K_power_bal_∂s_e = b[e] * A_e_vec * Aθ_e  # n×1 vector (scalar times vector)
-        J_s[idx.ν_bal, e] = ∂K_power_bal_∂s_e
+        Aθ_e = Aθ[e]  # scalar: phase angle difference across branch e
 
-        # 3. ∂K_flow_def/∂s_e: K_flow_def = f - WA * θ
-        # ∂K_flow_def/∂s_e = -∂(WA)/∂s_e * θ
-        # ∂(WA)/∂s_e * θ: row e is -b_e * A[e,:] * θ = -b_e * Aθ_e
-        # All other rows are 0
-        ∂K_flow_def_∂s_e = spzeros(m)
-        ∂K_flow_def_∂s_e[e] = b[e] * Aθ_e  # Note: -(-b_e * Aθ_e) = b_e * Aθ_e
-        J_s[idx.ν_flow, e] = ∂K_flow_def_∂s_e
+        # ∂K_power_bal/∂s_e = b_e * A[e,:]' * (A * θ)[e]
+        J_s[idx.ν_bal, e] = b[e] * A_e_vec * Aθ_e
 
-        # 4. K_θ also depends on s through B and WA affecting the stationarity conditions
-        # K_θ = B' * ν_bal + WA' * ν_flow + e_ref * η_ref
-        # But B and WA depend on s, so:
+        # ∂K_flow_def/∂s_e: only row e is nonzero
+        J_s[idx.ν_flow[e], e] = b[e] * Aθ_e
+
         # ∂K_θ/∂s_e = ∂B'/∂s_e * ν_bal + ∂(WA')/∂s_e * ν_flow
-        # However, for implicit differentiation, we treat duals as variables, not functions of s.
-        # So ∂K_θ/∂s_e at fixed duals is computed as above.
-        ν_bal = sol.ν_bal
-        ν_flow = sol.ν_flow
-
-        # ∂B'/∂s_e = -b_e * A[e,:]' * A[e,:]  (this is symmetric, same as ∂B/∂s_e)
-        # For the outer product, we need: -b_e * (A[e,:] ⋅ ν_bal) * A[e,:]'
-        # Because (A[e,:]' * A[e,:]) * ν_bal = A[e,:]' * (A[e,:] ⋅ ν_bal)
-        Ae_dot_ν = dot(A_e_vec, ν_bal)  # scalar
-        ∂K_θ_from_ν_bal = -b[e] * A_e_vec * Ae_dot_ν  # n×1 vector
-
-        # ∂(WA')/∂s_e affects only column e: column e becomes -b_e * A[e,:]'
-        # So ∂(WA')/∂s_e * ν_flow = -b_e * A[e,:]' * ν_flow[e]
-        ∂K_θ_from_ν_flow = -b[e] * A_e_vec * ν_flow[e]  # n×1
-
-        J_s[idx.θ, e] = ∂K_θ_from_ν_bal + ∂K_θ_from_ν_flow
+        Ae_dot_ν = dot(A_e_vec, ν_bal)
+        J_s[idx.θ, e] = -b[e] * A_e_vec * (Ae_dot_ν + ν_flow[e])
     end
 
     return J_s
