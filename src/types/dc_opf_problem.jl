@@ -91,7 +91,7 @@ B-θ formulation of DC OPF wrapped around a JuMP model.
 # Fields
 - `model`: JuMP Model
 - `network`: DCNetwork data
-- `θ`, `g`, `f`, `psh`: Variable references for phase angles, generation, flows, load shedding
+- `va`, `pg`, `f`, `psh`: Variable references for phase angles, generation, flows, load shedding
 - `d`: Demand parameter (can be updated for sensitivity analysis)
 - `cons`: Named tuple of constraint references
 - `cache`: Mutable sensitivity cache for avoiding redundant KKT solves
@@ -101,8 +101,8 @@ B-θ formulation of DC OPF wrapped around a JuMP model.
 mutable struct DCOPFProblem <: AbstractOPFProblem
     model::JuMP.Model
     network::DCNetwork
-    θ::Vector{VariableRef}
-    g::Vector{VariableRef}
+    va::Vector{VariableRef}
+    pg::Vector{VariableRef}
     f::Vector{VariableRef}
     psh::Vector{VariableRef}
     d::Vector{Float64}
@@ -176,7 +176,7 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     # Objective: quadratic generation cost + regularization on flows + shedding penalty
     @objective(model, Min,
         sum(network.cq[i] * g[i]^2 + network.cl[i] * g[i] for i in 1:k) +
-        (1/2) * network.τ^2 * sum(f[i]^2 for i in 1:m) +
+        (1/2) * network.tau^2 * sum(f[i]^2 for i in 1:m) +
         sum(network.c_shed[i] * psh[i] for i in 1:n)
     )
 
@@ -203,11 +203,11 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     ref_con = @constraint(model, θ[network.ref_bus] == 0.0)
 
     # Phase angle difference limits
-    phase_diff = @constraint(model, network.Δθ_min .<= network.A * θ .<= network.Δθ_max)
+    phase_diff = @constraint(model, network.angmin .<= network.A * θ .<= network.angmax)
 
     prob.model = model
-    prob.θ = θ
-    prob.g = g
+    prob.va = θ
+    prob.pg = g
     prob.f = f
     prob.psh = psh
     prob.cons = (
@@ -233,8 +233,8 @@ Convenience constructor: build DCOPFProblem directly from PowerModels dict.
 
 If `d` is not provided, extracts demand from the network data.
 """
-function DCOPFProblem(net::Dict; d::Union{Nothing,AbstractVector}=nothing, τ::Float64=DEFAULT_TAU, kwargs...)
-    network = DCNetwork(net; τ=τ)
+function DCOPFProblem(net::Dict; d::Union{Nothing,AbstractVector}=nothing, tau::Float64=DEFAULT_TAU, kwargs...)
+    network = DCNetwork(net; tau=tau)
     if isnothing(d)
         d = calc_demand_vector(net)
     end

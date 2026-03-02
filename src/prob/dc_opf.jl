@@ -44,8 +44,8 @@ function solve!(prob::DCOPFProblem)
     @assert status ∈ [MOI.OPTIMAL, MOI.LOCALLY_SOLVED] "Optimization failed with status: $status"
 
     # Extract primal variables
-    θ_val = value.(prob.θ)
-    g_val = value.(prob.g)
+    θ_val = value.(prob.va)
+    g_val = value.(prob.pg)
     f_val = value.(prob.f)
     psh_val = value.(prob.psh)
 

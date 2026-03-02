@@ -26,7 +26,7 @@ function calc_kkt_jacobian_cost_linear(net::DCNetwork)
     J_cl = spzeros(dim, k)
 
     # dK_g/dcl = I_k
-    J_cl[idx.g, :] = sparse(I, k, k)
+    J_cl[idx.pg, :] = sparse(I, k, k)
 
     return J_cl
 end
@@ -56,14 +56,14 @@ function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem, sol::DCOPFSolution
     dim = kkt_dims(net)
     idx = kkt_indices(n, m, k)
 
-    g = sol.g
+    g = sol.pg
 
     J_cq = spzeros(dim, k)
 
     # dK_g/dcq = 2*Diagonal(g)
     # Objective is cq_i * g_i^2, stationarity is 2*cq_i*g_i + cl_i - ...
     # So ∂(2*cq_i*g_i)/∂cq_i = 2*g_i
-    J_cq[idx.g, :] = 2 * sparse(Diagonal(g))
+    J_cq[idx.pg, :] = 2 * sparse(Diagonal(g))
 
     return J_cq
 end

@@ -104,16 +104,16 @@ function ac_kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
 
     return (
         va = idx_va, vm = idx_vm, pg = idx_pg, qg = idx_qg,
-        ν_p_bal = idx_ν_p_bal, ν_q_bal = idx_ν_q_bal, ν_ref_bus = idx_ν_ref_bus,
-        λ_thermal_fr = idx_λ_thermal_fr, λ_thermal_to = idx_λ_thermal_to,
-        λ_angle_lb = idx_λ_angle_lb, λ_angle_ub = idx_λ_angle_ub,
-        μ_vm_lb = idx_μ_vm_lb, μ_vm_ub = idx_μ_vm_ub,
-        ρ_pg_lb = idx_ρ_pg_lb, ρ_pg_ub = idx_ρ_pg_ub,
-        ρ_qg_lb = idx_ρ_qg_lb, ρ_qg_ub = idx_ρ_qg_ub,
-        σ_p_fr_lb = idx_σ_p_fr_lb, σ_p_fr_ub = idx_σ_p_fr_ub,
-        σ_q_fr_lb = idx_σ_q_fr_lb, σ_q_fr_ub = idx_σ_q_fr_ub,
-        σ_p_to_lb = idx_σ_p_to_lb, σ_p_to_ub = idx_σ_p_to_ub,
-        σ_q_to_lb = idx_σ_q_to_lb, σ_q_to_ub = idx_σ_q_to_ub
+        nu_p_bal = idx_ν_p_bal, nu_q_bal = idx_ν_q_bal, nu_ref_bus = idx_ν_ref_bus,
+        lam_thermal_fr = idx_λ_thermal_fr, lam_thermal_to = idx_λ_thermal_to,
+        lam_angle_lb = idx_λ_angle_lb, lam_angle_ub = idx_λ_angle_ub,
+        mu_vm_lb = idx_μ_vm_lb, mu_vm_ub = idx_μ_vm_ub,
+        rho_pg_lb = idx_ρ_pg_lb, rho_pg_ub = idx_ρ_pg_ub,
+        rho_qg_lb = idx_ρ_qg_lb, rho_qg_ub = idx_ρ_qg_ub,
+        sig_p_fr_lb = idx_σ_p_fr_lb, sig_p_fr_ub = idx_σ_p_fr_ub,
+        sig_q_fr_lb = idx_σ_q_fr_lb, sig_q_fr_ub = idx_σ_q_fr_ub,
+        sig_p_to_lb = idx_σ_p_to_lb, sig_p_to_ub = idx_σ_p_to_ub,
+        sig_q_to_lb = idx_σ_q_to_lb, sig_q_to_ub = idx_σ_q_to_ub
     )
 end
 
@@ -135,13 +135,13 @@ Ordering matches `ac_kkt_indices`.
 function ac_flatten_variables(sol::ACOPFSolution, prob::ACOPFProblem)
     return vcat(
         sol.va, sol.vm, sol.pg, sol.qg,
-        sol.ν_p_bal, sol.ν_q_bal, sol.ν_ref_bus,
-        sol.λ_thermal_fr, sol.λ_thermal_to,
-        sol.λ_angle_lb, sol.λ_angle_ub,
-        sol.μ_vm_lb, sol.μ_vm_ub,
-        sol.ρ_pg_lb, sol.ρ_pg_ub, sol.ρ_qg_lb, sol.ρ_qg_ub,
-        sol.σ_p_fr_lb, sol.σ_p_fr_ub, sol.σ_q_fr_lb, sol.σ_q_fr_ub,
-        sol.σ_p_to_lb, sol.σ_p_to_ub, sol.σ_q_to_lb, sol.σ_q_to_ub
+        sol.nu_p_bal, sol.nu_q_bal, sol.nu_ref_bus,
+        sol.lam_thermal_fr, sol.lam_thermal_to,
+        sol.lam_angle_lb, sol.lam_angle_ub,
+        sol.mu_vm_lb, sol.mu_vm_ub,
+        sol.rho_pg_lb, sol.rho_pg_ub, sol.rho_qg_lb, sol.rho_qg_ub,
+        sol.sig_p_fr_lb, sol.sig_p_fr_ub, sol.sig_q_fr_lb, sol.sig_q_fr_ub,
+        sol.sig_p_to_lb, sol.sig_p_to_ub, sol.sig_q_to_lb, sol.sig_q_to_ub
     )
 end
 
@@ -158,16 +158,16 @@ function ac_unflatten_variables(z::AbstractVector, prob::ACOPFProblem)
 
     return (
         va = z[idx.va], vm = z[idx.vm], pg = z[idx.pg], qg = z[idx.qg],
-        ν_p_bal = z[idx.ν_p_bal], ν_q_bal = z[idx.ν_q_bal], ν_ref_bus = z[idx.ν_ref_bus],
-        λ_thermal_fr = z[idx.λ_thermal_fr], λ_thermal_to = z[idx.λ_thermal_to],
-        λ_angle_lb = z[idx.λ_angle_lb], λ_angle_ub = z[idx.λ_angle_ub],
-        μ_vm_lb = z[idx.μ_vm_lb], μ_vm_ub = z[idx.μ_vm_ub],
-        ρ_pg_lb = z[idx.ρ_pg_lb], ρ_pg_ub = z[idx.ρ_pg_ub],
-        ρ_qg_lb = z[idx.ρ_qg_lb], ρ_qg_ub = z[idx.ρ_qg_ub],
-        σ_p_fr_lb = z[idx.σ_p_fr_lb], σ_p_fr_ub = z[idx.σ_p_fr_ub],
-        σ_q_fr_lb = z[idx.σ_q_fr_lb], σ_q_fr_ub = z[idx.σ_q_fr_ub],
-        σ_p_to_lb = z[idx.σ_p_to_lb], σ_p_to_ub = z[idx.σ_p_to_ub],
-        σ_q_to_lb = z[idx.σ_q_to_lb], σ_q_to_ub = z[idx.σ_q_to_ub]
+        nu_p_bal = z[idx.nu_p_bal], nu_q_bal = z[idx.nu_q_bal], nu_ref_bus = z[idx.nu_ref_bus],
+        lam_thermal_fr = z[idx.lam_thermal_fr], lam_thermal_to = z[idx.lam_thermal_to],
+        lam_angle_lb = z[idx.lam_angle_lb], lam_angle_ub = z[idx.lam_angle_ub],
+        mu_vm_lb = z[idx.mu_vm_lb], mu_vm_ub = z[idx.mu_vm_ub],
+        rho_pg_lb = z[idx.rho_pg_lb], rho_pg_ub = z[idx.rho_pg_ub],
+        rho_qg_lb = z[idx.rho_qg_lb], rho_qg_ub = z[idx.rho_qg_ub],
+        sig_p_fr_lb = z[idx.sig_p_fr_lb], sig_p_fr_ub = z[idx.sig_p_fr_ub],
+        sig_q_fr_lb = z[idx.sig_q_fr_lb], sig_q_fr_ub = z[idx.sig_q_fr_ub],
+        sig_p_to_lb = z[idx.sig_p_to_lb], sig_p_to_ub = z[idx.sig_p_to_ub],
+        sig_q_to_lb = z[idx.sig_q_to_lb], sig_q_to_ub = z[idx.sig_q_to_ub]
     )
 end
 
@@ -333,21 +333,21 @@ function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw)
         h_P = p_flow_sum[i] + gs * vm[i]^2 - pg_sum[i] + pd
         h_Q = q_flow_sum[i] - bs * vm[i]^2 - qg_sum[i] + qd
 
-        L -= vars.ν_p_bal[i] * h_P
-        L -= vars.ν_q_bal[i] * h_Q
+        L -= vars.nu_p_bal[i] * h_P
+        L -= vars.nu_q_bal[i] * h_Q
     end
 
     # ----- Reference bus (equality): va[ref] - 0 = 0 -----
     ref_bus_keys = _ref_bus_indices(prob)
     for (j, ref_bus_idx) in enumerate(ref_bus_keys)
-        L -= vars.ν_ref_bus[j] * va[ref_bus_idx]
+        L -= vars.nu_ref_bus[j] * va[ref_bus_idx]
     end
 
     # ----- Thermal limits (inequality): p²+q²-r² ≤ 0 -----
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        L -= vars.λ_thermal_fr[l] * (p_fr[l]^2 + q_fr[l]^2 - rate_a^2)
-        L -= vars.λ_thermal_to[l] * (p_to[l]^2 + q_to[l]^2 - rate_a^2)
+        L -= vars.lam_thermal_fr[l] * (p_fr[l]^2 + q_fr[l]^2 - rate_a^2)
+        L -= vars.lam_thermal_to[l] * (p_to[l]^2 + q_to[l]^2 - rate_a^2)
     end
 
     # ----- Angle difference limits (inequality) -----
@@ -357,16 +357,16 @@ function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw)
         branch = ref[:branch][l]
         f_bus = branch["f_bus"]
         t_bus = branch["t_bus"]
-        L -= vars.λ_angle_lb[l] * (va[f_bus] - va[t_bus] - branch["angmin"])
-        L -= vars.λ_angle_ub[l] * (va[f_bus] - va[t_bus] - branch["angmax"])
+        L -= vars.lam_angle_lb[l] * (va[f_bus] - va[t_bus] - branch["angmin"])
+        L -= vars.lam_angle_ub[l] * (va[f_bus] - va[t_bus] - branch["angmax"])
     end
 
     # ----- Voltage bounds (inequality) -----
     # vm >= vmin  →  normalized: vm - vmin
     # vm <= vmax  →  normalized: vm - vmax
     for i in 1:n
-        L -= vars.μ_vm_lb[i] * (vm[i] - ref[:bus][i]["vmin"])
-        L -= vars.μ_vm_ub[i] * (vm[i] - ref[:bus][i]["vmax"])
+        L -= vars.mu_vm_lb[i] * (vm[i] - ref[:bus][i]["vmin"])
+        L -= vars.mu_vm_ub[i] * (vm[i] - ref[:bus][i]["vmax"])
     end
 
     # ----- Generation bounds (inequality) -----
@@ -374,10 +374,10 @@ function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw)
     # pg <= pmax  →  normalized: pg - pmax
     for i in 1:k
         gen = ref[:gen][i]
-        L -= vars.ρ_pg_lb[i] * (pg[i] - gen["pmin"])
-        L -= vars.ρ_pg_ub[i] * (pg[i] - gen["pmax"])
-        L -= vars.ρ_qg_lb[i] * (qg[i] - gen["qmin"])
-        L -= vars.ρ_qg_ub[i] * (qg[i] - gen["qmax"])
+        L -= vars.rho_pg_lb[i] * (pg[i] - gen["pmin"])
+        L -= vars.rho_pg_ub[i] * (pg[i] - gen["pmax"])
+        L -= vars.rho_qg_lb[i] * (qg[i] - gen["qmin"])
+        L -= vars.rho_qg_ub[i] * (qg[i] - gen["qmax"])
     end
 
     # ----- Flow variable bounds (inequality, reduced-space) -----
@@ -385,14 +385,14 @@ function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw)
     # p_fr <= rate_a   →  normalized: p_fr - rate_a
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        L -= vars.σ_p_fr_lb[l] * (p_fr[l] + rate_a)
-        L -= vars.σ_p_fr_ub[l] * (p_fr[l] - rate_a)
-        L -= vars.σ_q_fr_lb[l] * (q_fr[l] + rate_a)
-        L -= vars.σ_q_fr_ub[l] * (q_fr[l] - rate_a)
-        L -= vars.σ_p_to_lb[l] * (p_to[l] + rate_a)
-        L -= vars.σ_p_to_ub[l] * (p_to[l] - rate_a)
-        L -= vars.σ_q_to_lb[l] * (q_to[l] + rate_a)
-        L -= vars.σ_q_to_ub[l] * (q_to[l] - rate_a)
+        L -= vars.sig_p_fr_lb[l] * (p_fr[l] + rate_a)
+        L -= vars.sig_p_fr_ub[l] * (p_fr[l] - rate_a)
+        L -= vars.sig_q_fr_lb[l] * (q_fr[l] + rate_a)
+        L -= vars.sig_q_fr_ub[l] * (q_fr[l] - rate_a)
+        L -= vars.sig_p_to_lb[l] * (p_to[l] + rate_a)
+        L -= vars.sig_p_to_ub[l] * (p_to[l] - rate_a)
+        L -= vars.sig_q_to_lb[l] * (q_to[l] + rate_a)
+        L -= vars.sig_q_to_ub[l] * (q_to[l] - rate_a)
     end
 
     return L
@@ -521,11 +521,11 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
     # Thermal limits
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.λ_thermal_fr[l] * (p_fr[l]^2 + q_fr[l]^2 - rate_a^2))
+        push!(K, vars.lam_thermal_fr[l] * (p_fr[l]^2 + q_fr[l]^2 - rate_a^2))
     end
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.λ_thermal_to[l] * (p_to[l]^2 + q_to[l]^2 - rate_a^2))
+        push!(K, vars.lam_thermal_to[l] * (p_to[l]^2 + q_to[l]^2 - rate_a^2))
     end
 
     # Angle difference limits
@@ -533,69 +533,69 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
         branch = ref[:branch][l]
         f_bus = branch["f_bus"]
         t_bus = branch["t_bus"]
-        push!(K, vars.λ_angle_lb[l] * (va[f_bus] - va[t_bus] - branch["angmin"]))
+        push!(K, vars.lam_angle_lb[l] * (va[f_bus] - va[t_bus] - branch["angmin"]))
     end
     for l in 1:m
         branch = ref[:branch][l]
         f_bus = branch["f_bus"]
         t_bus = branch["t_bus"]
-        push!(K, vars.λ_angle_ub[l] * (branch["angmax"] - va[f_bus] + va[t_bus]))
+        push!(K, vars.lam_angle_ub[l] * (branch["angmax"] - va[f_bus] + va[t_bus]))
     end
 
     # Voltage bounds
     for i in 1:n
-        push!(K, vars.μ_vm_lb[i] * (vm[i] - ref[:bus][i]["vmin"]))
+        push!(K, vars.mu_vm_lb[i] * (vm[i] - ref[:bus][i]["vmin"]))
     end
     for i in 1:n
-        push!(K, vars.μ_vm_ub[i] * (ref[:bus][i]["vmax"] - vm[i]))
+        push!(K, vars.mu_vm_ub[i] * (ref[:bus][i]["vmax"] - vm[i]))
     end
 
     # Generation bounds
     for i in 1:k
-        push!(K, vars.ρ_pg_lb[i] * (pg[i] - ref[:gen][i]["pmin"]))
+        push!(K, vars.rho_pg_lb[i] * (pg[i] - ref[:gen][i]["pmin"]))
     end
     for i in 1:k
-        push!(K, vars.ρ_pg_ub[i] * (ref[:gen][i]["pmax"] - pg[i]))
+        push!(K, vars.rho_pg_ub[i] * (ref[:gen][i]["pmax"] - pg[i]))
     end
     for i in 1:k
-        push!(K, vars.ρ_qg_lb[i] * (qg[i] - ref[:gen][i]["qmin"]))
+        push!(K, vars.rho_qg_lb[i] * (qg[i] - ref[:gen][i]["qmin"]))
     end
     for i in 1:k
-        push!(K, vars.ρ_qg_ub[i] * (ref[:gen][i]["qmax"] - qg[i]))
+        push!(K, vars.rho_qg_ub[i] * (ref[:gen][i]["qmax"] - qg[i]))
     end
 
     # Flow variable bounds (reduced-space)
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.σ_p_fr_lb[l] * (p_fr[l] + rate_a))
+        push!(K, vars.sig_p_fr_lb[l] * (p_fr[l] + rate_a))
     end
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.σ_p_fr_ub[l] * (rate_a - p_fr[l]))
+        push!(K, vars.sig_p_fr_ub[l] * (rate_a - p_fr[l]))
     end
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.σ_q_fr_lb[l] * (q_fr[l] + rate_a))
+        push!(K, vars.sig_q_fr_lb[l] * (q_fr[l] + rate_a))
     end
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.σ_q_fr_ub[l] * (rate_a - q_fr[l]))
+        push!(K, vars.sig_q_fr_ub[l] * (rate_a - q_fr[l]))
     end
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.σ_p_to_lb[l] * (p_to[l] + rate_a))
+        push!(K, vars.sig_p_to_lb[l] * (p_to[l] + rate_a))
     end
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.σ_p_to_ub[l] * (rate_a - p_to[l]))
+        push!(K, vars.sig_p_to_ub[l] * (rate_a - p_to[l]))
     end
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.σ_q_to_lb[l] * (q_to[l] + rate_a))
+        push!(K, vars.sig_q_to_lb[l] * (q_to[l] + rate_a))
     end
     for l in 1:m
         rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.σ_q_to_ub[l] * (rate_a - q_to[l]))
+        push!(K, vars.sig_q_to_ub[l] * (rate_a - q_to[l]))
     end
 
     @assert length(K) == ac_kkt_dims(prob) "KKT vector length mismatch: got $(length(K)), expected $(ac_kkt_dims(prob))"

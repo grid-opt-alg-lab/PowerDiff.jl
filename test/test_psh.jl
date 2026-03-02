@@ -1,7 +1,7 @@
 # Load-shedding (:psh) operand tests
 
 # Local helper for the 2-bus topology used by multiple testsets
-function _make_2bus_psh(; gmax=0.5, cq=0.0, cl=10.0, τ=0.0)
+function _make_2bus_psh(; gmax=0.5, cq=0.0, cl=10.0, tau=0.0)
     n, m, k = 2, 1, 1
     A = sparse([1.0 -1.0])
     G_inc = sparse(reshape([1.0, 0.0], 2, 1))
@@ -9,7 +9,7 @@ function _make_2bus_psh(; gmax=0.5, cq=0.0, cl=10.0, τ=0.0)
     DCNetwork(n, m, k, A, G_inc, b;
         fmax=[100.0], gmax=[gmax], gmin=[0.0],
         cl=[cl], cq=[cq], c_shed=[1e4, 1e4],
-        ref_bus=1, τ=τ)
+        ref_bus=1, tau=tau)
 end
 
 # Helper: load case14 with tightened flow limits so congestion forces shedding.
@@ -47,7 +47,7 @@ end
 
             # Power balance still holds: G_inc * g + psh - d ≈ B * θ
             B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
-            residual = dc_net.G_inc * sol.g + sol.psh - d - B_mat * sol.θ
+            residual = dc_net.G_inc * sol.pg + sol.psh - d - B_mat * sol.va
             @test norm(residual) < 1e-4
         end
     end
@@ -60,12 +60,12 @@ end
         sol = solve!(prob)
 
         # Generator at max, shedding makes up the difference
-        @test sol.g[1] ≈ 0.5 atol=1e-4
+        @test sol.pg[1] ≈ 0.5 atol=1e-4
         @test sum(sol.psh) ≈ 0.5 atol=1e-4
 
         # Power balance: G_inc * g + psh - d ≈ B * θ
         B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
-        residual = dc_net.G_inc * sol.g + sol.psh - d - B_mat * sol.θ
+        residual = dc_net.G_inc * sol.pg + sol.psh - d - B_mat * sol.va
         @test norm(residual) < 1e-4
     end
 
@@ -84,7 +84,7 @@ end
             fmax=[0.3, 0.3],  # Tight flow limits
             gmax=[10.0], gmin=[0.0],
             cl=[10.0], cq=[0.0], c_shed=[1e4, 1e4, 1e4],
-            ref_bus=1, τ=0.01)
+            ref_bus=1, tau=0.01)
 
         d = [0.0, 0.0, 1.0]  # 1 MW load at bus 3
         prob = DCOPFProblem(dc_net, d)
@@ -95,7 +95,7 @@ end
 
         # Power balance still holds
         B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
-        residual = dc_net.G_inc * sol.g + sol.psh - d - B_mat * sol.θ
+        residual = dc_net.G_inc * sol.pg + sol.psh - d - B_mat * sol.va
         @test norm(residual) < 1e-4
     end
 
@@ -109,13 +109,13 @@ end
         sol = solve!(prob)
 
         B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
-        psh_formula = d + B_mat * sol.θ - dc_net.G_inc * sol.g
+        psh_formula = d + B_mat * sol.va - dc_net.G_inc * sol.pg
         @test isapprox(sol.psh, psh_formula, atol=1e-4)
     end
 
     @testset "KKT residuals" begin
         # Test with active shedding
-        dc_net = _make_2bus_psh(gmax=0.5, cq=1.0, τ=0.01)
+        dc_net = _make_2bus_psh(gmax=0.5, cq=1.0, tau=0.01)
 
         d = [0.0, 1.0]
         prob = DCOPFProblem(dc_net, d)
@@ -126,11 +126,11 @@ end
 
         # Check primal feasibility (should be very tight)
         idx = kkt_indices(dc_net)
-        @test norm(K[idx.ν_bal]) < 1e-4
-        @test norm(K[idx.ν_flow]) < 1e-4
+        @test norm(K[idx.nu_bal]) < 1e-4
+        @test norm(K[idx.nu_flow]) < 1e-4
 
         # Also test with inactive shedding (feasible case)
-        dc_net2 = _make_2bus_psh(gmax=10.0, cq=1.0, τ=0.01)
+        dc_net2 = _make_2bus_psh(gmax=10.0, cq=1.0, tau=0.01)
 
         d2 = [0.0, 1.0]
         prob2 = DCOPFProblem(dc_net2, d2)
@@ -139,8 +139,8 @@ end
         z2 = flatten_variables(sol2, prob2)
         K2 = kkt(z2, prob2, d2)
         idx2 = kkt_indices(dc_net2)
-        @test norm(K2[idx2.ν_bal]) < 1e-4
-        @test norm(K2[idx2.ν_flow]) < 1e-4
+        @test norm(K2[idx2.nu_bal]) < 1e-4
+        @test norm(K2[idx2.nu_flow]) < 1e-4
     end
 
     # =========================================================================
@@ -417,7 +417,7 @@ end
     @testset "Degenerate complementarity (d=0 everywhere)" begin
         # When d=0 at all buses, both shedding bounds collapse to 0 ≤ psh ≤ 0.
         # This triggers Tikhonov regularization in the KKT factorization.
-        dc_net = _make_2bus_psh(gmax=10.0, cq=1.0, τ=0.01)
+        dc_net = _make_2bus_psh(gmax=10.0, cq=1.0, tau=0.01)
         d_zero = [0.0, 0.0]
         prob = DCOPFProblem(dc_net, d_zero)
         sol = solve!(prob)

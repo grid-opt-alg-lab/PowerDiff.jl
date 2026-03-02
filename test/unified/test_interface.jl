@@ -29,7 +29,7 @@ using Test
 
         # Test construction
         pf_state = DCPowerFlowState(net, demand)
-        @test length(pf_state.θ) == net.n
+        @test length(pf_state.va) == net.n
         @test length(pf_state.f) == net.m
         @test pf_state.p == -demand  # Since g = 0
 
@@ -37,7 +37,7 @@ using Test
         g = zeros(net.n)
         g[1] = sum(demand)  # All generation at bus 1
         pf_state2 = DCPowerFlowState(net, g, demand)
-        @test pf_state2.g == g
+        @test pf_state2.pg == g
         @test pf_state2.d == demand
         @test pf_state2.p == g - demand
     end

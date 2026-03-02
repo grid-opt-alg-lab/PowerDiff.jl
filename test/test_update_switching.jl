@@ -39,8 +39,8 @@
         sol_fresh = solve!(prob_fresh)
 
         # Solutions must match
-        @test sol_updated.θ ≈ sol_fresh.θ atol=1e-6
-        @test sol_updated.g ≈ sol_fresh.g atol=1e-6
+        @test sol_updated.va ≈ sol_fresh.va atol=1e-6
+        @test sol_updated.pg ≈ sol_fresh.pg atol=1e-6
         @test sol_updated.f ≈ sol_fresh.f atol=1e-6
         @test sol_updated.objective ≈ sol_fresh.objective atol=1e-6
 

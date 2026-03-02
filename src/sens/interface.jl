@@ -255,3 +255,33 @@ function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, param::Symbol)
         return dz_dsw[idx.qg, :]
     end
 end
+
+# =============================================================================
+# Symbol Introspection API
+# =============================================================================
+
+"""
+    operand_symbols(state) → Vector{Symbol}
+
+Return the valid operand symbols for `calc_sensitivity` on the given state or problem.
+
+# Examples
+```julia
+operand_symbols(pf_state)  # [:va, :f]
+operand_symbols(prob)       # [:va, :pg, :f, :psh, :lmp]  (DCOPFProblem)
+```
+"""
+operand_symbols(state) = unique(first.(_valid_combinations(typeof(state))))
+
+"""
+    parameter_symbols(state) → Vector{Symbol}
+
+Return the valid parameter symbols for `calc_sensitivity` on the given state or problem.
+
+# Examples
+```julia
+parameter_symbols(pf_state)  # [:d, :sw]
+parameter_symbols(prob)       # [:d, :sw, :cq, :cl, :fmax, :b]  (DCOPFProblem)
+```
+"""
+parameter_symbols(state) = unique(last.(_valid_combinations(typeof(state))))
