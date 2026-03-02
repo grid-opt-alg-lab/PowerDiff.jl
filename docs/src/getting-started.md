@@ -13,6 +13,17 @@ raw = PowerModels.parse_file("case14.m")
 net = PowerModels.make_basic_network(raw)
 ```
 
+## Interactive Exploration
+
+For a pre-loaded REPL session with case14, run:
+
+```bash
+julia --project=. -iL examples/interactive_repl.jl
+```
+
+This loads a `DCNetwork`, solves both DC power flow and DC OPF, and prints
+suggested `calc_sensitivity` commands to try.
+
 ## DC Power Flow
 
 DC power flow computes voltage angles from the reduced system ``\theta_r = L_r^{-1} p_r``, where ``L_r`` is the susceptance-weighted Laplacian with the reference bus row and column deleted.

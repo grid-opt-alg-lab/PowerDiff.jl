@@ -11,7 +11,7 @@
 Solution container for AC OPF problem, storing primal and dual variables.
 
 # Fields
-## Primal Variables
+Primal Variables
 - `va`: Voltage angles at each bus (n)
 - `vm`: Voltage magnitudes at each bus (n)
 - `pg`: Active power generation (k)
@@ -19,14 +19,14 @@ Solution container for AC OPF problem, storing primal and dual variables.
 - `p`: Active branch flows Dict{(l,i,j) => Float64}
 - `q`: Reactive branch flows Dict{(l,i,j) => Float64}
 
-## Dual Variables (Equality Constraints)
+Dual Variables (Equality Constraints)
 - `ν_p_bal`: Active power balance duals (n) - used for LMP
 - `ν_q_bal`: Reactive power balance duals (n)
 - `ν_ref_bus`: Reference bus constraint duals (n_ref, usually 1)
 - `ν_p_fr`, `ν_p_to`: Active flow definition duals (m each)
 - `ν_q_fr`, `ν_q_to`: Reactive flow definition duals (m each)
 
-## Dual Variables (Inequality Constraints)
+Dual Variables (Inequality Constraints)
 - `λ_thermal_fr`, `λ_thermal_to`: Thermal limit duals (m each)
 - `λ_angle_lb`, `λ_angle_ub`: Angle difference limit duals (m each)
 - `μ_vm_lb`, `μ_vm_ub`: Voltage magnitude bound duals (n each)
@@ -37,7 +37,7 @@ Solution container for AC OPF problem, storing primal and dual variables.
 - `σ_p_to_lb`, `σ_p_to_ub`: To-side active flow bound duals (m each)
 - `σ_q_to_lb`, `σ_q_to_ub`: To-side reactive flow bound duals (m each)
 
-## Objective
+Objective
 - `objective`: Optimal objective value
 """
 struct ACOPFSolution <: AbstractOPFSolution
