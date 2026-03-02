@@ -28,7 +28,7 @@ println("Network: n=$(net.n) buses, m=$(net.m) branches, k=$(net.k) generators")
 
 # Solve DC power flow (NOT OPF - just theta = L^+ * p)
 pf_state = DCPowerFlowState(net, d)
-println("Phase angles: θ = ", round.(pf_state.θ, digits=4))
+println("Phase angles: θ = ", round.(pf_state.va, digits=4))
 println("Flows: f = ", round.(pf_state.f, digits=4))
 
 # New symbol-based API: request exactly what you need
@@ -71,7 +71,7 @@ println("=" ^ 60)
 prob = DCOPFProblem(net, d)
 sol = solve!(prob)
 println("OPF solved: objective = ", round(sol.objective, digits=2))
-println("Generation: g = ", round.(sol.g, digits=4))
+println("Generation: g = ", round.(sol.pg, digits=4))
 
 # OPF has more operands available (including :lmp and :pg)
 println("\n--- OPF Demand Sensitivities ---")

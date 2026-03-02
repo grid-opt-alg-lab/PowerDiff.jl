@@ -33,7 +33,7 @@ using Test
     function make_net(; b=b_base, fmax=fmax_base, cl=cl_base, cq=cq_base)
         DCNetwork(n, m, k, A, G_inc, b;
             fmax=fmax, gmax=gmax, gmin=gmin,
-            cl=cl, cq=cq, ref_bus=1, τ=τ)
+            cl=cl, cq=cq, ref_bus=1, tau=τ)
     end
 
     function solve_opf(net, demand=d)
@@ -69,8 +69,8 @@ using Test
         dpg_dcq = calc_sensitivity(prob_base, :pg, :cq)
         df_dcq  = calc_sensitivity(prob_base, :f, :cq)
 
-        check_primal(dva_dcq, sol_base, sol_pert, s -> s.θ, 1)
-        check_primal(dpg_dcq, sol_base, sol_pert, s -> s.g, 1)
+        check_primal(dva_dcq, sol_base, sol_pert, s -> s.va, 1)
+        check_primal(dpg_dcq, sol_base, sol_pert, s -> s.pg, 1)
         check_primal(df_dcq, sol_base, sol_pert, s -> s.f, 1)
     end
 
@@ -90,8 +90,8 @@ using Test
         dpg_dfmax = calc_sensitivity(prob_base, :pg, :fmax)
         df_dfmax  = calc_sensitivity(prob_base, :f, :fmax)
 
-        check_primal(dva_dfmax, sol_base, sol_pert, s -> s.θ, 1)
-        check_primal(dpg_dfmax, sol_base, sol_pert, s -> s.g, 1)
+        check_primal(dva_dfmax, sol_base, sol_pert, s -> s.va, 1)
+        check_primal(dpg_dfmax, sol_base, sol_pert, s -> s.pg, 1)
         check_primal(df_dfmax, sol_base, sol_pert, s -> s.f, 1)
     end
 
@@ -110,8 +110,8 @@ using Test
         dpg_db = calc_sensitivity(prob_base, :pg, :b)
         df_db  = calc_sensitivity(prob_base, :f, :b)
 
-        check_primal(dva_db, sol_base, sol_pert, s -> s.θ, 1)
-        check_primal(dpg_db, sol_base, sol_pert, s -> s.g, 1)
+        check_primal(dva_db, sol_base, sol_pert, s -> s.va, 1)
+        check_primal(dpg_db, sol_base, sol_pert, s -> s.pg, 1)
         check_primal(df_db, sol_base, sol_pert, s -> s.f, 1)
     end
 
@@ -129,7 +129,7 @@ using Test
         net_pert = make_net(cl=cl_pert)
         _, sol_pert = solve_opf(net_pert)
 
-        check_primal(dva_dcl, sol_base, sol_pert, s -> s.θ, 1)
+        check_primal(dva_dcl, sol_base, sol_pert, s -> s.va, 1)
         check_primal(df_dcl, sol_base, sol_pert, s -> s.f, 1)
     end
 end
@@ -215,8 +215,8 @@ end
 
             # Find a marginal generator (interior, not at bounds)
             gen_idx = findfirst(i ->
-                sol_base.g[i] > dc_net.gmin[i] + 0.01 &&
-                sol_base.g[i] < dc_net.gmax[i] - 0.01, 1:dc_net.k)
+                sol_base.pg[i] > dc_net.gmin[i] + 0.01 &&
+                sol_base.pg[i] < dc_net.gmax[i] - 0.01, 1:dc_net.k)
             @test !isnothing(gen_idx)
 
             net_pert = load_test_case("case5.m")
@@ -241,8 +241,8 @@ end
 
             # Find a marginal generator (interior, not at bounds)
             gen_idx = findfirst(i ->
-                sol_base.g[i] > dc_net.gmin[i] + 0.01 &&
-                sol_base.g[i] < dc_net.gmax[i] - 0.01, 1:dc_net.k)
+                sol_base.pg[i] > dc_net.gmin[i] + 0.01 &&
+                sol_base.pg[i] < dc_net.gmax[i] - 0.01, 1:dc_net.k)
             @test !isnothing(gen_idx)
 
             net_pert = load_test_case("case5.m")

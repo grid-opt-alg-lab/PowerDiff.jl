@@ -38,7 +38,7 @@ lmps = calc_lmp(sol, prob.network)
 ```
 """
 function calc_lmp(sol::DCOPFSolution, net::DCNetwork)
-    return sol.ν_bal
+    return sol.nu_bal
 end
 
 """
@@ -74,8 +74,8 @@ function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork)
     L_r = L[non_ref, non_ref]
 
     # Convert JuMP duals to standard convention: λ_ub_std = -λ_ub_jmp
-    λ_ub_std = -sol.λ_ub
-    λ_lb_std = sol.λ_lb
+    λ_ub_std = -sol.lam_ub
+    λ_lb_std = sol.lam_lb
     rhs_full = net.A' * Diagonal(w .* net.sw) * (λ_ub_std - λ_lb_std)
 
     result = zeros(net.n)
@@ -95,6 +95,6 @@ For a connected network, this should be approximately constant across all buses.
 Vector (length n) of energy contributions to each bus's LMP.
 """
 function calc_energy_component(sol::DCOPFSolution, net::DCNetwork)
-    return sol.ν_bal .- calc_congestion_component(sol, net)
+    return sol.nu_bal .- calc_congestion_component(sol, net)
 end
 

@@ -19,11 +19,11 @@ topology sensitivity analysis and integration with RandomizedSwitching tools.
 - `b`: Branch susceptances (imaginary part of 1/z)
 - `sw`: Branch switching states (1 = closed, 0 = open)
 - `fmax`, `gmax`, `gmin`: Flow and generation limits
-- `Δθ_max`, `Δθ_min`: Phase angle difference limits
+- `angmax`, `angmin`: Phase angle difference limits
 - `cq`, `cl`: Quadratic and linear generation cost coefficients
 - `c_shed`: Load-shedding cost per bus (penalty for involuntary load curtailment)
 - `ref_bus`: Reference bus index (phase angle = 0)
-- `τ`: Regularization parameter for strong convexity
+- `tau`: Regularization parameter for strong convexity
 """
 struct DCNetwork <: AbstractPowerNetwork
     n::Int
@@ -36,13 +36,13 @@ struct DCNetwork <: AbstractPowerNetwork
     fmax::Vector{Float64}
     gmax::Vector{Float64}
     gmin::Vector{Float64}
-    Δθ_max::Vector{Float64}
-    Δθ_min::Vector{Float64}
+    angmax::Vector{Float64}
+    angmin::Vector{Float64}
     cq::Vector{Float64}
     cl::Vector{Float64}
     c_shed::Vector{Float64}
     ref_bus::Int
-    τ::Float64
+    tau::Float64
 end
 
 # =============================================================================
@@ -55,30 +55,30 @@ end
 Solution container for DC OPF problem, storing both primal and dual variables.
 
 # Fields
-- `θ`: Phase angles at each bus
-- `g`: Generator outputs
+- `va`: Phase angles at each bus
+- `pg`: Generator outputs
 - `f`: Line flows
 - `psh`: Load shedding at each bus
-- `ν_bal`: Power balance dual variables (nodal, used for LMP computation)
-- `ν_flow`: Flow definition dual variables
-- `λ_ub`, `λ_lb`: Line flow upper/lower bound duals
-- `ρ_ub`, `ρ_lb`: Generator upper/lower bound duals
-- `μ_lb`, `μ_ub`: Load shedding lower/upper bound duals
+- `nu_bal`: Power balance dual variables (nodal, used for LMP computation)
+- `nu_flow`: Flow definition dual variables
+- `lam_ub`, `lam_lb`: Line flow upper/lower bound duals
+- `rho_ub`, `rho_lb`: Generator upper/lower bound duals
+- `mu_lb`, `mu_ub`: Load shedding lower/upper bound duals
 - `objective`: Optimal objective value
 """
 struct DCOPFSolution <: AbstractOPFSolution
-    θ::Vector{Float64}
-    g::Vector{Float64}
+    va::Vector{Float64}
+    pg::Vector{Float64}
     f::Vector{Float64}
     psh::Vector{Float64}
-    ν_bal::Vector{Float64}
-    ν_flow::Vector{Float64}
-    λ_ub::Vector{Float64}
-    λ_lb::Vector{Float64}
-    ρ_ub::Vector{Float64}
-    ρ_lb::Vector{Float64}
-    μ_lb::Vector{Float64}
-    μ_ub::Vector{Float64}
+    nu_bal::Vector{Float64}
+    nu_flow::Vector{Float64}
+    lam_ub::Vector{Float64}
+    lam_lb::Vector{Float64}
+    rho_ub::Vector{Float64}
+    rho_lb::Vector{Float64}
+    mu_lb::Vector{Float64}
+    mu_ub::Vector{Float64}
     objective::Float64
 end
 
@@ -95,19 +95,19 @@ constraint handling.
 
 # Fields
 - `net`: DCNetwork data
-- `θ`: Phase angles (rad), with `θ[ref_bus] = 0`
-- `p`: Net injection vector (p = g - d)
-- `g`: Generation vector
+- `va`: Phase angles (rad), with `va[ref_bus] = 0`
+- `p`: Net injection vector (p = pg - d)
+- `pg`: Generation vector
 - `d`: Demand vector
-- `f`: Branch flows (computed from θ)
+- `f`: Branch flows (computed from va)
 - `L_r_factor`: LU factorization of `L[non_ref, non_ref]`
 - `non_ref`: Indices of non-reference buses
 """
 struct DCPowerFlowState{F<:Factorization{Float64}} <: AbstractPowerFlowState
     net::DCNetwork
-    θ::Vector{Float64}
+    va::Vector{Float64}
     p::Vector{Float64}
-    g::Vector{Float64}
+    pg::Vector{Float64}
     d::Vector{Float64}
     f::Vector{Float64}
     L_r_factor::F
@@ -130,7 +130,7 @@ const DEFAULT_SHED_COST_MULTIPLIER = 10
 # =============================================================================
 
 """
-    DCNetwork(net::Dict; τ=DEFAULT_TAU, ref_bus=nothing)
+    DCNetwork(net::Dict; tau=DEFAULT_TAU, ref_bus=nothing)
 
 Construct a DCNetwork from a PowerModels network dictionary.
 
@@ -144,7 +144,7 @@ net = PowerModels.make_basic_network(raw)
 dc_net = DCNetwork(net)
 ```
 """
-function DCNetwork(net::Dict; τ::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
+function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
     @assert haskey(net, "basic_network") && net["basic_network"] == true "Network must be a basic network (use make_basic_network)"
 
     gen = net["gen"]
@@ -175,8 +175,8 @@ function DCNetwork(net::Dict; τ::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,In
     gmin = [gen[string(i)]["pmin"] for i in 1:k]
 
     # Phase angle difference limits
-    Δθ_max = [branch[string(i)]["angmax"] for i in 1:m]
-    Δθ_min = [branch[string(i)]["angmin"] for i in 1:m]
+    angmax = [branch[string(i)]["angmax"] for i in 1:m]
+    angmin = [branch[string(i)]["angmin"] for i in 1:m]
 
     # Cost coefficients (assumes polynomial cost with at least 2 terms)
     cq = [gen[string(i)]["cost"][1] for i in 1:k]
@@ -191,7 +191,7 @@ function DCNetwork(net::Dict; τ::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,In
         ref_bus = _find_reference_bus(net)
     end
 
-    return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, Δθ_max, Δθ_min, cq, cl, c_shed, ref_bus, τ)
+    return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, angmax, angmin, cq, cl, c_shed, ref_bus, tau)
 end
 
 """
@@ -207,13 +207,13 @@ function DCNetwork(
     fmax::AbstractVector=fill(Inf, m),
     gmax::AbstractVector=fill(Inf, k),
     gmin::AbstractVector=zeros(k),
-    Δθ_max::AbstractVector=fill(π, m),
-    Δθ_min::AbstractVector=fill(-π, m),
+    angmax::AbstractVector=fill(π, m),
+    angmin::AbstractVector=fill(-π, m),
     cq::AbstractVector=zeros(k),
     cl::AbstractVector=zeros(k),
     c_shed::AbstractVector=fill(1e4, n),
     ref_bus::Int=1,
-    τ::Float64=DEFAULT_TAU
+    tau::Float64=DEFAULT_TAU
 )
     @assert length(c_shed) == n "c_shed length ($(length(c_shed))) must match number of buses ($n)"
     @assert all(c_shed .> 0) "c_shed must be strictly positive at all buses"
@@ -222,10 +222,10 @@ function DCNetwork(
         sparse(Float64.(A)), sparse(Float64.(G_inc)),
         Float64.(b), Float64.(sw),
         Float64.(fmax), Float64.(gmax), Float64.(gmin),
-        Float64.(Δθ_max), Float64.(Δθ_min),
+        Float64.(angmax), Float64.(angmin),
         Float64.(cq), Float64.(cl),
         Float64.(c_shed),
-        ref_bus, τ
+        ref_bus, tau
     )
 end
 

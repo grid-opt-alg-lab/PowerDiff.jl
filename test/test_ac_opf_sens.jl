@@ -89,9 +89,9 @@ using Test
         @test norm(K[idx.vm]) < 1e-2          # vm stationarity
         @test norm(K[idx.pg]) < 1e-6          # pg stationarity (exact: linear)
         @test norm(K[idx.qg]) < 1e-6          # qg stationarity (exact: linear)
-        @test norm(K[idx.ν_p_bal]) < 1e-6     # power balance
-        @test norm(K[idx.ν_q_bal]) < 1e-6     # reactive balance
-        @test norm(K[idx.ν_ref_bus]) < 1e-6   # reference bus
+        @test norm(K[idx.nu_p_bal]) < 1e-6     # power balance
+        @test norm(K[idx.nu_q_bal]) < 1e-6     # reactive balance
+        @test norm(K[idx.nu_ref_bus]) < 1e-6   # reference bus
     end
 
     @testset "Finite-difference verification" begin

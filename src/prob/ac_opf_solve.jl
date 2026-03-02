@@ -114,19 +114,21 @@ function _extract_ac_opf_solution(prob::ACOPFProblem)
     obj = objective_value(prob.model)
 
     return ACOPFSolution(
-        va_val, vm_val,
-        pg_val, qg_val,
-        p_val, q_val,
-        ν_p_bal, ν_q_bal,
-        ν_ref_bus,
-        ν_p_fr, ν_p_to, ν_q_fr, ν_q_to,
-        λ_thermal_fr, λ_thermal_to,
-        λ_angle_lb, λ_angle_ub,
-        μ_vm_lb, μ_vm_ub,
-        ρ_pg_lb, ρ_pg_ub, ρ_qg_lb, ρ_qg_ub,
-        σ_p_fr_lb, σ_p_fr_ub, σ_q_fr_lb, σ_q_fr_ub,
-        σ_p_to_lb, σ_p_to_ub, σ_q_to_lb, σ_q_to_ub,
-        obj
+        va = va_val, vm = vm_val,
+        pg = pg_val, qg = qg_val,
+        p = p_val, q = q_val,
+        nu_p_bal = ν_p_bal, nu_q_bal = ν_q_bal,
+        nu_ref_bus = ν_ref_bus,
+        nu_p_fr = ν_p_fr, nu_p_to = ν_p_to, nu_q_fr = ν_q_fr, nu_q_to = ν_q_to,
+        lam_thermal_fr = λ_thermal_fr, lam_thermal_to = λ_thermal_to,
+        lam_angle_lb = λ_angle_lb, lam_angle_ub = λ_angle_ub,
+        mu_vm_lb = μ_vm_lb, mu_vm_ub = μ_vm_ub,
+        rho_pg_lb = ρ_pg_lb, rho_pg_ub = ρ_pg_ub, rho_qg_lb = ρ_qg_lb, rho_qg_ub = ρ_qg_ub,
+        sig_p_fr_lb = σ_p_fr_lb, sig_p_fr_ub = σ_p_fr_ub,
+        sig_q_fr_lb = σ_q_fr_lb, sig_q_fr_ub = σ_q_fr_ub,
+        sig_p_to_lb = σ_p_to_lb, sig_p_to_ub = σ_p_to_ub,
+        sig_q_to_lb = σ_q_to_lb, sig_q_to_ub = σ_q_to_ub,
+        objective = obj
     )
 end
 

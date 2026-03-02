@@ -38,9 +38,9 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
     dim = kkt_dims(net)
     idx = kkt_indices(n, m, k)
 
-    theta = sol.θ
-    nu_bal = sol.ν_bal
-    nu_flow = sol.ν_flow
+    theta = sol.va
+    nu_bal = sol.nu_bal
+    nu_flow = sol.nu_flow
 
     # Network parameters
     sw = net.sw
@@ -57,13 +57,13 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
 
         # dK_theta/db_e = -sw_e * A[e,:]' * (dot(A[e,:], nu_bal) + nu_flow[e])
         Ae_dot_nu_bal = dot(A_e_vec, nu_bal)
-        J_b[idx.θ, e] = -sw[e] * A_e_vec * (Ae_dot_nu_bal + nu_flow[e])
+        J_b[idx.va, e] = -sw[e] * A_e_vec * (Ae_dot_nu_bal + nu_flow[e])
 
         # dK_power_bal/db_e = sw_e * A[e,:]' * (A * theta)[e]
-        J_b[idx.ν_bal, e] = sw[e] * A_e_vec * Atheta_e
+        J_b[idx.nu_bal, e] = sw[e] * A_e_vec * Atheta_e
 
         # dK_flow_def/db_e: only row e is nonzero
-        J_b[idx.ν_flow[e], e] = sw[e] * Atheta_e
+        J_b[idx.nu_flow[e], e] = sw[e] * Atheta_e
     end
 
     return J_b

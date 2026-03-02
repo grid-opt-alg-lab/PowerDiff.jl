@@ -13,6 +13,17 @@ raw = PowerModels.parse_file("case14.m")
 net = PowerModels.make_basic_network(raw)
 ```
 
+## Interactive Exploration
+
+For a pre-loaded REPL session with case14, run:
+
+```bash
+julia --project=. -iL examples/interactive_repl.jl
+```
+
+This loads a `DCNetwork`, solves both DC power flow and DC OPF, and prints
+suggested `calc_sensitivity` commands to try.
+
 ## DC Power Flow
 
 DC power flow computes voltage angles from the reduced system ``\theta_r = L_r^{-1} p_r``, where ``L_r`` is the susceptance-weighted Laplacian with the reference bus row and column deleted.
@@ -66,8 +77,8 @@ DC OPF supports sensitivities for all five operands (`:va`, `:pg`, `:f`, `:psh`,
 
 ```julia
 dlmp_dd  = calc_sensitivity(prob, :lmp, :d)    # dLMP/dd (n x n)
-dpg_dd   = calc_sensitivity(prob, :pg, :d)     # dg/dd (k x n)
-dpg_dcq  = calc_sensitivity(prob, :pg, :cq)    # dg/dcq (k x k)
+dpg_dd   = calc_sensitivity(prob, :pg, :d)     # dpg/dd (k x n)
+dpg_dcq  = calc_sensitivity(prob, :pg, :cq)    # dpg/dcq (k x k)
 dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)   # dLMP/dsw (n x m)
 df_dfmax = calc_sensitivity(prob, :f, :fmax)   # df/dfmax (m x m)
 dpsh_dd  = calc_sensitivity(prob, :psh, :d)    # dpsh/dd (n x n)

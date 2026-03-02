@@ -168,7 +168,7 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
     n, m = net.n, net.m
     nr = state.non_ref
 
-    θ_r = state.θ[nr]
+    θ_r = state.va[nr]
 
     # Preallocate
     dva_dsw = zeros(n, m)
@@ -195,7 +195,7 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
         df_dsw[:, e_prime] = W * net.A * dva_dsw[:, e_prime]
 
         # Direct effect: only edge e_prime
-        df_dsw[e_prime, e_prime] += -net.b[e_prime] * dot(net.A[e_prime, :], state.θ)
+        df_dsw[e_prime, e_prime] += -net.b[e_prime] * dot(net.A[e_prime, :], state.va)
     end
 
     return (dva_dsw=dva_dsw, df_dsw=df_dsw)

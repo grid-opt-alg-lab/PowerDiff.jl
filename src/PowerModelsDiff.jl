@@ -24,6 +24,7 @@ include("types/dc_opf_problem.jl")  # DCOPFProblem + constructors
 include("types/ac_network.jl")      # ACNetwork, ACPowerFlowState
 include("types/ac_opf_problem.jl")  # ACOPFProblem, ACOPFSolution + constructors
 include("types/sensitivities.jl")   # Sensitivity{T} (public API wrapper)
+include("types/show.jl")           # Pretty-printing (Base.show methods)
 
 # =============================================================================
 # Power flow and graph utilities
@@ -79,6 +80,7 @@ export AbstractOPFProblem
 # -----------------------------------------------------------------------------
 export calc_sensitivity
 export Sensitivity
+export operand_symbols, parameter_symbols
 
 # -----------------------------------------------------------------------------
 # DC Power Flow Types

@@ -76,7 +76,7 @@ using Test
             L = transpose(A) * Diagonal(-b .* net.sw) * A
             non_ref = setdiff(1:net.n, net.ref_bus)
             L_r = Matrix(L[non_ref, non_ref])
-            p = pf_state.g - d_vec  # Net injection
+            p = pf_state.pg - d_vec  # Net injection
             θ = zeros(eltype(d_vec), net.n)
             θ[non_ref] = L_r \ p[non_ref]
             return θ
@@ -108,7 +108,7 @@ using Test
             L = transpose(A) * Diagonal(-b .* net.sw) * A
             non_ref = setdiff(1:net.n, net.ref_bus)
             L_r = Matrix(L[non_ref, non_ref])
-            p = pf_state.g - d_vec  # Net injection
+            p = pf_state.pg - d_vec  # Net injection
             θ = zeros(eltype(d_vec), net.n)
             θ[non_ref] = L_r \ p[non_ref]
             W = Diagonal(-b .* net.sw)
@@ -143,7 +143,7 @@ using Test
             update_demand!(prob, d_pert)
             sol_pert = solve!(prob)
 
-            fd_dva_dd_col = (sol_pert.θ - sol.θ) / ε
+            fd_dva_dd_col = (sol_pert.va - sol.va) / ε
 
             max_err = maximum(abs.(Matrix(dva_dd)[:, i] - fd_dva_dd_col))
             @test max_err < 1e-3
@@ -174,7 +174,7 @@ using Test
             prob_pert = DCOPFProblem(net_pert, d)
             sol_pert = solve!(prob_pert)
 
-            fd_dva_dsw_col = (sol.θ - sol_pert.θ) / ε  # Reversed due to negative ε
+            fd_dva_dsw_col = (sol.va - sol_pert.va) / ε  # Reversed due to negative ε
 
             # Larger tolerance for OPF due to active constraint changes
             max_err = maximum(abs.(Matrix(dva_dsw)[:, e] - fd_dva_dsw_col))
@@ -206,7 +206,7 @@ using Test
             sol_pert = solve!(prob_pert)
 
             # Reversed sign due to negative perturbation
-            fd_dpg_col = (sol.g - sol_pert.g) / ε
+            fd_dpg_col = (sol.pg - sol_pert.pg) / ε
             fd_df_col = (sol.f - sol_pert.f) / ε
 
             # Check ∂pg/∂sw

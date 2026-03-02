@@ -39,18 +39,18 @@ function calc_kkt_jacobian_flowlimit(prob::DCOPFProblem, sol::DCOPFSolution)
     dim = kkt_dims(net)
     idx = kkt_indices(n, m, k)
 
-    lambda_lb = sol.λ_lb
-    lambda_ub = sol.λ_ub
+    lambda_lb = sol.lam_lb
+    lambda_ub = sol.lam_ub
 
     J_fmax = spzeros(dim, m)
 
     # dK_lambda_lb/dfmax = Diag(lambda_lb)
     # K_lambda_lb = lambda_lb .* (f + fmax), so dK_lambda_lb/dfmax_e = lambda_lb[e] for row e
-    J_fmax[idx.λ_lb, :] = sparse(Diagonal(lambda_lb))
+    J_fmax[idx.lam_lb, :] = sparse(Diagonal(lambda_lb))
 
     # dK_lambda_ub/dfmax = Diag(lambda_ub)
     # K_lambda_ub = lambda_ub .* (fmax - f), so dK_lambda_ub/dfmax_e = lambda_ub[e] for row e
-    J_fmax[idx.λ_ub, :] = sparse(Diagonal(lambda_ub))
+    J_fmax[idx.lam_ub, :] = sparse(Diagonal(lambda_ub))
 
     return J_fmax
 end

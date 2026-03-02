@@ -60,26 +60,26 @@ end
         # Test problem construction
         prob = DCOPFProblem(dc_net, d)
         @test prob.network === dc_net
-        @test length(prob.θ) == dc_net.n
-        @test length(prob.g) == dc_net.k
+        @test length(prob.va) == dc_net.n
+        @test length(prob.pg) == dc_net.k
         @test length(prob.f) == dc_net.m
 
         # Test solving
         sol = solve!(prob)
-        @test length(sol.θ) == dc_net.n
-        @test length(sol.g) == dc_net.k
+        @test length(sol.va) == dc_net.n
+        @test length(sol.pg) == dc_net.k
         @test length(sol.f) == dc_net.m
 
         # Basic feasibility checks
-        @test sol.θ[dc_net.ref_bus] ≈ 0.0 atol=1e-6  # Reference bus angle = 0
-        @test all(sol.g .>= dc_net.gmin .- 1e-6)      # Generation lower bounds
-        @test all(sol.g .<= dc_net.gmax .+ 1e-6)      # Generation upper bounds
+        @test sol.va[dc_net.ref_bus] ≈ 0.0 atol=1e-6  # Reference bus angle = 0
+        @test all(sol.pg .>= dc_net.gmin .- 1e-6)      # Generation lower bounds
+        @test all(sol.pg .<= dc_net.gmax .+ 1e-6)      # Generation upper bounds
         @test all(sol.f .>= -dc_net.fmax .- 1e-6)     # Flow lower bounds
         @test all(sol.f .<= dc_net.fmax .+ 1e-6)      # Flow upper bounds
 
         # Test power balance (approximately)
         B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
-        power_imbalance = dc_net.G_inc * sol.g + sol.psh - d - B_mat * sol.θ
+        power_imbalance = dc_net.G_inc * sol.pg + sol.psh - d - B_mat * sol.va
         @test norm(power_imbalance) < 1e-4
     end
 end
@@ -126,8 +126,8 @@ end
         @test length(z) == dim
 
         vars = unflatten_variables(z, prob)
-        @test vars.θ ≈ sol.θ
-        @test vars.g ≈ sol.g
+        @test vars.va ≈ sol.va
+        @test vars.pg ≈ sol.pg
         @test vars.f ≈ sol.f
 
         # Test KKT residuals (should be near zero at optimum)
@@ -136,7 +136,7 @@ end
         # Check stationarity and feasibility conditions using centralized indices
         idx = kkt_indices(dc_net)
         # Primal feasibility should be very tight
-        @test norm(K[idx.ν_bal]) < 1e-4
+        @test norm(K[idx.nu_bal]) < 1e-4
     end
 end
 
@@ -233,11 +233,11 @@ end
 
         # Our generation should be close to PowerModels
         # Note: tolerance is higher due to regularization term in our formulation
-        gen_diff = norm(sol.g - pm_gen)
+        gen_diff = norm(sol.pg - pm_gen)
         @test gen_diff < 0.1  # Within 10% for small regularization
 
         # Compare total generation (power balance)
-        total_gen_ours = sum(sol.g)
+        total_gen_ours = sum(sol.pg)
         total_gen_pm = sum(pm_gen)
         total_demand = sum(d)
 
@@ -279,13 +279,13 @@ end
 
         # Solve with our implementation
         # Use small τ for numerical stability in KKT system
-        dc_net = DCNetwork(net; τ=1e-3)
+        dc_net = DCNetwork(net; tau=1e-3)
         prob = DCOPFProblem(dc_net, calc_demand_vector(net))
         sol = solve!(prob)
 
         # For LMPs, use the power balance duals directly (ν_bal)
         # This matches the standard definition: LMP = ∂Cost/∂d
-        our_lmps = sol.ν_bal
+        our_lmps = sol.nu_bal
 
         # Check validity
         @test !any(isnan, our_lmps)
@@ -342,8 +342,8 @@ end
         sol_pert = solve!(prob_pert)
 
         # Numerical derivatives
-        dg_dd_numerical = (sol_pert.g - sol_base.g) / delta
-        dva_dd_numerical = (sol_pert.θ - sol_base.θ) / delta
+        dg_dd_numerical = (sol_pert.pg - sol_base.pg) / delta
+        dva_dd_numerical = (sol_pert.va - sol_base.va) / delta
         df_dd_numerical = (sol_pert.f - sol_base.f) / delta
 
         # Compare against analytical (relative error)
@@ -408,17 +408,17 @@ end
 
     dc_net = DCNetwork(n, m, k, A, G_inc, b;
         fmax=[100.0], gmax=[10.0], gmin=[0.0],
-        cl=[10.0], cq=[0.0], ref_bus=1, τ=0.0)
+        cl=[10.0], cq=[0.0], ref_bus=1, tau=0.0)
 
     d = [0.0, 1.0]  # 1 MW load at bus 2
     prob = DCOPFProblem(dc_net, d)
     sol = solve!(prob)
 
     # Verify closed-form solution
-    @test sol.g[1] ≈ 1.0 atol=1e-4  # Generator supplies all demand
-    @test sol.θ[1] ≈ 0.0 atol=1e-4  # Reference bus
+    @test sol.pg[1] ≈ 1.0 atol=1e-4  # Generator supplies all demand
+    @test sol.va[1] ≈ 0.0 atol=1e-4  # Reference bus
     # θ₂ = f / (b*z) = 1/10 = 0.1 (positive because of flow direction convention)
-    @test abs(sol.θ[2]) ≈ 0.1 atol=1e-4
+    @test abs(sol.va[2]) ≈ 0.1 atol=1e-4
     @test abs(sol.f[1]) ≈ 1.0 atol=1e-4  # |Flow| = demand
 
     # LMPs should be equal (no congestion)
@@ -454,7 +454,7 @@ end
         fmax=[0.5, 10.0],  # Line 1→3 constrained at 0.5 MW
         gmax=[10.0, 10.0], gmin=[0.0, 0.0],
         cl=[10.0, 50.0], cq=[0.0, 0.0],  # Gen 1 cheap, Gen 2 expensive
-        ref_bus=1, τ=0.0)
+        ref_bus=1, tau=0.0)
 
     d = [0.0, 0.0, 1.5]  # 1.5 MW load at bus 3
     prob = DCOPFProblem(dc_net, d)
@@ -464,17 +464,17 @@ end
 
     # Cheap gen can only supply 0.5 MW (line constraint)
     # Expensive gen must supply remaining 1.0 MW
-    @test sol.g[1] ≈ 0.5 atol=0.1  # Cheap gen maxed by line constraint
-    @test sol.g[2] ≈ 1.0 atol=0.1  # Expensive gen fills the gap
+    @test sol.pg[1] ≈ 0.5 atol=0.1  # Cheap gen maxed by line constraint
+    @test sol.pg[2] ≈ 1.0 atol=0.1  # Expensive gen fills the gap
 
     # Total generation equals total demand
-    @test abs(sum(sol.g) - sum(d)) < 1e-4
+    @test abs(sum(sol.pg) - sum(d)) < 1e-4
 
     # LMPs should differ due to congestion
     # Bus 3 (load) should have higher LMP than bus 1 (cheap gen)
     @test abs(lmps[3] - lmps[1]) > 1.0  # Significant LMP difference
 
-    @info "3-bus congested results:" lmps=lmps gen=sol.g flows=sol.f
+    @info "3-bus congested results:" lmps=lmps gen=sol.pg flows=sol.f
 end
 
 @testset "LMP Decomposition" begin
@@ -547,7 +547,7 @@ end
     cl_base = [10.0]
     dc_net = DCNetwork(n, m, k, A, G_inc, b;
         fmax=[100.0], gmax=[10.0], gmin=[0.0],
-        cl=cl_base, cq=[1.0], ref_bus=1, τ=0.01)  # Small τ for stability
+        cl=cl_base, cq=[1.0], ref_bus=1, tau=0.01)  # Small τ for stability
 
     d = [0.0, 1.0]
     prob = DCOPFProblem(dc_net, d)
@@ -561,12 +561,12 @@ end
 
     dc_net_pert = DCNetwork(n, m, k, A, G_inc, b;
         fmax=[100.0], gmax=[10.0], gmin=[0.0],
-        cl=cl_pert, cq=[1.0], ref_bus=1, τ=0.01)
+        cl=cl_pert, cq=[1.0], ref_bus=1, tau=0.01)
     prob_pert = DCOPFProblem(dc_net_pert, d)
     sol_pert = solve!(prob_pert)
 
     # Numerical derivative
-    dg_dcl_numerical = (sol_pert.g - sol_base.g) / delta
+    dg_dcl_numerical = (sol_pert.pg - sol_base.pg) / delta
 
     # Compare (single generator case)
     if norm(dg_dcl_numerical) > 1e-10
@@ -670,10 +670,10 @@ end
         prob = DCOPFProblem(dc_net, d)
         sol = solve!(prob)
 
-        @test all(isfinite, sol.θ)
-        @test all(isfinite, sol.g)
+        @test all(isfinite, sol.va)
+        @test all(isfinite, sol.pg)
         @test all(isfinite, sol.f)
-        @test abs(sum(sol.g) - sum(d)) < 1e-4  # Power balance
+        @test abs(sum(sol.pg) - sum(d)) < 1e-4  # Power balance
 
         # Sensitivities should all be finite
         for (op, param) in [(:va, :d), (:pg, :d), (:f, :d), (:lmp, :d),
@@ -730,10 +730,10 @@ end
 
         @test maximum(abs.(sol.psh)) < 1e-6  # no shedding
 
-        g_bus = dc_net.G_inc * sol.g
+        g_bus = dc_net.G_inc * sol.pg
         pf = DCPowerFlowState(dc_net, g_bus, d)
 
-        @test isapprox(sol.θ, pf.θ, atol=1e-4)
+        @test isapprox(sol.va, pf.va, atol=1e-4)
     end
 end
 
@@ -753,7 +753,7 @@ end
 
         # Find generators at their upper bound
         for i in 1:dc_net.k
-            if sol.g[i] >= dc_net.gmax[i] - 1e-4
+            if sol.pg[i] >= dc_net.gmax[i] - 1e-4
                 # This generator is at its limit — participation should be near zero
                 participation = maximum(abs.(dg_dd[i, :]))
                 @test participation < 0.05

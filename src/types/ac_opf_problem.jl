@@ -11,7 +11,7 @@
 Solution container for AC OPF problem, storing primal and dual variables.
 
 # Fields
-## Primal Variables
+**Primal Variables**
 - `va`: Voltage angles at each bus (n)
 - `vm`: Voltage magnitudes at each bus (n)
 - `pg`: Active power generation (k)
@@ -19,28 +19,28 @@ Solution container for AC OPF problem, storing primal and dual variables.
 - `p`: Active branch flows Dict{(l,i,j) => Float64}
 - `q`: Reactive branch flows Dict{(l,i,j) => Float64}
 
-## Dual Variables (Equality Constraints)
-- `ν_p_bal`: Active power balance duals (n) - used for LMP
-- `ν_q_bal`: Reactive power balance duals (n)
-- `ν_ref_bus`: Reference bus constraint duals (n_ref, usually 1)
-- `ν_p_fr`, `ν_p_to`: Active flow definition duals (m each)
-- `ν_q_fr`, `ν_q_to`: Reactive flow definition duals (m each)
+**Dual Variables (Equality Constraints)**
+- `nu_p_bal`: Active power balance duals (n) - used for LMP
+- `nu_q_bal`: Reactive power balance duals (n)
+- `nu_ref_bus`: Reference bus constraint duals (n_ref, usually 1)
+- `nu_p_fr`, `nu_p_to`: Active flow definition duals (m each)
+- `nu_q_fr`, `nu_q_to`: Reactive flow definition duals (m each)
 
-## Dual Variables (Inequality Constraints)
-- `λ_thermal_fr`, `λ_thermal_to`: Thermal limit duals (m each)
-- `λ_angle_lb`, `λ_angle_ub`: Angle difference limit duals (m each)
-- `μ_vm_lb`, `μ_vm_ub`: Voltage magnitude bound duals (n each)
-- `ρ_pg_lb`, `ρ_pg_ub`: Active gen bound duals (k each)
-- `ρ_qg_lb`, `ρ_qg_ub`: Reactive gen bound duals (k each)
-- `σ_p_fr_lb`, `σ_p_fr_ub`: From-side active flow bound duals (m each)
-- `σ_q_fr_lb`, `σ_q_fr_ub`: From-side reactive flow bound duals (m each)
-- `σ_p_to_lb`, `σ_p_to_ub`: To-side active flow bound duals (m each)
-- `σ_q_to_lb`, `σ_q_to_ub`: To-side reactive flow bound duals (m each)
+**Dual Variables (Inequality Constraints)**
+- `lam_thermal_fr`, `lam_thermal_to`: Thermal limit duals (m each)
+- `lam_angle_lb`, `lam_angle_ub`: Angle difference limit duals (m each)
+- `mu_vm_lb`, `mu_vm_ub`: Voltage magnitude bound duals (n each)
+- `rho_pg_lb`, `rho_pg_ub`: Active gen bound duals (k each)
+- `rho_qg_lb`, `rho_qg_ub`: Reactive gen bound duals (k each)
+- `sig_p_fr_lb`, `sig_p_fr_ub`: From-side active flow bound duals (m each)
+- `sig_q_fr_lb`, `sig_q_fr_ub`: From-side reactive flow bound duals (m each)
+- `sig_p_to_lb`, `sig_p_to_ub`: To-side active flow bound duals (m each)
+- `sig_q_to_lb`, `sig_q_to_ub`: To-side reactive flow bound duals (m each)
 
-## Objective
+**Objective**
 - `objective`: Optimal objective value
 """
-struct ACOPFSolution <: AbstractOPFSolution
+Base.@kwdef struct ACOPFSolution <: AbstractOPFSolution
     # Primal - voltages
     va::Vector{Float64}
     vm::Vector{Float64}
@@ -54,45 +54,45 @@ struct ACOPFSolution <: AbstractOPFSolution
     q::Dict{Tuple{Int,Int,Int}, Float64}
 
     # Dual - power balance (equality)
-    ν_p_bal::Vector{Float64}
-    ν_q_bal::Vector{Float64}
+    nu_p_bal::Vector{Float64}
+    nu_q_bal::Vector{Float64}
 
     # Dual - reference bus (equality)
-    ν_ref_bus::Vector{Float64}
+    nu_ref_bus::Vector{Float64}
 
     # Dual - flow definition equations (equality, used in full-space stationarity)
-    ν_p_fr::Vector{Float64}
-    ν_p_to::Vector{Float64}
-    ν_q_fr::Vector{Float64}
-    ν_q_to::Vector{Float64}
+    nu_p_fr::Vector{Float64}
+    nu_p_to::Vector{Float64}
+    nu_q_fr::Vector{Float64}
+    nu_q_to::Vector{Float64}
 
     # Dual - thermal limits (inequality)
-    λ_thermal_fr::Vector{Float64}
-    λ_thermal_to::Vector{Float64}
+    lam_thermal_fr::Vector{Float64}
+    lam_thermal_to::Vector{Float64}
 
     # Dual - angle difference limits (inequality)
-    λ_angle_lb::Vector{Float64}
-    λ_angle_ub::Vector{Float64}
+    lam_angle_lb::Vector{Float64}
+    lam_angle_ub::Vector{Float64}
 
     # Dual - voltage bounds (inequality)
-    μ_vm_lb::Vector{Float64}
-    μ_vm_ub::Vector{Float64}
+    mu_vm_lb::Vector{Float64}
+    mu_vm_ub::Vector{Float64}
 
     # Dual - generation bounds (inequality)
-    ρ_pg_lb::Vector{Float64}
-    ρ_pg_ub::Vector{Float64}
-    ρ_qg_lb::Vector{Float64}
-    ρ_qg_ub::Vector{Float64}
+    rho_pg_lb::Vector{Float64}
+    rho_pg_ub::Vector{Float64}
+    rho_qg_lb::Vector{Float64}
+    rho_qg_ub::Vector{Float64}
 
     # Dual - flow variable bounds (inequality, reduced-space)
-    σ_p_fr_lb::Vector{Float64}
-    σ_p_fr_ub::Vector{Float64}
-    σ_q_fr_lb::Vector{Float64}
-    σ_q_fr_ub::Vector{Float64}
-    σ_p_to_lb::Vector{Float64}
-    σ_p_to_ub::Vector{Float64}
-    σ_q_to_lb::Vector{Float64}
-    σ_q_to_ub::Vector{Float64}
+    sig_p_fr_lb::Vector{Float64}
+    sig_p_fr_ub::Vector{Float64}
+    sig_q_fr_lb::Vector{Float64}
+    sig_q_fr_ub::Vector{Float64}
+    sig_p_to_lb::Vector{Float64}
+    sig_p_to_ub::Vector{Float64}
+    sig_q_to_lb::Vector{Float64}
+    sig_q_to_ub::Vector{Float64}
 
     # Objective
     objective::Float64

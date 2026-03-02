@@ -29,7 +29,7 @@ using Test
 
         # Test construction
         pf_state = DCPowerFlowState(net, demand)
-        @test length(pf_state.θ) == net.n
+        @test length(pf_state.va) == net.n
         @test length(pf_state.f) == net.m
         @test pf_state.p == -demand  # Since g = 0
 
@@ -37,7 +37,7 @@ using Test
         g = zeros(net.n)
         g[1] = sum(demand)  # All generation at bus 1
         pf_state2 = DCPowerFlowState(net, g, demand)
-        @test pf_state2.g == g
+        @test pf_state2.pg == g
         @test pf_state2.d == demand
         @test pf_state2.p == g - demand
     end
@@ -182,6 +182,77 @@ using Test
         # Sensitivities should be real and finite
         @test all(isfinite, Matrix(dvm_dp))
         @test all(isfinite, Matrix(dvm_dq))
+    end
+
+    @testset "Symbol Introspection" begin
+        net = DCNetwork(net_data)
+        demand = calc_demand_vector(net_data)
+
+        pf_state = DCPowerFlowState(net, demand)
+        @test operand_symbols(pf_state) == [:va, :f]
+        @test parameter_symbols(pf_state) == [:d, :sw]
+
+        prob = DCOPFProblem(net, demand)
+        @test operand_symbols(prob) == [:va, :pg, :f, :psh, :lmp]
+        @test parameter_symbols(prob) == [:d, :sw, :cq, :cl, :fmax, :b]
+
+        PowerModels.compute_ac_pf!(net_data)
+        ac_state = ACPowerFlowState(net_data)
+        @test operand_symbols(ac_state) == [:vm, :v, :im]
+        @test parameter_symbols(ac_state) == [:p, :q]
+
+        ac_prob = ACOPFProblem(net_data)
+        @test operand_symbols(ac_prob) == [:vm, :va, :pg, :qg]
+        @test parameter_symbols(ac_prob) == [:sw]
+    end
+
+    @testset "Base.show Methods" begin
+        net = DCNetwork(net_data)
+        demand = calc_demand_vector(net_data)
+        pf_state = DCPowerFlowState(net, demand)
+        prob = DCOPFProblem(net, demand)
+        sol = solve!(prob)
+
+        # One-line show
+        @test sprint(show, net) isa String
+        @test sprint(show, pf_state) isa String
+        @test sprint(show, prob) isa String
+        @test sprint(show, sol) isa String
+
+        # Multi-line show (MIME"text/plain")
+        @test sprint(show, MIME("text/plain"), net) isa String
+        @test sprint(show, MIME("text/plain"), pf_state) isa String
+        @test sprint(show, MIME("text/plain"), prob) isa String
+        @test sprint(show, MIME("text/plain"), sol) isa String
+    end
+
+    @testset "Property Aliases" begin
+        net = DCNetwork(net_data)
+        demand = calc_demand_vector(net_data)
+
+        # DCNetwork aliases
+        @test net.τ === net.tau
+        @test net.Δθ_max === net.angmax
+        @test net.Δθ_min === net.angmin
+
+        # DCPowerFlowState aliases
+        pf_state = DCPowerFlowState(net, demand)
+        @test pf_state.θ === pf_state.va
+        @test pf_state.g === pf_state.pg
+
+        # DCOPFSolution aliases
+        prob = DCOPFProblem(net, demand)
+        sol = solve!(prob)
+        @test sol.θ === sol.va
+        @test sol.g === sol.pg
+        @test sol.ν_bal === sol.nu_bal
+        @test sol.λ_ub === sol.lam_ub
+        @test sol.ρ_ub === sol.rho_ub
+        @test sol.μ_lb === sol.mu_lb
+
+        # DCOPFProblem aliases
+        @test prob.θ === prob.va
+        @test prob.g === prob.pg
     end
 
     @testset "Sensitivity Metadata" begin
