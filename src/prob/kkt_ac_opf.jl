@@ -666,6 +666,7 @@ function _get_ac_dz_dsw!(prob::ACOPFProblem)::Matrix{Float64}
         catch e
             if e isa LinearAlgebra.SingularException
                 ε = 1e-10
+                @warn "AC KKT Jacobian is singular; applying Tikhonov perturbation ($ε)"
                 -((J_z + ε * I) \ J_sw)
             else
                 rethrow(e)

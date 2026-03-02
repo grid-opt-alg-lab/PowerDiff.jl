@@ -5,7 +5,6 @@
 # PowerModelsDiff.jl
 
 [![CI](https://github.com/grid-opt-alg-lab/PowerModelsDiff.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/grid-opt-alg-lab/PowerModelsDiff.jl/actions/workflows/CI.yml)
-[![Docs](https://img.shields.io/badge/docs-stable-blue.svg)](https://grid-opt-alg-lab.github.io/PowerModelsDiff.jl/stable/)
 [![Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://grid-opt-alg-lab.github.io/PowerModelsDiff.jl/dev/)
 
 A Julia package for differentiable power system analysis. Compute sensitivities of power flow solutions, optimal power flow dispatch, and locational marginal prices with respect to network parameters.
@@ -24,7 +23,7 @@ A Julia package for differentiable power system analysis. Compute sensitivities 
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerModelsDiff.jl")
+Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerModelsDiff.jl.git")
 ```
 
 ## Quick Start

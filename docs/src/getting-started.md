@@ -77,8 +77,8 @@ DC OPF supports sensitivities for all five operands (`:va`, `:pg`, `:f`, `:psh`,
 
 ```julia
 dlmp_dd  = calc_sensitivity(prob, :lmp, :d)    # dLMP/dd (n x n)
-dpg_dd   = calc_sensitivity(prob, :pg, :d)     # dg/dd (k x n)
-dpg_dcq  = calc_sensitivity(prob, :pg, :cq)    # dg/dcq (k x k)
+dpg_dd   = calc_sensitivity(prob, :pg, :d)     # dpg/dd (k x n)
+dpg_dcq  = calc_sensitivity(prob, :pg, :cq)    # dpg/dcq (k x k)
 dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)   # dLMP/dsw (n x m)
 df_dfmax = calc_sensitivity(prob, :f, :fmax)   # df/dfmax (m x m)
 dpsh_dd  = calc_sensitivity(prob, :psh, :d)    # dpsh/dd (n x n)

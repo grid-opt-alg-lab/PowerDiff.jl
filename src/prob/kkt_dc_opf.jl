@@ -192,9 +192,9 @@ end
 Compute the dimension of the flattened KKT variable vector.
 
 The KKT system includes:
-- Primal: θ (n), g (k), f (m), psh (n)
-- Dual (inequality): λ_lb (m), λ_ub (m), ρ_lb (k), ρ_ub (k), μ_lb (n), μ_ub (n)
-- Dual (equality): ν_bal (n), ν_flow (m)
+- Primal: va (n), pg (k), f (m), psh (n)
+- Dual (inequality): lam_lb (m), lam_ub (m), rho_lb (k), rho_ub (k), mu_lb (n), mu_ub (n)
+- Dual (equality): nu_bal (n), nu_flow (m)
 - Reference bus constraint: 1
 
 Total: 5n + 4m + 3k + 1
@@ -203,7 +203,7 @@ kkt_dims(prob::DCOPFProblem) = kkt_dims(prob.network)
 
 function kkt_dims(net::DCNetwork)
     n, m, k = net.n, net.m, net.k
-    # θ(n) + g(k) + f(m) + psh(n) + λ_lb(m) + λ_ub(m) + ρ_lb(k) + ρ_ub(k) + μ_lb(n) + μ_ub(n) + ν_bal(n) + ν_flow(m) + ref(1)
+    # va(n) + pg(k) + f(m) + psh(n) + lam_lb(m) + lam_ub(m) + rho_lb(k) + rho_ub(k) + mu_lb(n) + mu_ub(n) + nu_bal(n) + nu_flow(m) + ref(1)
     return 5n + 4m + 3k + 1
 end
 
@@ -214,7 +214,7 @@ Compute all KKT variable indices from network dimensions.
 Single source of truth for index calculations.
 
 # Variable ordering
-[θ(n), g(k), f(m), psh(n), λ_lb(m), λ_ub(m), ρ_lb(k), ρ_ub(k), μ_lb(n), μ_ub(n), ν_bal(n), ν_flow(m), η_ref(1)]
+[va(n), pg(k), f(m), psh(n), lam_lb(m), lam_ub(m), rho_lb(k), rho_ub(k), mu_lb(n), mu_ub(n), nu_bal(n), nu_flow(m), eta(1)]
 
 # Returns
 NamedTuple with index ranges for each variable block.
@@ -257,9 +257,9 @@ kkt_indices(prob::DCOPFProblem) = kkt_indices(prob.network)
 Flatten solution primal and dual variables into a single vector for KKT evaluation.
 
 # Variable ordering
-[θ; g; f; psh; λ_lb; λ_ub; ρ_lb; ρ_ub; μ_lb; μ_ub; ν_bal; ν_flow; η_ref]
+[va; pg; f; psh; lam_lb; lam_ub; rho_lb; rho_ub; mu_lb; mu_ub; nu_bal; nu_flow; eta]
 
-where η_ref is the dual for the reference bus constraint (set to 0).
+where eta is the dual for the reference bus constraint (set to 0).
 """
 function flatten_variables(sol::DCOPFSolution, prob::DCOPFProblem)
     # Reference bus dual (typically not needed, set to 0)
@@ -288,7 +288,7 @@ end
 Unflatten KKT variable vector into named components.
 
 # Returns
-NamedTuple with fields: θ, g, f, psh, λ_lb, λ_ub, ρ_lb, ρ_ub, μ_lb, μ_ub, ν_bal, ν_flow, η_ref
+NamedTuple with fields: va, pg, f, psh, lam_lb, lam_ub, rho_lb, rho_ub, mu_lb, mu_ub, nu_bal, nu_flow, eta
 """
 function unflatten_variables(z::AbstractVector, prob::DCOPFProblem)
     return unflatten_variables(z, prob.network)

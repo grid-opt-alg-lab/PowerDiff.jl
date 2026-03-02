@@ -3,23 +3,53 @@
 # =============================================================================
 
 # =============================================================================
-# Property aliases: .g → .pg (mirrors :g → :pg alias in sensitivity API)
+# Property aliases: Unicode → ASCII (backward compatibility after field rename)
 # =============================================================================
 
-function Base.getproperty(state::DCPowerFlowState, s::Symbol)
-    s === :g && return getfield(state, :pg)
-    return getfield(state, s)
+function _alias_getproperty(obj, aliases::Dict{Symbol,Symbol}, s::Symbol)
+    s = get(aliases, s, s)
+    return getfield(obj, s)
 end
 
-function Base.getproperty(sol::DCOPFSolution, s::Symbol)
-    s === :g && return getfield(sol, :pg)
-    return getfield(sol, s)
-end
+const _DC_NETWORK_ALIASES = Dict{Symbol,Symbol}(
+    :Δθ_max => :angmax, :Δθ_min => :angmin, :τ => :tau,
+)
 
-function Base.getproperty(prob::DCOPFProblem, s::Symbol)
-    s === :g && return getfield(prob, :pg)
-    return getfield(prob, s)
-end
+const _DC_PF_STATE_ALIASES = Dict{Symbol,Symbol}(
+    :θ => :va, :g => :pg,
+)
+
+const _DC_OPF_SOLUTION_ALIASES = Dict{Symbol,Symbol}(
+    :θ => :va, :g => :pg,
+    :ν_bal => :nu_bal, :ν_flow => :nu_flow,
+    :λ_ub => :lam_ub, :λ_lb => :lam_lb,
+    :ρ_ub => :rho_ub, :ρ_lb => :rho_lb,
+    :μ_lb => :mu_lb, :μ_ub => :mu_ub,
+)
+
+const _DC_OPF_PROBLEM_ALIASES = Dict{Symbol,Symbol}(
+    :θ => :va, :g => :pg,
+)
+
+const _AC_OPF_SOLUTION_ALIASES = Dict{Symbol,Symbol}(
+    :ν_p_bal => :nu_p_bal, :ν_q_bal => :nu_q_bal, :ν_ref_bus => :nu_ref_bus,
+    :ν_p_fr => :nu_p_fr, :ν_p_to => :nu_p_to, :ν_q_fr => :nu_q_fr, :ν_q_to => :nu_q_to,
+    :λ_thermal_fr => :lam_thermal_fr, :λ_thermal_to => :lam_thermal_to,
+    :λ_angle_lb => :lam_angle_lb, :λ_angle_ub => :lam_angle_ub,
+    :μ_vm_lb => :mu_vm_lb, :μ_vm_ub => :mu_vm_ub,
+    :ρ_pg_lb => :rho_pg_lb, :ρ_pg_ub => :rho_pg_ub,
+    :ρ_qg_lb => :rho_qg_lb, :ρ_qg_ub => :rho_qg_ub,
+    :σ_p_fr_lb => :sig_p_fr_lb, :σ_p_fr_ub => :sig_p_fr_ub,
+    :σ_q_fr_lb => :sig_q_fr_lb, :σ_q_fr_ub => :sig_q_fr_ub,
+    :σ_p_to_lb => :sig_p_to_lb, :σ_p_to_ub => :sig_p_to_ub,
+    :σ_q_to_lb => :sig_q_to_lb, :σ_q_to_ub => :sig_q_to_ub,
+)
+
+Base.getproperty(net::DCNetwork, s::Symbol) = _alias_getproperty(net, _DC_NETWORK_ALIASES, s)
+Base.getproperty(state::DCPowerFlowState, s::Symbol) = _alias_getproperty(state, _DC_PF_STATE_ALIASES, s)
+Base.getproperty(sol::DCOPFSolution, s::Symbol) = _alias_getproperty(sol, _DC_OPF_SOLUTION_ALIASES, s)
+Base.getproperty(prob::DCOPFProblem, s::Symbol) = _alias_getproperty(prob, _DC_OPF_PROBLEM_ALIASES, s)
+Base.getproperty(sol::ACOPFSolution, s::Symbol) = _alias_getproperty(sol, _AC_OPF_SOLUTION_ALIASES, s)
 
 # =============================================================================
 # DCNetwork
@@ -201,8 +231,9 @@ function _problem_status_str(model::JuMP.Model)
     try
         status = JuMP.termination_status(model)
         return string(status)
-    catch
-        return "not solved"
+    catch e
+        e isa ErrorException && return "not solved"
+        rethrow(e)
     end
 end
 
