@@ -34,13 +34,28 @@ Matrix(sens)              # raw matrix
 sens * ones(size(sens,2)) # matrix-vector product</code></pre><h2 id="AC-Power-Flow"><a class="docs-heading-anchor" href="#AC-Power-Flow">AC Power Flow</a><a id="AC-Power-Flow-1"></a><a class="docs-heading-anchor-permalink" href="#AC-Power-Flow" title="Permalink"></a></h2><p>AC power flow sensitivities require a solved AC power flow solution.</p><pre><code class="language-julia hljs">PowerModels.compute_ac_pf!(net)
 ac_state = ACPowerFlowState(net)
 
+# Voltage and current sensitivities
 dvm_dp = calc_sensitivity(ac_state, :vm, :p)   # d|V|/dp (n x n)
 dvm_dq = calc_sensitivity(ac_state, :vm, :q)   # d|V|/dq (n x n)
 dv_dp  = calc_sensitivity(ac_state, :v, :p)    # dV/dp (ComplexF64, n x n)
-dim_dp = calc_sensitivity(ac_state, :im, :p)   # d|I|/dp (m x n)</code></pre><h2 id="AC-OPF"><a class="docs-heading-anchor" href="#AC-OPF">AC OPF</a><a id="AC-OPF-1"></a><a class="docs-heading-anchor-permalink" href="#AC-OPF" title="Permalink"></a></h2><p>AC OPF computes switching sensitivities via implicit differentiation of the full nonlinear KKT system.</p><pre><code class="language-julia hljs">ac_prob = ACOPFProblem(net)
+dim_dp = calc_sensitivity(ac_state, :im, :p)   # d|I|/dp (m x n)
+
+# Voltage angle and branch flow sensitivities
+dva_dp = calc_sensitivity(ac_state, :va, :p)   # dθ/dp (n x n)
+df_dp  = calc_sensitivity(ac_state, :f, :p)    # dP_flow/dp (m x n)
+
+# Demand sensitivities (∂/∂d = -∂/∂p since p_net = pg - pd)
+dvm_dd = calc_sensitivity(ac_state, :vm, :d)   # d|V|/dd (n x n)</code></pre><h3 id="Power-Flow-Jacobian"><a class="docs-heading-anchor" href="#Power-Flow-Jacobian">Power Flow Jacobian</a><a id="Power-Flow-Jacobian-1"></a><a class="docs-heading-anchor-permalink" href="#Power-Flow-Jacobian" title="Permalink"></a></h3><p>The 4 standard Jacobian blocks are available as sensitivity combinations:</p><pre><code class="language-julia hljs">J1 = calc_sensitivity(ac_state, :p, :va)   # ∂P/∂θ  (n x n)
+J2 = calc_sensitivity(ac_state, :p, :vm)   # ∂P/∂|V| (n x n)
+J3 = calc_sensitivity(ac_state, :q, :va)   # ∂Q/∂θ  (n x n)
+J4 = calc_sensitivity(ac_state, :q, :vm)   # ∂Q/∂|V| (n x n)</code></pre><p>Or compute all 4 at once:</p><pre><code class="language-julia hljs">jac = calc_power_flow_jacobian(ac_state)
+jac.dp_dva   # J1
+jac.dp_dvm   # J2
+jac.dq_dva   # J3
+jac.dq_dvm   # J4</code></pre><h2 id="AC-OPF"><a class="docs-heading-anchor" href="#AC-OPF">AC OPF</a><a id="AC-OPF-1"></a><a class="docs-heading-anchor-permalink" href="#AC-OPF" title="Permalink"></a></h2><p>AC OPF computes switching sensitivities via implicit differentiation of the full nonlinear KKT system.</p><pre><code class="language-julia hljs">ac_prob = ACOPFProblem(net)
 solve!(ac_prob)
 
 dvm_dsw = calc_sensitivity(ac_prob, :vm, :sw)   # d|V|/dsw (n x m)
 dva_dsw = calc_sensitivity(ac_prob, :va, :sw)   # dva/dsw (n x m)
 dpg_dsw = calc_sensitivity(ac_prob, :pg, :sw)   # dpg/dsw (k x m)
-dqg_dsw = calc_sensitivity(ac_prob, :qg, :sw)   # dqg/dsw (k x m)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../sensitivity-api/">Sensitivity API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Wednesday 4 March 2026 20:47">Wednesday 4 March 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+dqg_dsw = calc_sensitivity(ac_prob, :qg, :sw)   # dqg/dsw (k x m)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../sensitivity-api/">Sensitivity API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Wednesday 4 March 2026 22:26">Wednesday 4 March 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
