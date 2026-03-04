@@ -54,16 +54,21 @@ struct IDMapping
 
     function IDMapping(bus_ids, branch_ids, gen_ids, load_ids, shunt_ids,
                        bus_to_idx, branch_to_idx, gen_to_idx, load_to_idx, shunt_to_idx)
-        @assert issorted(bus_ids) "bus_ids must be sorted"
-        @assert issorted(branch_ids) "branch_ids must be sorted"
-        @assert issorted(gen_ids) "gen_ids must be sorted"
-        @assert issorted(load_ids) "load_ids must be sorted"
-        @assert issorted(shunt_ids) "shunt_ids must be sorted"
-        @assert length(bus_ids) == length(bus_to_idx)
-        @assert length(branch_ids) == length(branch_to_idx)
-        @assert length(gen_ids) == length(gen_to_idx)
-        @assert length(load_ids) == length(load_to_idx)
-        @assert length(shunt_ids) == length(shunt_to_idx)
+        issorted(bus_ids) || throw(ArgumentError("bus_ids must be sorted"))
+        issorted(branch_ids) || throw(ArgumentError("branch_ids must be sorted"))
+        issorted(gen_ids) || throw(ArgumentError("gen_ids must be sorted"))
+        issorted(load_ids) || throw(ArgumentError("load_ids must be sorted"))
+        issorted(shunt_ids) || throw(ArgumentError("shunt_ids must be sorted"))
+        length(bus_ids) == length(bus_to_idx) || throw(ArgumentError(
+            "bus_ids length ($(length(bus_ids))) must match bus_to_idx length ($(length(bus_to_idx)))"))
+        length(branch_ids) == length(branch_to_idx) || throw(ArgumentError(
+            "branch_ids length ($(length(branch_ids))) must match branch_to_idx length ($(length(branch_to_idx)))"))
+        length(gen_ids) == length(gen_to_idx) || throw(ArgumentError(
+            "gen_ids length ($(length(gen_ids))) must match gen_to_idx length ($(length(gen_to_idx)))"))
+        length(load_ids) == length(load_to_idx) || throw(ArgumentError(
+            "load_ids length ($(length(load_ids))) must match load_to_idx length ($(length(load_to_idx)))"))
+        length(shunt_ids) == length(shunt_to_idx) || throw(ArgumentError(
+            "shunt_ids length ($(length(shunt_ids))) must match shunt_to_idx length ($(length(shunt_to_idx)))"))
         new(bus_ids, branch_ids, gen_ids, load_ids, shunt_ids,
             bus_to_idx, branch_to_idx, gen_to_idx, load_to_idx, shunt_to_idx)
     end

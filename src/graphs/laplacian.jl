@@ -48,12 +48,18 @@ end
 
 
 """
+    calc_incidence_matrix(net::Dict; full_nodes=true, full_edges=false)
+
 The full incidence matrix of a PowerModels network.
 Note that every node has a self edge.
 This uses the incidence matrix of the network to only consider edges that exist in the network.
 
+!!! note "Requires basic network"
+    This function calls `PM.calc_basic_incidence_matrix` internally,
+    which requires `net` to be converted with `make_basic_network` first.
+
 Params:
-    net: a PowerModels network
+    net: a PowerModels network (must be basic)
     full_nodes: if true, include the self edges -- append an identity matrix to the incidence matrix
     full_edges: if true, consider all possible edges -- use the full incidence matrix
 """
@@ -117,9 +123,14 @@ function vectorize_laplacian_weights(Y::AbstractMatrix{ComplexF64})
 end
 
 
-# vectorize_laplacian_weights(net::Dict{String,Any}) = vectorize_laplacian_weights(PM.calc_basic_admittance_matrix(net))
 """
+    vectorize_laplacian_weights(net::Dict; full_nodes=true, full_edges=false)
+
 Construct vectorized laplacian weights from a PowerModels data dictionary.
+
+!!! note "Requires basic network"
+    This function calls `PM.calc_basic_admittance_matrix` internally,
+    which requires `net` to be converted with `make_basic_network` first.
 """
 function vectorize_laplacian_weights(
     net::Dict;

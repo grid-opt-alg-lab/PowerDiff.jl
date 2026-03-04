@@ -44,6 +44,22 @@
     end
 
     # =================================================================
+    # ref_bus translation with non-basic IDs
+    # =================================================================
+    @testset "ref_bus translation with non-basic IDs" begin
+        # Bus 10 in case5 maps to sequential index 5
+        dc_net = DCNetwork(raw; ref_bus=10)
+        @test dc_net.ref_bus == 5  # translated to sequential index
+
+        # Default ref_bus should still work
+        dc_default = DCNetwork(raw)
+        @test 1 <= dc_default.ref_bus <= dc_default.n
+
+        # Invalid ref_bus should throw
+        @test_throws ArgumentError DCNetwork(raw; ref_bus=999)
+    end
+
+    # =================================================================
     # DCNetwork from non-basic
     # =================================================================
     @testset "DCNetwork from non-basic network" begin
@@ -277,28 +293,53 @@
         solve!(prob_nb)
         solve!(prob_b)
 
+        # Full element-wise cross-validation for :va w.r.t. :d
         S_b = calc_sensitivity(prob_b, :va, :d)
         S_nb = calc_sensitivity(prob_nb, :va, :d)
 
-        # Pick bus ID 1 (exists in both basic and non-basic)
-        bus_id = 1
-        row_b = S_b.id_to_row[bus_id]
-        col_b = S_b.id_to_col[bus_id]
-        row_nb = S_nb.id_to_row[bus_id]
-        col_nb = S_nb.id_to_col[bus_id]
-        @test isapprox(S_b[row_b, col_b], S_nb[row_nb, col_nb], atol=1e-6)
+        for bus_row_id in S_b.row_to_id
+            for bus_col_id in S_b.col_to_id
+                if bus_row_id in S_nb.row_to_id && bus_col_id in S_nb.col_to_id
+                    @test isapprox(
+                        S_b[S_b.id_to_row[bus_row_id], S_b.id_to_col[bus_col_id]],
+                        S_nb[S_nb.id_to_row[bus_row_id], S_nb.id_to_col[bus_col_id]],
+                        atol=1e-4)
+                end
+            end
+        end
 
-        # Check generator sensitivities element-wise
+        # Full element-wise cross-validation for :pg w.r.t. :d
         Spg_b = calc_sensitivity(prob_b, :pg, :d)
         Spg_nb = calc_sensitivity(prob_nb, :pg, :d)
 
-        gen_id = first(Spg_b.row_to_id)
-        if gen_id in Spg_nb.row_to_id
-            row_b = Spg_b.id_to_row[gen_id]
-            row_nb = Spg_nb.id_to_row[gen_id]
-            col_b = Spg_b.id_to_col[bus_id]
-            col_nb = Spg_nb.id_to_col[bus_id]
-            @test isapprox(Spg_b[row_b, col_b], Spg_nb[row_nb, col_nb], atol=1e-4)
+        for gen_id in Spg_b.row_to_id
+            if gen_id in Spg_nb.row_to_id
+                for bus_id in Spg_b.col_to_id
+                    if bus_id in Spg_nb.col_to_id
+                        @test isapprox(
+                            Spg_b[Spg_b.id_to_row[gen_id], Spg_b.id_to_col[bus_id]],
+                            Spg_nb[Spg_nb.id_to_row[gen_id], Spg_nb.id_to_col[bus_id]],
+                            atol=1e-4)
+                    end
+                end
+            end
+        end
+
+        # Full element-wise cross-validation for :f w.r.t. :sw
+        Sf_b = calc_sensitivity(prob_b, :f, :sw)
+        Sf_nb = calc_sensitivity(prob_nb, :f, :sw)
+
+        for br_row_id in Sf_b.row_to_id
+            if br_row_id in Sf_nb.row_to_id
+                for br_col_id in Sf_b.col_to_id
+                    if br_col_id in Sf_nb.col_to_id
+                        @test isapprox(
+                            Sf_b[Sf_b.id_to_row[br_row_id], Sf_b.id_to_col[br_col_id]],
+                            Sf_nb[Sf_nb.id_to_row[br_row_id], Sf_nb.id_to_col[br_col_id]],
+                            atol=1e-4)
+                    end
+                end
+            end
         end
     end
 

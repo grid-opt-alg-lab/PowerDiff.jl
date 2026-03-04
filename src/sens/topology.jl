@@ -19,6 +19,11 @@
 Compute the linearized sensitivity of bus-voltage magnitudes with respect to
 perturbations in the network topology parameters of a PowerModels-style network.
 
+!!! note "Requires basic network"
+    Unlike the main constructors (DCNetwork, ACNetwork, etc.), this legacy function
+    requires `net` to be converted with `make_basic_network` first. It uses
+    `PM.calc_basic_bus_voltage` and `PM.calc_basic_bus_injection` internally.
+
 The function assumes that `net` has been converted with `make_basic_network`
 and that a steady-state power flow solution is available. If `voltages` is not
 provided, the solved bus voltages are extracted via `PowerModels.calc_basic_bus_voltage`.

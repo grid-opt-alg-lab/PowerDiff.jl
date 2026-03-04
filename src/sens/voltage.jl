@@ -302,5 +302,3 @@ function _insert_slack_zeros(K::Matrix{T}, idx_slack::Int, ::Type{T}) where T
 
     return K_full
 end
-
-# NOTE: ACPowerFlowState(net::Dict) constructor is defined in types/ac_network.jl

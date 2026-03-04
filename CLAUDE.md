@@ -132,7 +132,7 @@ struct IDMapping
     gen_ids::Vector{Int}           # sorted original gen IDs
     load_ids::Vector{Int}          # sorted original load IDs
     bus_to_idx::Dict{Int,Int}      # original ID → sequential index
-    # ... (branch_to_idx, gen_to_idx, load_to_idx)
+    # ... (branch_to_idx, gen_to_idx, load_to_idx, shunt_to_idx)
 end
 ```
 

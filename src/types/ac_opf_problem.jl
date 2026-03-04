@@ -254,7 +254,7 @@ function _remap_element_dict(ref_dict, to_idx::Dict{Int,Int}, bus_to_idx::Dict{I
     seq = Dict{Int, Any}()
     for (orig_id, elem) in ref_dict
         idx = to_idx[orig_id]
-        new_elem = copy(elem)
+        new_elem = deepcopy(elem)
         new_elem["index"] = idx
         for f in bus_fields
             haskey(new_elem, f) && (new_elem[f] = bus_to_idx[new_elem[f]])

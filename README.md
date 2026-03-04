@@ -31,7 +31,8 @@ Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerModelsDiff.jl.git")
 ```julia
 using PowerModelsDiff, PowerModels
 
-net = make_basic_network(parse_file("case14.m"))
+# Load network (make_basic_network is optional)
+net = parse_file("case14.m")
 dc_net = DCNetwork(net)
 d = calc_demand_vector(net)
 
