@@ -608,11 +608,6 @@ end
 # Voltage Topology Sensitivities (existing tests, updated for PowerModels data)
 # =============================================================================
 
-# Note: Voltage Topology Sensitivities tests are temporarily disabled pending
-# investigation of admittance matrix reconstruction issues with standard test cases.
-# The original implementation was tested with a specific case14.m file.
-# TODO: Fix vectorize_laplacian_weights for general MATPOWER cases
-
 # =============================================================================
 # Physics Property Tests
 # =============================================================================

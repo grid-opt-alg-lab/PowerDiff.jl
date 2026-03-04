@@ -154,7 +154,7 @@ Example: `dg_dsw[i,j]` = ∂(generation at generator `dpg.row_to_id[i]`) / ∂(s
 
 ### DC OPF - B-theta Formulation
 
-Uses susceptance-weighted Laplacian `L = A' * Diagonal(-b .* sw) * A`:
+Uses susceptance-weighted Laplacian `B = A' * Diagonal(-b .* sw) * A`:
 
 - `DCNetwork`: Network data (topology `A`, susceptances `b`, switching `sw`, limits, costs, `c_shed`)
 - `DCOPFProblem`: JuMP optimization wrapper with `DCSensitivityCache` for efficient KKT reuse
@@ -214,11 +214,10 @@ src/
 │   ├── current.jl              # AC current sensitivity
 │   └── lmp.jl                  # LMP computation
 ├── pf/                         # Power flow equations
-├── graphs/                     # Incidence matrices, Laplacian utilities
-└── deprecated/                 # Legacy types
+└── graphs/                     # Incidence matrices, Laplacian utilities
 
 test/
-├── runtests.jl                 # Main test runner (~790 lines inline + includes below)
+├── runtests.jl                 # Main test runner (~810 lines inline + includes below)
 ├── common.jl                   # Shared helpers: load_test_case, create_2bus_network, etc.
 ├── test_ac_opf_sens.jl         # AC OPF sensitivity tests
 ├── test_ac_pf_verification.jl  # AC PF finite-difference verification
@@ -230,7 +229,8 @@ test/
 ├── unified/
 │   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
 │   └── test_sensitivity_verification.jl  # ForwardDiff verification
-└── mwe_unified.jl              # Minimum working example (symbol API)
+├── mwe_unified.jl              # Minimum working example (symbol API)
+└── smoke_rts_gmlc.jl           # RTS-GMLC smoke test (manual, not in Pkg.test)
 
 examples/
 └── interactive_repl.jl         # Interactive REPL walkthrough (case14)
@@ -259,7 +259,8 @@ docs/
 
 **Matrix Orientations**
 - Incidence matrix `A` is (m × n): rows are branches, columns are buses
-- B-theta Laplacian: `L = A' * Diagonal(-b .* sw) * A`
+- B-theta Laplacian: `B = A' * Diagonal(-b .* sw) * A`
+- Sign convention: `b` stores Im(1/z) < 0 for inductive branches. The negation `-b > 0` makes `B` positive-semidefinite. This is the **negative** of PowerModels' `calc_susceptance_matrix`.
 
 **Switching Variables**
 - `sw` stores switching states in [0,1]; sw=1 means branch closed, sw=0 means open
@@ -270,7 +271,7 @@ docs/
 - Override: `DCOPFProblem(net, d; optimizer=Ipopt.Optimizer)`
 
 **Testing**
-- `runtests.jl` contains ~790 lines of inline tests plus `include()` calls for 7 additional test files
+- `runtests.jl` contains ~800 lines of inline tests plus `include()` calls for 8 additional test files
 - Tests call `PowerModels.silence()` at startup to suppress solver output
 - `test/common.jl` provides `load_test_case()`, `create_2bus_network()`, `create_3bus_congested_network()` helpers (used by included test files, not by runtests.jl which defines its own `load_test_case`)
 - `test/test_nonbasic.jl` verifies all features work with non-basic networks (case5.m, bus IDs `[1,2,3,4,10]`)

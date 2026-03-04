@@ -15,8 +15,8 @@
 # Locational Marginal Price (LMP) Computation
 #
 # In the B-θ DC OPF formulation, the power balance constraint is:
-#     G_inc * g + psh - d = L * θ
-# where L = A' * Diag(-b .* sw) * A is the susceptance-weighted Laplacian.
+#     G_inc * g + psh - d = B * θ
+# where B = A' * Diag(-b .* sw) * A is the susceptance-weighted Laplacian.
 #
 # The LMP at bus i equals the power balance dual ν_bal[i]. The network topology
 # is embedded in the constraint through L, so ν_bal already incorporates both
@@ -25,7 +25,7 @@
 # LMP Decomposition (for analysis):
 #     LMP = ν_bal = energy_component + congestion_component
 # where:
-#     congestion_component = L_r⁻¹ A_r' Diag(-b .* sw) (λ_ub_std - λ_lb_std)  (non-ref block)
+#     congestion_component = B_r⁻¹ A_r' Diag(-b .* sw) (λ_ub_std - λ_lb_std)  (non-ref block)
 #     energy_component = ν_bal - congestion_component  (uniform for connected network)
 #
 # Sign conventions:
@@ -70,9 +70,9 @@ end
 
 Extract the congestion component of LMPs for analysis.
 
-From KKT conditions: L * ν_bal = A' * W * (λ_ub_std - λ_lb_std)
+From KKT conditions: B * ν_bal = A' * W * (λ_ub_std - λ_lb_std)
 Solving the reduced system (ref bus deleted):
-    congestion[non_ref] = L_r \\ (A' W (λ_ub_std - λ_lb_std))[non_ref]
+    congestion[non_ref] = B_r \\ (A' W (λ_ub_std - λ_lb_std))[non_ref]
 
 The congestion component captures price differentiation due to binding flow constraints,
 with the reference bus congestion component equal to zero.
@@ -83,9 +83,9 @@ Vector (length n) of congestion contributions to each bus's LMP.
 """
 function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork)
     w = -net.b  # positive weights (b < 0 for inductive lines)
-    L = calc_susceptance_matrix(net)
+    B = calc_susceptance_matrix(net)
     non_ref = setdiff(1:net.n, net.ref_bus)
-    L_r = L[non_ref, non_ref]
+    B_r = B[non_ref, non_ref]
 
     # Convert JuMP duals to standard convention: λ_ub_std = -λ_ub_jmp
     λ_ub_std = -sol.lam_ub
@@ -93,7 +93,7 @@ function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork)
     rhs_full = net.A' * Diagonal(w .* net.sw) * (λ_ub_std - λ_lb_std)
 
     result = zeros(net.n)
-    result[non_ref] = L_r \ rhs_full[non_ref]
+    result[non_ref] = B_r \ rhs_full[non_ref]
     return result
 end
 

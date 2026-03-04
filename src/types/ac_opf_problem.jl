@@ -164,7 +164,7 @@ Polar coordinate AC OPF wrapped around a JuMP model.
 - `pg`, `qg`: Variable references for active and reactive generation
 - `p`, `q`: Dict of branch flow variable references (keyed by arc tuple)
 - `cons`: Named tuple of constraint references
-- `ref`: PowerModels-style reference dictionary
+- `ref`: PowerModels-style reference dictionary (sequential keys)
 - `gen_buses`: Generator bus indices (maps generator index to bus index)
 - `n_gen`: Number of generators
 - `cache`: ACSensitivityCache for caching KKT derivatives
@@ -194,16 +194,15 @@ end
 # =============================================================================
 
 """
-    ACOPFProblem(network::ACNetwork, pm_data::Dict; optimizer=Ipopt.Optimizer, silent=true)
+    ACOPFProblem(network::ACNetwork; optimizer=Ipopt.Optimizer, silent=true)
 
-Build a polar AC OPF problem for the given network.
+Build a polar AC OPF problem from an ACNetwork that was constructed from a
+PowerModels dictionary (i.e., `network.ref` must not be nothing).
 
-Uses PowerModels-style data dict for load/gen/branch parameters.
 Accepts both basic and non-basic networks; internally remaps to sequential indices.
 
 # Arguments
-- `network`: ACNetwork containing topology and admittances
-- `pm_data`: PowerModels data dictionary (basic or non-basic)
+- `network`: ACNetwork containing topology, admittances, and stored `ref`
 - `optimizer`: JuMP-compatible optimizer (default: Ipopt)
 - `silent`: Suppress solver output (default: true)
 
@@ -215,8 +214,7 @@ solve!(prob)
 ```
 """
 function ACOPFProblem(
-    network::ACNetwork,
-    pm_data::Dict;
+    network::ACNetwork;
     optimizer=Ipopt.Optimizer,
     silent::Bool=true
 )
@@ -227,16 +225,14 @@ function ACOPFProblem(
         ))
     end
 
-    # Build PowerModels reference structure
-    pm_data = deepcopy(pm_data)
-    PM.standardize_cost_terms!(pm_data, order=2)
-    PM.calc_thermal_limits!(pm_data)
-    ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
+    isnothing(network.ref) && error(
+        "ACOPFProblem requires an ACNetwork constructed from a PowerModels dict " *
+        "(network.ref must not be nothing). Use ACOPFProblem(pm_data::Dict) instead.")
 
     id_map = network.id_map
 
     # Remap ref to sequential keys so JuMP/KKT code can iterate 1:n, 1:m, 1:k
-    seq_ref = _remap_ref_to_sequential(ref, id_map)
+    seq_ref = _remap_ref_to_sequential(network.ref, id_map)
 
     n_gen = length(seq_ref[:gen])
     gen_buses = [seq_ref[:gen][i]["gen_bus"] for i in 1:n_gen]
@@ -252,74 +248,32 @@ function ACOPFProblem(
 end
 
 """
+Remap element dict entries to sequential indices, updating bus ID fields.
+"""
+function _remap_element_dict(ref_dict, to_idx::Dict{Int,Int}, bus_to_idx::Dict{Int,Int}, bus_fields::Vector{String})
+    seq = Dict{Int, Any}()
+    for (orig_id, elem) in ref_dict
+        idx = to_idx[orig_id]
+        new_elem = copy(elem)
+        new_elem["index"] = idx
+        for f in bus_fields
+            haskey(new_elem, f) && (new_elem[f] = bus_to_idx[new_elem[f]])
+        end
+        seq[idx] = new_elem
+    end
+    return seq
+end
+
+"""
 Remap a `build_ref` result to sequential 1-based keys so that the JuMP model
 and KKT code can iterate `for i in 1:n` without change.
-
-Internal bus/branch/gen/load IDs within each dict entry (e.g. `f_bus`, `gen_bus`,
-`load_bus`) are also remapped to sequential indices.
 """
 function _remap_ref_to_sequential(ref::Dict, id_map::IDMapping)
-    n = length(id_map.bus_ids)
-    m = length(id_map.branch_ids)
-    k = length(id_map.gen_ids)
-
-    # Helper: remap bus IDs inside a dict entry
-    function _remap_bus_fields!(d::Dict, fields)
-        for f in fields
-            if haskey(d, f)
-                d[f] = id_map.bus_to_idx[d[f]]
-            end
-        end
-        return d
-    end
-
-    # Remap buses: orig_id → sequential idx
-    seq_bus = Dict{Int, Any}()
-    for (orig_id, bus) in ref[:bus]
-        idx = id_map.bus_to_idx[orig_id]
-        new_bus = copy(bus)
-        new_bus["bus_i"] = idx
-        new_bus["index"] = idx
-        seq_bus[idx] = new_bus
-    end
-
-    # Remap branches
-    seq_branch = Dict{Int, Any}()
-    for (orig_id, br) in ref[:branch]
-        idx = id_map.branch_to_idx[orig_id]
-        new_br = copy(br)
-        new_br["index"] = idx
-        _remap_bus_fields!(new_br, ["f_bus", "t_bus"])
-        seq_branch[idx] = new_br
-    end
-
-    # Remap generators
-    seq_gen = Dict{Int, Any}()
-    for (orig_id, gen) in ref[:gen]
-        idx = id_map.gen_to_idx[orig_id]
-        new_gen = copy(gen)
-        new_gen["index"] = idx
-        _remap_bus_fields!(new_gen, ["gen_bus"])
-        seq_gen[idx] = new_gen
-    end
-
-    # Remap loads
-    seq_load = Dict{Int, Any}()
-    for (orig_id, load) in ref[:load]
-        idx = id_map.load_to_idx[orig_id]
-        new_load = copy(load)
-        new_load["index"] = idx
-        _remap_bus_fields!(new_load, ["load_bus"])
-        seq_load[idx] = new_load
-    end
-
-    # Remap shunts
-    seq_shunt = Dict{Int, Any}()
-    for (orig_id, shunt) in ref[:shunt]
-        new_shunt = copy(shunt)
-        _remap_bus_fields!(new_shunt, ["shunt_bus"])
-        seq_shunt[orig_id] = new_shunt  # shunt IDs don't matter much, keep original
-    end
+    seq_bus = _remap_element_dict(ref[:bus], id_map.bus_to_idx, id_map.bus_to_idx, ["bus_i"])
+    seq_branch = _remap_element_dict(ref[:branch], id_map.branch_to_idx, id_map.bus_to_idx, ["f_bus", "t_bus"])
+    seq_gen = _remap_element_dict(ref[:gen], id_map.gen_to_idx, id_map.bus_to_idx, ["gen_bus"])
+    seq_load = _remap_element_dict(ref[:load], id_map.load_to_idx, id_map.bus_to_idx, ["load_bus"])
+    seq_shunt = _remap_element_dict(ref[:shunt], id_map.shunt_to_idx, id_map.bus_to_idx, ["shunt_bus"])
 
     # Remap arcs: (l, i, j) → (seq_l, seq_i, seq_j)
     function _remap_arc(arc)
@@ -349,7 +303,7 @@ function _remap_ref_to_sequential(ref::Dict, id_map::IDMapping)
 
     seq_bus_shunts = Dict{Int, Vector{Int}}()
     for (orig_bus, shunt_ids) in ref[:bus_shunts]
-        seq_bus_shunts[id_map.bus_to_idx[orig_bus]] = shunt_ids  # keep shunt IDs as-is
+        seq_bus_shunts[id_map.bus_to_idx[orig_bus]] = [id_map.shunt_to_idx[s] for s in shunt_ids]
     end
 
     # Remap ref_buses
@@ -550,5 +504,5 @@ Accepts both basic and non-basic networks.
 """
 function ACOPFProblem(pm_data::Dict; kwargs...)
     network = ACNetwork(pm_data)
-    return ACOPFProblem(network, pm_data; kwargs...)
+    return ACOPFProblem(network; kwargs...)
 end

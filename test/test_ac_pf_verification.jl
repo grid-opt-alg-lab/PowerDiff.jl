@@ -127,7 +127,9 @@ end
     # Use PowerModels' admittance matrix for consistency with the PF solution.
     v_base = PowerModels.calc_basic_bus_voltage(pf_data)
     Y = PowerModels.calc_basic_admittance_matrix(pf_data)
-    slack = PowerModelsDiff._find_slack_bus(pf_data)
+    # Find slack bus from reference bus data
+    pf_ref = PowerModels.build_ref(deepcopy(pf_data))[:it][:pm][:nw][0]
+    slack = first(keys(pf_ref[:ref_buses]))
     n = length(v_base)
     n_branch = length(pf_data["branch"])
 

@@ -17,7 +17,7 @@
 # =============================================================================
 #
 # DC network representation for B-theta OPF formulation with susceptance-weighted
-# Laplacian L = A' * Diag(-b .* sw) * A.
+# Laplacian B = A' * Diag(-b .* sw) * A.
 
 """
     DCNetwork <: AbstractPowerNetwork
@@ -39,6 +39,7 @@ topology sensitivity analysis and integration with RandomizedSwitching tools.
 - `ref_bus`: Reference bus index (phase angle = 0)
 - `tau`: Regularization parameter for strong convexity
 - `id_map`: Bidirectional mapping between original and sequential element IDs
+- `ref`: PowerModels build_ref dictionary (nothing for programmatic constructors)
 """
 struct DCNetwork <: AbstractPowerNetwork
     n::Int
@@ -59,6 +60,7 @@ struct DCNetwork <: AbstractPowerNetwork
     ref_bus::Int
     tau::Float64
     id_map::IDMapping
+    ref::Union{Nothing,Dict}
 end
 
 # =============================================================================
@@ -105,7 +107,7 @@ DC power flow solution (phase angles from reduced-Laplacian solve, no optimizati
 Supports both generation and demand for flexible sensitivity analysis.
 
 Unlike DCOPFSolution, this represents a simple power flow solution
-`θ_r = L_r \\ p_r` where `L_r` is the Laplacian with the reference bus row and
+`θ_r = B_r \\ p_r` where `B_r` is the susceptance matrix with the reference bus row and
 column deleted (invertible for a connected network), without optimal dispatch or
 constraint handling.
 
@@ -116,7 +118,7 @@ constraint handling.
 - `pg`: Generation vector
 - `d`: Demand vector
 - `f`: Branch flows (computed from va)
-- `L_r_factor`: LU factorization of `L[non_ref, non_ref]`
+- `L_r_factor`: LU factorization of `B[non_ref, non_ref]`
 - `non_ref`: Indices of non-reference buses
 """
 struct DCPowerFlowState{F<:Factorization{Float64}} <: AbstractPowerFlowState
@@ -154,6 +156,10 @@ Accepts both basic and non-basic networks. Non-basic networks (with arbitrary
 bus/branch/gen IDs) are automatically translated to sequential indices internally.
 The original IDs are preserved in `id_map` for result interpretation.
 
+The `build_ref` result is stored on the network for reuse by downstream
+constructors (e.g. `DCOPFProblem`, `DCPowerFlowState`), avoiding redundant
+`deepcopy` + `build_ref` calls.
+
 # Example
 ```julia
 raw = PowerModels.parse_file("case14.m")
@@ -164,16 +170,7 @@ dc_net = DCNetwork(net)  # basic also OK
 ```
 """
 function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
-    # Preprocess: standardize costs and compute thermal limits
-    pm_data = deepcopy(net)
-    PM.standardize_cost_terms!(pm_data, order=2)
-    PM.calc_thermal_limits!(pm_data)
-
-    # Build ref structure (works on any network, basic or not)
-    ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
-
-    # Build ID mapping
-    id_map = IDMapping(ref)
+    pm_data, ref, id_map = _prepare_network_data(net)
 
     n = length(id_map.bus_ids)
     m = length(id_map.branch_ids)
@@ -234,12 +231,17 @@ function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,I
         orig_ref = first(keys(ref[:ref_buses]))
         ref_bus = id_map.bus_to_idx[orig_ref]
     else
-        # If user provided an original bus ID, translate it
-        ref_bus = get(id_map.bus_to_idx, ref_bus, ref_bus)
+        # If user provided an original bus ID, translate it; validate the result
+        if haskey(id_map.bus_to_idx, ref_bus)
+            ref_bus = id_map.bus_to_idx[ref_bus]
+        elseif !(1 <= ref_bus <= n)
+            throw(ArgumentError(
+                "ref_bus=$ref_bus is not a valid bus ID ($(id_map.bus_ids)) or index (1:$n)"))
+        end
     end
 
     return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, angmax, angmin,
-                     cq, cl, c_shed, ref_bus, tau, id_map)
+                     cq, cl, c_shed, ref_bus, tau, id_map, ref)
 end
 
 """
@@ -274,26 +276,14 @@ function DCNetwork(
         Float64.(cq), Float64.(cl),
         Float64.(c_shed),
         ref_bus, tau,
-        IDMapping(n, m, k, 0)
+        IDMapping(n, m, k, 0),
+        nothing
     )
 end
 
 # =============================================================================
 # DCNetwork Helper Functions
 # =============================================================================
-
-"""
-Find reference bus from network data (returns original bus ID).
-"""
-function _find_reference_bus(net::Dict)
-    for (_, bus) in net["bus"]
-        if bus["bus_type"] == 3  # Reference bus type in MATPOWER
-            return bus["bus_i"]
-        end
-    end
-    # Default to bus 1 if no reference found
-    return 1
-end
 
 """
     calc_demand_vector(net::Dict)
@@ -305,12 +295,22 @@ uses `PM.build_ref` to resolve load-bus mappings and returns a vector
 in sequential bus order (matching `IDMapping` from `DCNetwork(net)`).
 """
 function calc_demand_vector(net::Dict)
-    pm_data = deepcopy(net)
-    PM.standardize_cost_terms!(pm_data, order=2)
-    PM.calc_thermal_limits!(pm_data)
-    ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
-    id_map = IDMapping(ref)
+    _, ref, id_map = _prepare_network_data(net)
     return _calc_demand_vector(ref, id_map)
+end
+
+"""
+    calc_demand_vector(network::DCNetwork)
+
+Extract demand vector from a DCNetwork that was constructed from a PowerModels dict.
+
+Uses the stored `ref` to avoid redundant `build_ref` calls.
+"""
+function calc_demand_vector(network::DCNetwork)
+    isnothing(network.ref) && error(
+        "DCNetwork was not constructed from a PowerModels dict; cannot extract demand. " *
+        "Provide the demand vector explicitly.")
+    return _calc_demand_vector(network.ref, network.id_map)
 end
 
 """
@@ -331,7 +331,15 @@ end
 """
     calc_susceptance_matrix(network::DCNetwork)
 
-Compute the susceptance matrix B = A' * Diagonal(-b .* sw) * A.
+Compute the susceptance-weighted Laplacian: B = A' * Diagonal(-b .* sw) * A.
+
+Sign convention: `b` stores Im(1/z) which is negative for inductive branches.
+The negation `-b` produces positive edge weights, making B positive semidefinite.
+This is the negative of PowerModels' `calc_susceptance_matrix` (which uses
+the standard bus susceptance matrix convention with negative diagonal).
+
+DC power flow: B * θ = p (net injection).
+Branch flows: f = Diag(-b .* sw) * A * θ.
 """
 function calc_susceptance_matrix(network::DCNetwork)
     W = Diagonal(-network.b .* network.sw)
@@ -355,16 +363,6 @@ function _calc_generation_vector(ref::Dict, id_map::IDMapping)
     return g
 end
 
-# Legacy overload for backward compatibility
-function _calc_generation_vector(net::Dict, n::Int)
-    pm_data = deepcopy(net)
-    PM.standardize_cost_terms!(pm_data, order=2)
-    PM.calc_thermal_limits!(pm_data)
-    ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
-    id_map = IDMapping(ref)
-    return _calc_generation_vector(ref, id_map)
-end
-
 # =============================================================================
 # DCPowerFlowState Constructors
 # =============================================================================
@@ -375,8 +373,8 @@ end
 Solve DC power flow for given generation and demand.
 
 Computes phase angles θ by solving the reduced system:
-    L_r * θ_r = p_r
-where L_r is the susceptance-weighted Laplacian with the reference bus row and
+    B_r * θ_r = p_r
+where B_r is the susceptance-weighted Laplacian with the reference bus row and
 column deleted (invertible for a connected network), and p_r is the net injection
 with the reference entry removed. The reference bus angle is zero by construction.
 
@@ -391,7 +389,7 @@ DCPowerFlowState containing angles, injections, and flows.
 # Example
 ```julia
 net = DCNetwork(pm_data)
-d = calc_demand_vector(pm_data)
+d = calc_demand_vector(net)
 g = zeros(net.n)  # Or specify generation at each bus
 state = DCPowerFlowState(net, g, d)
 ```
@@ -404,12 +402,12 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
     # Net injection
     p = Float64.(g) - Float64.(d)
 
-    # Build reduced Laplacian (delete reference bus row/col) and factorize
-    L = calc_susceptance_matrix(net)
+    # Build reduced susceptance matrix (delete reference bus row/col) and factorize
+    B = calc_susceptance_matrix(net)
     non_ref = setdiff(1:n, net.ref_bus)
-    F = lu(L[non_ref, non_ref])   # sparse LU (UmfpackLU)
+    F = lu(B[non_ref, non_ref])   # sparse LU (UmfpackLU)
 
-    # Solve reduced system: θ[non_ref] = L_r \ p[non_ref], θ[ref] = 0
+    # Solve reduced system: θ[non_ref] = B_r \ p[non_ref], θ[ref] = 0
     θ = zeros(n)
     θ[non_ref] = F \ p[non_ref]
 
@@ -449,14 +447,14 @@ If `g` is not provided, aggregates generation from gen data to buses.
 function DCPowerFlowState(pm_net::Dict; g::Union{Nothing,AbstractVector}=nothing, d::Union{Nothing,AbstractVector}=nothing)
     net = DCNetwork(pm_net)
 
-    # Extract demand if not provided
+    # Extract demand if not provided (reuses stored ref — no extra build_ref)
     if isnothing(d)
-        d = calc_demand_vector(pm_net)
+        d = _calc_demand_vector(net.ref, net.id_map)
     end
 
     # Aggregate generation to buses if not provided
     if isnothing(g)
-        g = _calc_generation_vector(pm_net, net.n)
+        g = _calc_generation_vector(net.ref, net.id_map)
     end
 
     return DCPowerFlowState(net, g, d)

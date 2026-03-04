@@ -111,11 +111,6 @@
         dva_dd_nb = calc_sensitivity(prob_nb, :va, :d)
         dva_dd_b = calc_sensitivity(prob_b, :va, :d)
 
-        # Check metadata
-        @test dva_dd_nb.formulation == :dcopf
-        @test dva_dd_nb.operand == :va
-        @test dva_dd_nb.parameter == :d
-
         # row_to_id should contain original bus IDs for non-basic
         @test 10 in dva_dd_nb.row_to_id  # Bus 10 should be in the mapping
         @test dva_dd_nb.row_to_id == [1, 2, 3, 4, 10]
@@ -249,5 +244,105 @@
             sv_b = sort(svd(S_b).S, rev=true)
             @test isapprox(sv_nb, sv_b, atol=1e-4)
         end
+    end
+
+    # =================================================================
+    # id_to_row / id_to_col round-trip
+    # =================================================================
+    @testset "id_to_row / id_to_col round-trip" begin
+        prob_nb = DCOPFProblem(raw)
+        solve!(prob_nb)
+
+        S = calc_sensitivity(prob_nb, :va, :d)
+        for (i, id) in enumerate(S.row_to_id)
+            @test S.id_to_row[id] == i
+        end
+        for (j, id) in enumerate(S.col_to_id)
+            @test S.id_to_col[id] == j
+        end
+
+        # Also check generator-indexed sensitivity
+        Spg = calc_sensitivity(prob_nb, :pg, :d)
+        for (i, id) in enumerate(Spg.row_to_id)
+            @test Spg.id_to_row[id] == i
+        end
+    end
+
+    # =================================================================
+    # Element-wise cross-validation using ID mappings
+    # =================================================================
+    @testset "Element-wise cross-validation" begin
+        prob_nb = DCOPFProblem(raw)
+        prob_b = DCOPFProblem(basic)
+        solve!(prob_nb)
+        solve!(prob_b)
+
+        S_b = calc_sensitivity(prob_b, :va, :d)
+        S_nb = calc_sensitivity(prob_nb, :va, :d)
+
+        # Pick bus ID 1 (exists in both basic and non-basic)
+        bus_id = 1
+        row_b = S_b.id_to_row[bus_id]
+        col_b = S_b.id_to_col[bus_id]
+        row_nb = S_nb.id_to_row[bus_id]
+        col_nb = S_nb.id_to_col[bus_id]
+        @test isapprox(S_b[row_b, col_b], S_nb[row_nb, col_nb], atol=1e-6)
+
+        # Check generator sensitivities element-wise
+        Spg_b = calc_sensitivity(prob_b, :pg, :d)
+        Spg_nb = calc_sensitivity(prob_nb, :pg, :d)
+
+        gen_id = first(Spg_b.row_to_id)
+        if gen_id in Spg_nb.row_to_id
+            row_b = Spg_b.id_to_row[gen_id]
+            row_nb = Spg_nb.id_to_row[gen_id]
+            col_b = Spg_b.id_to_col[bus_id]
+            col_nb = Spg_nb.id_to_col[bus_id]
+            @test isapprox(Spg_b[row_b, col_b], Spg_nb[row_nb, col_nb], atol=1e-4)
+        end
+    end
+
+    # =================================================================
+    # Stored ref on network types
+    # =================================================================
+    @testset "Stored ref field" begin
+        dc_nb = DCNetwork(raw)
+        @test !isnothing(dc_nb.ref)
+        @test haskey(dc_nb.ref, :bus)
+
+        ac_nb = ACNetwork(raw)
+        @test !isnothing(ac_nb.ref)
+        @test haskey(ac_nb.ref, :bus)
+
+        # Programmatic constructor has ref=nothing
+        n, m, k = 2, 1, 1
+        A = sparse([1.0 -1.0])
+        G_inc = sparse(reshape([1.0, 0.0], 2, 1))
+        b = [-10.0]
+        dc_prog = DCNetwork(n, m, k, A, G_inc, b)
+        @test isnothing(dc_prog.ref)
+    end
+
+    # =================================================================
+    # IDMapping shunt support
+    # =================================================================
+    @testset "IDMapping shunt fields" begin
+        dc_nb = DCNetwork(raw)
+        id_map = dc_nb.id_map
+
+        @test isa(id_map.shunt_ids, Vector{Int})
+        @test isa(id_map.shunt_to_idx, Dict{Int,Int})
+        # shunt_ids should be sorted
+        @test issorted(id_map.shunt_ids)
+    end
+
+    # =================================================================
+    # calc_demand_vector from DCNetwork
+    # =================================================================
+    @testset "calc_demand_vector from DCNetwork" begin
+        dc_nb = DCNetwork(raw)
+        d1 = calc_demand_vector(raw)
+        d2 = calc_demand_vector(dc_nb)
+        @test isapprox(d1, d2, atol=1e-10)
     end
 end

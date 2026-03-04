@@ -52,11 +52,10 @@ NamedTuple with fields:
 
 # Example
 ```julia
-Y = calc_basic_admittance_matrix(net)
-v = calc_basic_bus_voltage(net)
-sens = calc_voltage_power_sensitivities(v, Y)
+state = ACPowerFlowState(pm_net)
+sens = calc_sensitivity(state, :vm, :p)
 # How does voltage at bus 3 change when active power at bus 2 increases?
-dvdp = sens.dvm_dp[3, 2]
+dvdp = sens[3, 2]
 ```
 """
 function calc_voltage_power_sensitivities(
@@ -304,5 +303,4 @@ function _insert_slack_zeros(K::Matrix{T}, idx_slack::Int, ::Type{T}) where T
     return K_full
 end
 
-# NOTE: _find_slack_bus(net::Dict) is defined in types/ac_network.jl
 # NOTE: ACPowerFlowState(net::Dict) constructor is defined in types/ac_network.jl

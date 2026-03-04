@@ -49,12 +49,6 @@ include("graphs/laplacian.jl")
 include("pf/pf_eqns.jl")
 
 # =============================================================================
-# Deprecated types (for backwards compatibility)
-# =============================================================================
-include("deprecated/pf_structs.jl")
-include("deprecated/measurements.jl")
-
-# =============================================================================
 # DC OPF (B-theta formulation) - solving and KKT conditions
 # =============================================================================
 include("prob/dc_opf.jl")
@@ -139,14 +133,11 @@ export admittance_matrix, branch_current, branch_power
 # Graph Utilities
 # -----------------------------------------------------------------------------
 export VectorizedAdmittanceMatrix, vectorize_laplacian_weights
-export laplacian, full_incidence_matrix, calc_incidence_matrix
+export laplacian, complete_incidence_matrix, calc_incidence_matrix
 
 # Power Flow Equations
 export p, q, vm, vm2, pf_eqns
 export p_polar, q_polar
 export branch_flow, p_flow, q_flow
-
-# Deprecated types (kept for backwards compatibility; emit depwarn on construction)
-export NetworkTopology, PowerFlowEquations
 
 end # module PowerModelsDiff

@@ -49,6 +49,7 @@ For switching-aware formulation:
 - `vm_min`, `vm_max`: Voltage magnitude limits per bus
 - `i_max`: Branch current magnitude limits
 - `id_map`: Bidirectional mapping between original and sequential element IDs
+- `ref`: PowerModels build_ref dictionary (nothing for Y-matrix constructors)
 """
 struct ACNetwork <: AbstractPowerNetwork
     # Dimensions
@@ -79,6 +80,9 @@ struct ACNetwork <: AbstractPowerNetwork
 
     # ID mapping
     id_map::IDMapping
+
+    # PowerModels reference (nothing for Y-matrix constructors)
+    ref::Union{Nothing,Dict}
 end
 
 # =============================================================================
@@ -104,7 +108,7 @@ network or from raw voltage/admittance data.
 - `pd`: Real power demand per bus
 - `qg`: Reactive power generation per bus
 - `qd`: Reactive power demand per bus
-- `branch_data`: Branch dictionary with sequential indices (optional, for legacy)
+- `branch_data`: Branch dictionary with sequential indices (required for :im sensitivity)
 - `idx_slack`: Index of the slack (reference) bus
 - `n`: Number of buses
 - `m`: Number of branches
@@ -178,19 +182,16 @@ Accepts both basic and non-basic networks. Non-basic networks (with arbitrary
 bus/branch/gen IDs) are automatically translated to sequential indices internally.
 The original IDs are preserved in `id_map` for result interpretation.
 
+The `build_ref` result is stored on the network for reuse by downstream
+constructors (e.g. `ACOPFProblem`, `ACPowerFlowState`), avoiding redundant
+`deepcopy` + `build_ref` calls.
+
 # Arguments
 - `net`: PowerModels network dictionary (basic or non-basic)
 - `idx_slack`: Slack bus index (if not specified, uses reference bus from data)
 """
 function ACNetwork(net::Dict{String,<:Any}; idx_slack::Union{Nothing,Int}=nothing)
-    # Preprocess
-    pm_data = deepcopy(net)
-    PM.standardize_cost_terms!(pm_data, order=2)
-    PM.calc_thermal_limits!(pm_data)
-
-    # Build ref structure
-    ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
-    id_map = IDMapping(ref)
+    pm_data, ref, id_map = _prepare_network_data(net)
 
     n_bus = length(id_map.bus_ids)
     n_branch = length(id_map.branch_ids)
@@ -227,8 +228,6 @@ function ACNetwork(net::Dict{String,<:Any}; idx_slack::Union{Nothing,Int}=nothin
 
     # Shunt admittances: use PM.calc_admittance_matrix to get the full Y matrix,
     # then extract shunts from diagonal minus branch contributions
-    Y_mat = PM.calc_admittance_matrix(pm_data).matrix
-    # Y_mat is indexed by PM's internal bus ordering; use its idx_to_bus mapping
     am = PM.calc_admittance_matrix(pm_data)
 
     g_shunt = zeros(n_bus)
@@ -278,7 +277,8 @@ function ACNetwork(net::Dict{String,<:Any}; idx_slack::Union{Nothing,Int}=nothin
         sw, is_switchable,
         idx_slack,
         vm_min, vm_max, i_max,
-        id_map
+        id_map,
+        ref
     )
 end
 
@@ -341,20 +341,9 @@ function ACNetwork(Y::AbstractMatrix{<:Complex}; idx_slack::Int=1)
         sw, is_switchable,
         idx_slack,
         vm_min, vm_max, i_max,
-        IDMapping(n, m, 0, 0)
+        IDMapping(n, m, 0, 0),
+        nothing
     )
-end
-
-"""
-Find slack/reference bus from network data (returns original bus ID).
-"""
-function _find_slack_bus(net::Dict)
-    for (key, bus) in net["bus"]
-        if bus["bus_type"] == 3  # Reference bus type in MATPOWER
-            return haskey(bus, "bus_i") ? bus["bus_i"] : parse(Int, key)
-        end
-    end
-    return 1  # Default to bus 1
 end
 
 # =============================================================================
@@ -519,15 +508,10 @@ injection data. Creates an ACNetwork internally for access to edge-level data.
 The network must have a solved power flow.
 """
 function ACPowerFlowState(pm_net::Dict)
-    # Create ACNetwork from the PowerModels data (handles basic/non-basic)
+    # Create ACNetwork from the PowerModels data (handles basic/non-basic, stores ref)
     net = ACNetwork(pm_net)
     id_map = net.id_map
-
-    # Get voltage solution using build_ref + bus voltage data
-    pm_data = deepcopy(pm_net)
-    PM.standardize_cost_terms!(pm_data, order=2)
-    PM.calc_thermal_limits!(pm_data)
-    ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
+    ref = net.ref  # Reuse stored ref — no extra build_ref
 
     n = net.n
     m = net.m

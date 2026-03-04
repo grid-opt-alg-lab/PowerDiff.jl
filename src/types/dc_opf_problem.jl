@@ -61,12 +61,6 @@ mutable struct DCSensitivityCache
     dz_db::Union{Nothing,Matrix{Float64}}
 end
 
-# Deprecation alias
-function SensitivityCache(args...)
-    Base.depwarn("`SensitivityCache` is deprecated, use `DCSensitivityCache` instead.", :SensitivityCache)
-    return DCSensitivityCache(args...)
-end
-
 """
     DCSensitivityCache()
 
@@ -241,6 +235,28 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
 end
 
 """
+    DCOPFProblem(network::DCNetwork; d=nothing, optimizer=Clarabel.Optimizer, silent=true)
+
+Build a B-θ DC OPF problem from a DCNetwork.
+
+If `d` is not provided and the network was constructed from a PowerModels dict,
+demand is extracted from the stored `ref`.
+
+# Example
+```julia
+net = DCNetwork(pm_data)
+prob = DCOPFProblem(net)       # demand extracted from stored ref
+prob = DCOPFProblem(net; d=d)  # explicit demand
+```
+"""
+function DCOPFProblem(network::DCNetwork; d::Union{Nothing,AbstractVector}=nothing, kwargs...)
+    if isnothing(d)
+        d = calc_demand_vector(network)
+    end
+    return DCOPFProblem(network, d; kwargs...)
+end
+
+"""
     DCOPFProblem(net::Dict; d=nothing, kwargs...)
 
 Convenience constructor: build DCOPFProblem directly from PowerModels dict.
@@ -251,7 +267,7 @@ If `d` is not provided, extracts demand from the network data.
 function DCOPFProblem(net::Dict; d::Union{Nothing,AbstractVector}=nothing, tau::Float64=DEFAULT_TAU, kwargs...)
     network = DCNetwork(net; tau=tau)
     if isnothing(d)
-        d = calc_demand_vector(net)
+        d = _calc_demand_vector(network.ref, network.id_map)
     end
     return DCOPFProblem(network, d; kwargs...)
 end

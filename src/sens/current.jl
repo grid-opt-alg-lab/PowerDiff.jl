@@ -54,11 +54,10 @@ NamedTuple with fields:
 
 # Example
 ```julia
-Y = calc_basic_admittance_matrix(net)
-v = calc_basic_bus_voltage(net)
-sens = calc_current_power_sensitivities(v, Y, net["branch"])
+state = ACPowerFlowState(pm_net)
+sens = calc_sensitivity(state, :im, :p)
 # How does current on line 2 change when active power at bus 3 increases?
-dI_dp = sens.dIm_dp[2, 3]
+dI_dp = sens[2, 3]
 ```
 """
 function calc_current_power_sensitivities(

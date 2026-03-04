@@ -121,7 +121,7 @@ using Test
             # Build perturbed problem with sw[e] -= ε baked into JuMP model
             net_pert = ACNetwork(pm_data)
             net_pert.sw[e] -= ε
-            prob_pert = ACOPFProblem(net_pert, pm_data; silent=true)
+            prob_pert = ACOPFProblem(net_pert; silent=true)
             sol_pert = solve!(prob_pert)
 
             fd_dvm = (sol_base.vm - sol_pert.vm) / ε

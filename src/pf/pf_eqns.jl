@@ -116,7 +116,7 @@ Complex branch current flows: I_branch = diag(A*v) * (G + jB)
 
 Note: This uses the full incidence matrix and returns currents for all edges.
 """
-branch_flow(v, G, B) = Diagonal(full_incidence_matrix(length(v)) * v) * (G .+ B .* im)
+branch_flow(v, G, B) = Diagonal(complete_incidence_matrix(length(v)) * v) * (G .+ B .* im)
 
 """
     p_flow(v, G, B)
