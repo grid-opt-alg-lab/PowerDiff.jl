@@ -71,7 +71,7 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 - `:pg` or `:g` - Generator active power (DC OPF, AC OPF)
 - `:psh` - Load shedding (DC OPF)
 - `:qg` - Generator reactive power (AC OPF)
-- `:lmp` - Locational marginal prices (DC OPF)
+- `:lmp` - Locational marginal prices (DC OPF, AC OPF)
 - `:vm` - Voltage magnitude (AC PF, AC OPF)
 - `:im` - Current magnitude (AC PF)
 - `:v` - Complex voltage phasor (AC PF)
@@ -79,11 +79,11 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 - `:q` - Reactive power injection (AC PF, Jacobian block operand)
 
 **Parameter symbols** (what we differentiate w.r.t.):
-- `:d` or `:pd` - Active demand (DC PF, DC OPF; AC PF via transform)
-- `:qd` - Reactive demand (AC PF via transform)
+- `:d` or `:pd` - Active demand (DC PF, DC OPF, AC OPF; AC PF via transform)
+- `:qd` - Reactive demand (AC OPF; AC PF via transform)
 - `:sw` - Switching states
-- `:cq`, `:cl` - Cost coefficients (DC OPF)
-- `:fmax` - Flow limits (DC OPF)
+- `:cq`, `:cl` - Cost coefficients (DC OPF, AC OPF)
+- `:fmax` - Flow limits (DC OPF, AC OPF)
 - `:b` - Susceptances (DC OPF)
 - `:p`, `:q` - Power injections (AC PF)
 - `:va` - Voltage phase angle (AC PF, Jacobian block parameter)
@@ -109,9 +109,12 @@ df_dp  = calc_sensitivity(ac_state, :f, :p)     # .formulation == :acpf, .operan
 J1     = calc_sensitivity(ac_state, :p, :va)    # ∂P/∂θ Jacobian block
 dvm_dd = calc_sensitivity(ac_state, :vm, :d)    # via transform: -∂|V|/∂p
 
-# AC OPF
+# AC OPF (30 combinations: 5 operands × 6 parameters)
 ac_prob = ACOPFProblem(pm_data)
 dvm_dsw = calc_sensitivity(ac_prob, :vm, :sw)    # .formulation == :acopf, .operand == :vm
+dlmp_dd = calc_sensitivity(ac_prob, :lmp, :d)    # .formulation == :acopf, .operand == :lmp
+dpg_dcq = calc_sensitivity(ac_prob, :pg, :cq)    # .formulation == :acopf, .operand == :pg
+dqg_dfmax = calc_sensitivity(ac_prob, :qg, :fmax) # .formulation == :acopf, .operand == :qg
 
 # Invalid combinations throw ArgumentError
 calc_sensitivity(pf_state, :lmp, :d)  # ERROR: no LMP for power flow
@@ -237,6 +240,7 @@ test/
 ├── test_psh.jl                 # Load shedding sensitivity tests
 ├── test_nonbasic.jl            # Non-basic network support (arbitrary element IDs)
 ├── test_jvp_vjp.jl             # JVP/VJP with ID-aware Dict I/O
+├── test_ac_opf_all_sens.jl     # AC OPF all-parameter FD verification (d, qd, cq, cl, fmax)
 ├── unified/
 │   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
 │   └── test_sensitivity_verification.jl  # ForwardDiff verification

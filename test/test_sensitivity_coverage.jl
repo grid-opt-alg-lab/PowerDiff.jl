@@ -176,29 +176,33 @@ using Test
         @test_throws ArgumentError calc_sensitivity(state, :pg, :p)
     end
 
-    @testset "AC OPF — all 4 combinations" begin
+    @testset "AC OPF — all 30 combinations" begin
         prob = ACOPFProblem(net_data; silent=true)
 
-        combos = [
-            (:vm, :sw, (prob.network.n, prob.network.m)),
-            (:va, :sw, (prob.network.n, prob.network.m)),
-            (:pg, :sw, (prob.n_gen, prob.network.m)),
-            (:qg, :sw, (prob.n_gen, prob.network.m)),
-        ]
+        n, m, k = prob.network.n, prob.network.m, prob.n_gen
+        operands = [:va, :vm, :pg, :qg, :lmp]
+        params = [:sw, :d, :qd, :cq, :cl, :fmax]
 
-        for (op, param, expected_size) in combos
-            @testset "$op w.r.t. $param" begin
-                S = calc_sensitivity(prob, op, param)
-                @test S isa Sensitivity
-                @test S.formulation == :acopf
-                @test size(S) == expected_size
-                @test all(isfinite, Matrix(S))
+        op_sizes = Dict(:va => n, :vm => n, :pg => k, :qg => k, :lmp => n)
+        param_sizes = Dict(:sw => m, :d => n, :qd => n, :cq => k, :cl => k, :fmax => m)
+
+        for op in operands
+            for param in params
+                expected_rows = op_sizes[op]
+                expected_cols = param_sizes[param]
+                @testset "$op w.r.t. $param" begin
+                    S = calc_sensitivity(prob, op, param)
+                    @test S isa Sensitivity
+                    @test S.formulation == :acopf
+                    @test size(S) == (expected_rows, expected_cols)
+                    @test all(isfinite, Matrix(S))
+                end
             end
         end
 
         # Invalid combinations
-        @test_throws ArgumentError calc_sensitivity(prob, :lmp, :sw)
         @test_throws ArgumentError calc_sensitivity(prob, :f, :sw)
+        @test_throws ArgumentError calc_sensitivity(prob, :psh, :d)
     end
 
     @testset "Symbol aliases" begin

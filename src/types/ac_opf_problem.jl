@@ -122,13 +122,32 @@ end
 Mutable cache for storing computed AC OPF sensitivity data to avoid redundant
 KKT solves and ForwardDiff Jacobian evaluations.
 
+AC OPF supports 6 parameter types (`:sw`, `:d`, `:qd`, `:cq`, `:cl`, `:fmax`),
+each producing a separate `dz_d*` full-derivative matrix. All share one KKT LU
+factorization (`kkt_factor`), so after the first parameter type is queried the
+factorization is reused for subsequent parameters. Different operand queries
+(e.g. `:va` vs `:pg` vs `:lmp`) for the *same* parameter type all extract
+rows from the same cached `dz_d*` matrix — no recomputation needed.
+
 # Fields
 - `solution`: Cached ACOPFSolution (or nothing if not yet solved)
-- `dz_dsw`: Full ∂z/∂sw derivative matrix w.r.t. switching (or nothing)
+- `kkt_factor`: Cached LU factorization of KKT Jacobian (or nothing)
+- `dz_dsw`: Full KKT derivative w.r.t. switching (or nothing)
+- `dz_dd`: Full KKT derivative w.r.t. active demand (or nothing)
+- `dz_dqd`: Full KKT derivative w.r.t. reactive demand (or nothing)
+- `dz_dcq`: Full KKT derivative w.r.t. quadratic cost (or nothing)
+- `dz_dcl`: Full KKT derivative w.r.t. linear cost (or nothing)
+- `dz_dfmax`: Full KKT derivative w.r.t. flow limits (or nothing)
 """
 mutable struct ACSensitivityCache
     solution::Union{Nothing, ACOPFSolution}
+    kkt_factor::Union{Nothing, LinearAlgebra.LU{Float64, Matrix{Float64}, Vector{Int}}}
     dz_dsw::Union{Nothing, Matrix{Float64}}
+    dz_dd::Union{Nothing, Matrix{Float64}}
+    dz_dqd::Union{Nothing, Matrix{Float64}}
+    dz_dcq::Union{Nothing, Matrix{Float64}}
+    dz_dcl::Union{Nothing, Matrix{Float64}}
+    dz_dfmax::Union{Nothing, Matrix{Float64}}
 end
 
 """
@@ -136,7 +155,7 @@ end
 
 Create an empty AC sensitivity cache with all fields set to nothing.
 """
-ACSensitivityCache() = ACSensitivityCache(nothing, nothing)
+ACSensitivityCache() = ACSensitivityCache(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 
 """
     invalidate!(cache::ACSensitivityCache)
@@ -145,7 +164,13 @@ Clear all cached AC sensitivity data. Called when problem parameters change.
 """
 function invalidate!(cache::ACSensitivityCache)
     cache.solution = nothing
+    cache.kkt_factor = nothing
     cache.dz_dsw = nothing
+    cache.dz_dd = nothing
+    cache.dz_dqd = nothing
+    cache.dz_dcq = nothing
+    cache.dz_dcl = nothing
+    cache.dz_dfmax = nothing
 end
 
 # =============================================================================

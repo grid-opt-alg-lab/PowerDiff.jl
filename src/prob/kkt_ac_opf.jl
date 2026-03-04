@@ -208,7 +208,19 @@ function calc_ac_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothi
 
     z0 = ac_flatten_variables(sol, prob)
     sw = prob.network.sw
-    J = ForwardDiff.jacobian(z -> ac_kkt(z, prob, sw), z0)
+
+    # Pre-extract all parameters so ForwardDiff closure avoids Dict lookups
+    # and temporary allocations on every evaluation.
+    pd0 = _extract_bus_pd(prob)
+    qd0 = _extract_bus_qd(prob)
+    cq0 = _extract_gen_cq(prob)
+    cl0 = _extract_gen_cl(prob)
+    fmax0 = _extract_branch_fmax(prob)
+
+    J = ForwardDiff.jacobian(
+        z -> ac_kkt(z, prob, sw; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0),
+        z0
+    )
 
     return J
 end
@@ -289,7 +301,8 @@ Uses the JuMP/MOI dual sign convention:
     L = f(x) - Σ dual_i * normalized_residual_i
 where normalized_residual = constraint_function - set_value.
 """
-function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw)
+function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw;
+                             pd=nothing, qd=nothing, cq=nothing, cl=nothing, fmax=nothing)
     net = prob.network
     ref = prob.ref
     n, m, k = net.n, net.m, prob.n_gen
@@ -302,15 +315,21 @@ function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw)
     # Compute reduced-space flows
     p_fr, q_fr, p_to, q_to = _compute_branch_flows(va, vm, net, ref, sw)
 
-    # Use widest type from computed flows, which captures both inner (x_primal) and
-    # outer (sw) ForwardDiff dual types in the nested differentiation.
-    T = eltype(p_fr)
+    # Use widest type from computed flows and override vectors, which captures
+    # ForwardDiff dual types in nested differentiation.
+    _et(x) = isnothing(x) ? Float64 : eltype(x)
+    T = promote_type(eltype(p_fr), _et(pd), _et(qd), _et(cq), _et(cl), _et(fmax))
     L = zero(T)
+
+    # Materialize rate_a vector once to avoid repeated isnothing checks
+    rate_a = isnothing(fmax) ? T[ref[:branch][l]["rate_a"] for l in 1:m] : fmax
 
     # ----- Objective -----
     for i in 1:k
-        gen = ref[:gen][i]
-        L += gen["cost"][1] * pg[i]^2 + gen["cost"][2] * pg[i] + gen["cost"][3]
+        cq_i = isnothing(cq) ? ref[:gen][i]["cost"][1] : cq[i]
+        cl_i = isnothing(cl) ? ref[:gen][i]["cost"][2] : cl[i]
+        cc_i = ref[:gen][i]["cost"][3]
+        L += cq_i * pg[i]^2 + cl_i * pg[i] + cc_i
     end
 
     # ----- Power balance (equality): h = 0 -----
@@ -336,16 +355,14 @@ function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw)
     end
 
     for i in 1:n
-        bus_loads = [ref[:load][l] for l in ref[:bus_loads][i]]
-        bus_shunts = [ref[:shunt][s] for s in ref[:bus_shunts][i]]
+        gs = sum(ref[:shunt][s]["gs"] for s in ref[:bus_shunts][i]; init=0.0)
+        bs = sum(ref[:shunt][s]["bs"] for s in ref[:bus_shunts][i]; init=0.0)
 
-        pd = sum(load["pd"] for load in bus_loads; init=0.0)
-        qd = sum(load["qd"] for load in bus_loads; init=0.0)
-        gs = sum(shunt["gs"] for shunt in bus_shunts; init=0.0)
-        bs = sum(shunt["bs"] for shunt in bus_shunts; init=0.0)
+        pd_i = isnothing(pd) ? sum(ref[:load][l]["pd"] for l in ref[:bus_loads][i]; init=0.0) : pd[i]
+        qd_i = isnothing(qd) ? sum(ref[:load][l]["qd"] for l in ref[:bus_loads][i]; init=0.0) : qd[i]
 
-        h_P = p_flow_sum[i] + gs * vm[i]^2 - pg_sum[i] + pd
-        h_Q = q_flow_sum[i] - bs * vm[i]^2 - qg_sum[i] + qd
+        h_P = p_flow_sum[i] + gs * vm[i]^2 - pg_sum[i] + pd_i
+        h_Q = q_flow_sum[i] - bs * vm[i]^2 - qg_sum[i] + qd_i
 
         L -= vars.nu_p_bal[i] * h_P
         L -= vars.nu_q_bal[i] * h_Q
@@ -359,9 +376,8 @@ function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw)
 
     # ----- Thermal limits (inequality): p²+q²-r² ≤ 0 -----
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        L -= vars.lam_thermal_fr[l] * (p_fr[l]^2 + q_fr[l]^2 - rate_a^2)
-        L -= vars.lam_thermal_to[l] * (p_to[l]^2 + q_to[l]^2 - rate_a^2)
+        L -= vars.lam_thermal_fr[l] * (p_fr[l]^2 + q_fr[l]^2 - rate_a[l]^2)
+        L -= vars.lam_thermal_to[l] * (p_to[l]^2 + q_to[l]^2 - rate_a[l]^2)
     end
 
     # ----- Angle difference limits (inequality) -----
@@ -398,15 +414,14 @@ function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw)
     # p_fr >= -rate_a  →  normalized: p_fr - (-rate_a) = p_fr + rate_a
     # p_fr <= rate_a   →  normalized: p_fr - rate_a
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        L -= vars.sig_p_fr_lb[l] * (p_fr[l] + rate_a)
-        L -= vars.sig_p_fr_ub[l] * (p_fr[l] - rate_a)
-        L -= vars.sig_q_fr_lb[l] * (q_fr[l] + rate_a)
-        L -= vars.sig_q_fr_ub[l] * (q_fr[l] - rate_a)
-        L -= vars.sig_p_to_lb[l] * (p_to[l] + rate_a)
-        L -= vars.sig_p_to_ub[l] * (p_to[l] - rate_a)
-        L -= vars.sig_q_to_lb[l] * (q_to[l] + rate_a)
-        L -= vars.sig_q_to_ub[l] * (q_to[l] - rate_a)
+        L -= vars.sig_p_fr_lb[l] * (p_fr[l] + rate_a[l])
+        L -= vars.sig_p_fr_ub[l] * (p_fr[l] - rate_a[l])
+        L -= vars.sig_q_fr_lb[l] * (q_fr[l] + rate_a[l])
+        L -= vars.sig_q_fr_ub[l] * (q_fr[l] - rate_a[l])
+        L -= vars.sig_p_to_lb[l] * (p_to[l] + rate_a[l])
+        L -= vars.sig_p_to_ub[l] * (p_to[l] - rate_a[l])
+        L -= vars.sig_q_to_lb[l] * (q_to[l] + rate_a[l])
+        L -= vars.sig_q_to_ub[l] * (q_to[l] - rate_a[l])
     end
 
     return L
@@ -419,9 +434,12 @@ end
 """
 Power balance residuals.
 """
-function _power_balance_residuals(va, vm, pg, qg, p_fr, q_fr, p_to, q_to, net::ACNetwork, ref, prob::ACOPFProblem)
+function _power_balance_residuals(va, vm, pg, qg, p_fr, q_fr, p_to, q_to,
+                                  net::ACNetwork, ref, prob::ACOPFProblem;
+                                  pd=nothing, qd=nothing)
     n = net.n
-    T = promote_type(eltype(va), eltype(vm), eltype(pg), eltype(p_fr))
+    _et(x) = isnothing(x) ? Float64 : eltype(x)
+    T = promote_type(eltype(va), eltype(vm), eltype(pg), eltype(p_fr), _et(pd), _et(qd))
     K_p_bal = zeros(T, n)
     K_q_bal = zeros(T, n)
 
@@ -448,19 +466,14 @@ function _power_balance_residuals(va, vm, pg, qg, p_fr, q_fr, p_to, q_to, net::A
     end
 
     for i in 1:n
-        bus_loads = [ref[:load][l] for l in ref[:bus_loads][i]]
-        bus_shunts = [ref[:shunt][s] for s in ref[:bus_shunts][i]]
+        gs = sum(ref[:shunt][s]["gs"] for s in ref[:bus_shunts][i]; init=0.0)
+        bs = sum(ref[:shunt][s]["bs"] for s in ref[:bus_shunts][i]; init=0.0)
 
-        pd = sum(load["pd"] for load in bus_loads; init=zero(T))
-        qd = sum(load["qd"] for load in bus_loads; init=zero(T))
-        gs = sum(shunt["gs"] for shunt in bus_shunts; init=zero(T))
-        bs = sum(shunt["bs"] for shunt in bus_shunts; init=zero(T))
+        pd_i = isnothing(pd) ? sum(ref[:load][l]["pd"] for l in ref[:bus_loads][i]; init=0.0) : pd[i]
+        qd_i = isnothing(qd) ? sum(ref[:load][l]["qd"] for l in ref[:bus_loads][i]; init=0.0) : qd[i]
 
-        # P balance: Σ p_flow + gs*vm² = pg - pd
-        K_p_bal[i] = p_flow_sum[i] + gs * vm[i]^2 - pg_sum[i] + pd
-
-        # Q balance: Σ q_flow - bs*vm² = qg - qd
-        K_q_bal[i] = q_flow_sum[i] - bs * vm[i]^2 - qg_sum[i] + qd
+        K_p_bal[i] = p_flow_sum[i] + gs * vm[i]^2 - pg_sum[i] + pd_i
+        K_q_bal[i] = q_flow_sum[i] - bs * vm[i]^2 - qg_sum[i] + qd_i
     end
 
     return K_p_bal, K_q_bal
@@ -485,7 +498,8 @@ Returns a vector of KKT residuals (should be zero at optimum).
 2. Primal feasibility: power balance, reference bus
 3. Complementary slackness for all inequality constraints
 """
-function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
+function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
+                pd=nothing, qd=nothing, cq=nothing, cl=nothing, fmax=nothing)
     vars = ac_unflatten_variables(z, prob)
     net = prob.network
     ref = prob.ref
@@ -494,10 +508,14 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
     va, vm = vars.va, vars.vm
     pg, qg = vars.pg, vars.qg
 
-    T = promote_type(eltype(z), eltype(sw))
+    _et(x) = isnothing(x) ? Float64 : eltype(x)
+    T = promote_type(eltype(z), eltype(sw), _et(pd), _et(qd), _et(cq), _et(cl), _et(fmax))
 
     # Compute branch flows as functions of voltages
     p_fr, q_fr, p_to, q_to = _compute_branch_flows(va, vm, net, ref, sw)
+
+    # Materialize rate_a vector once to avoid repeated isnothing checks
+    rate_a = isnothing(fmax) ? T[ref[:branch][l]["rate_a"] for l in 1:m] : fmax
 
     # Build KKT residual vector
     K = T[]
@@ -507,7 +525,8 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
     # =========================================================================
     x_primal = vcat(va, vm, pg, qg)
     grad = ForwardDiff.gradient(
-        x -> _reduced_lagrangian(x, vars, prob, sw),
+        x -> _reduced_lagrangian(x, vars, prob, sw;
+                                 pd=pd, qd=qd, cq=cq, cl=cl, fmax=fmax),
         x_primal
     )
     # grad = [∂L/∂va; ∂L/∂vm; ∂L/∂pg; ∂L/∂qg]
@@ -518,7 +537,8 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
     # =========================================================================
 
     # Power balance
-    K_p_bal, K_q_bal = _power_balance_residuals(va, vm, pg, qg, p_fr, q_fr, p_to, q_to, net, ref, prob)
+    K_p_bal, K_q_bal = _power_balance_residuals(va, vm, pg, qg, p_fr, q_fr, p_to, q_to,
+                                                 net, ref, prob; pd=pd, qd=qd)
     append!(K, K_p_bal)
     append!(K, K_q_bal)
 
@@ -534,12 +554,10 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
 
     # Thermal limits
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.lam_thermal_fr[l] * (p_fr[l]^2 + q_fr[l]^2 - rate_a^2))
+        push!(K, vars.lam_thermal_fr[l] * (p_fr[l]^2 + q_fr[l]^2 - rate_a[l]^2))
     end
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.lam_thermal_to[l] * (p_to[l]^2 + q_to[l]^2 - rate_a^2))
+        push!(K, vars.lam_thermal_to[l] * (p_to[l]^2 + q_to[l]^2 - rate_a[l]^2))
     end
 
     # Angle difference limits
@@ -580,36 +598,28 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
 
     # Flow variable bounds (reduced-space)
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.sig_p_fr_lb[l] * (p_fr[l] + rate_a))
+        push!(K, vars.sig_p_fr_lb[l] * (p_fr[l] + rate_a[l]))
     end
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.sig_p_fr_ub[l] * (rate_a - p_fr[l]))
+        push!(K, vars.sig_p_fr_ub[l] * (rate_a[l] - p_fr[l]))
     end
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.sig_q_fr_lb[l] * (q_fr[l] + rate_a))
+        push!(K, vars.sig_q_fr_lb[l] * (q_fr[l] + rate_a[l]))
     end
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.sig_q_fr_ub[l] * (rate_a - q_fr[l]))
+        push!(K, vars.sig_q_fr_ub[l] * (rate_a[l] - q_fr[l]))
     end
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.sig_p_to_lb[l] * (p_to[l] + rate_a))
+        push!(K, vars.sig_p_to_lb[l] * (p_to[l] + rate_a[l]))
     end
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.sig_p_to_ub[l] * (rate_a - p_to[l]))
+        push!(K, vars.sig_p_to_ub[l] * (rate_a[l] - p_to[l]))
     end
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.sig_q_to_lb[l] * (q_to[l] + rate_a))
+        push!(K, vars.sig_q_to_lb[l] * (q_to[l] + rate_a[l]))
     end
     for l in 1:m
-        rate_a = ref[:branch][l]["rate_a"]
-        push!(K, vars.sig_q_to_ub[l] * (rate_a - q_to[l]))
+        push!(K, vars.sig_q_to_ub[l] * (rate_a[l] - q_to[l]))
     end
 
     @assert length(K) == ac_kkt_dims(prob) "KKT vector length mismatch: got $(length(K)), expected $(ac_kkt_dims(prob))"
@@ -621,28 +631,108 @@ end
 ac_kkt(z::AbstractVector, prob::ACOPFProblem) = ac_kkt(z, prob, prob.network.sw)
 
 # =============================================================================
-# Switching Sensitivity
+# Parameter Extraction Functions
 # =============================================================================
 
-"""
-    calc_ac_kkt_jacobian_switching(prob::ACOPFProblem, sol::ACOPFSolution)
+"""Extract per-bus aggregated active demand from the problem's ref."""
+function _extract_bus_pd(prob::ACOPFProblem)
+    ref = prob.ref
+    n = prob.network.n
+    pd = zeros(n)
+    for i in 1:n
+        for lid in ref[:bus_loads][i]
+            pd[i] += ref[:load][lid]["pd"]
+        end
+    end
+    return pd
+end
 
-Compute the Jacobian of KKT conditions with respect to switching variables ∂K/∂s.
+"""Extract per-bus aggregated reactive demand from the problem's ref."""
+function _extract_bus_qd(prob::ACOPFProblem)
+    ref = prob.ref
+    n = prob.network.n
+    qd = zeros(n)
+    for i in 1:n
+        for lid in ref[:bus_loads][i]
+            qd[i] += ref[:load][lid]["qd"]
+        end
+    end
+    return qd
+end
 
-Uses ForwardDiff for automatic differentiation, avoiding finite differences.
+"""Extract per-generator quadratic cost coefficients from the problem's ref."""
+function _extract_gen_cq(prob::ACOPFProblem)
+    k = prob.n_gen
+    cq = zeros(k)
+    for i in 1:k
+        cq[i] = prob.ref[:gen][i]["cost"][1]
+    end
+    return cq
+end
 
-# Returns
-Matrix of size (kkt_dims × m).
-"""
-function calc_ac_kkt_jacobian_switching(prob::ACOPFProblem, sol::ACOPFSolution)
-    z0 = ac_flatten_variables(sol, prob)
-    sw = prob.network.sw
-    J_s = ForwardDiff.jacobian(s -> ac_kkt(z0, prob, s), sw)
-    return J_s
+"""Extract per-generator linear cost coefficients from the problem's ref."""
+function _extract_gen_cl(prob::ACOPFProblem)
+    k = prob.n_gen
+    cl = zeros(k)
+    for i in 1:k
+        cl[i] = prob.ref[:gen][i]["cost"][2]
+    end
+    return cl
+end
+
+"""Extract per-branch flow limits (rate_a) from the problem's ref."""
+function _extract_branch_fmax(prob::ACOPFProblem)
+    m = prob.network.m
+    fmax = zeros(m)
+    for l in 1:m
+        fmax[l] = prob.ref[:branch][l]["rate_a"]
+    end
+    return fmax
 end
 
 # =============================================================================
-# Cached Solution and KKT Derivative Access
+# Parameter Jacobian (via ForwardDiff)
+# =============================================================================
+
+# Map parameter symbols to extraction functions
+const _AC_PARAM_EXTRACT = Dict{Symbol, Function}(
+    :sw   => prob -> prob.network.sw,
+    :d    => _extract_bus_pd,
+    :qd   => _extract_bus_qd,
+    :cq   => _extract_gen_cq,
+    :cl   => _extract_gen_cl,
+    :fmax => _extract_branch_fmax,
+)
+
+"""
+    calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol)
+
+Compute ∂K/∂param via ForwardDiff for any supported parameter symbol.
+Returns matrix of size (kkt_dims × param_dims).
+"""
+function calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol)
+    z0 = ac_flatten_variables(sol, prob)
+    sw = prob.network.sw
+    p0 = _AC_PARAM_EXTRACT[param](prob)
+    if param === :sw
+        return ForwardDiff.jacobian(s -> ac_kkt(z0, prob, s), p0)
+    elseif param === :d
+        return ForwardDiff.jacobian(pd -> ac_kkt(z0, prob, sw; pd=pd), p0)
+    elseif param === :qd
+        return ForwardDiff.jacobian(qd -> ac_kkt(z0, prob, sw; qd=qd), p0)
+    elseif param === :cq
+        return ForwardDiff.jacobian(cq -> ac_kkt(z0, prob, sw; cq=cq), p0)
+    elseif param === :cl
+        return ForwardDiff.jacobian(cl -> ac_kkt(z0, prob, sw; cl=cl), p0)
+    elseif param === :fmax
+        return ForwardDiff.jacobian(fmax -> ac_kkt(z0, prob, sw; fmax=fmax), p0)
+    else
+        throw(ArgumentError("Unknown AC OPF parameter: $param"))
+    end
+end
+
+# =============================================================================
+# Cached Solution and KKT Factorization Access
 # =============================================================================
 
 """
@@ -659,60 +749,56 @@ function _ensure_ac_solved!(prob::ACOPFProblem)::ACOPFSolution
 end
 
 """
-    _get_ac_dz_dsw!(prob::ACOPFProblem) → Matrix{Float64}
+    _ensure_ac_kkt_factor!(prob::ACOPFProblem) → LU
 
-Get or compute the full KKT derivative matrix w.r.t. switching.
-Uses cached value if available, otherwise computes and caches.
-
-Uses the implicit function theorem on KKT conditions:
-∂z/∂sw = -(∂K/∂z)⁻¹ · (∂K/∂sw)
+Ensure the KKT Jacobian factorization is computed and cached.
+Returns the LU factorization for efficient repeated solves.
 """
-function _get_ac_dz_dsw!(prob::ACOPFProblem)::Matrix{Float64}
-    if isnothing(prob.cache.dz_dsw)
+function _ensure_ac_kkt_factor!(prob::ACOPFProblem)
+    if isnothing(prob.cache.kkt_factor)
         sol = _ensure_ac_solved!(prob)
-
-        J_z = calc_ac_kkt_jacobian(prob; sol=sol)   # ∂K/∂z
-        J_sw = calc_ac_kkt_jacobian_switching(prob, sol)  # ∂K/∂sw
-
-        # Implicit function theorem: ∂z/∂sw = -(∂K/∂z)⁻¹ · (∂K/∂sw)
-        prob.cache.dz_dsw = try
-            -J_z \ J_sw
+        J_z = calc_ac_kkt_jacobian(prob; sol=sol)
+        prob.cache.kkt_factor = try
+            lu(J_z)
         catch e
             if e isa LinearAlgebra.SingularException
-                ε = 1e-10
-                @warn "AC KKT Jacobian is singular; applying Tikhonov perturbation ($ε)"
-                -((J_z + ε * I) \ J_sw)
+                @warn "AC KKT Jacobian is singular; applying Tikhonov perturbation ($TIKHONOV_EPS)"
+                J_reg = J_z + TIKHONOV_EPS * I
+                lu(J_reg)
             else
                 rethrow(e)
             end
         end
     end
-    return prob.cache.dz_dsw
+    return prob.cache.kkt_factor
 end
 
+# =============================================================================
+# Cached Derivative Computation
+# =============================================================================
+
+# Map parameter symbols to cache field names
+const _AC_CACHE_FIELD = Dict{Symbol, Symbol}(
+    :sw => :dz_dsw, :d => :dz_dd, :qd => :dz_dqd,
+    :cq => :dz_dcq, :cl => :dz_dcl, :fmax => :dz_dfmax,
+)
+
 """
-    calc_sensitivity_switching(prob::ACOPFProblem) → NamedTuple
+    _get_ac_dz_dparam!(prob::ACOPFProblem, param::Symbol) → Matrix{Float64}
 
-Compute sensitivities of AC OPF solution with respect to switching variables.
-
-Uses cached KKT derivatives for efficiency — multiple calls with different
-operands share the same expensive Jacobian computation.
-
-# Returns
-NamedTuple containing Jacobians of solution variables w.r.t. switching:
-- `dvm_dsw`: ∂vm/∂sw (n × m) - voltage magnitudes w.r.t. switching
-- `dva_dsw`: ∂va/∂sw (n × m) - voltage angles w.r.t. switching
-- `dpg_dsw`: ∂pg/∂sw (k × m) - active generation w.r.t. switching
-- `dqg_dsw`: ∂qg/∂sw (k × m) - reactive generation w.r.t. switching
+Get or compute ∂z/∂param = -(∂K/∂z)⁻¹ · (∂K/∂param). Uses shared KKT factorization
+and caches the result for reuse across different operand queries.
 """
-function calc_sensitivity_switching(prob::ACOPFProblem)
-    dz_dsw = _get_ac_dz_dsw!(prob)
-    idx = ac_kkt_indices(prob)
-
-    return (
-        dvm_dsw = dz_dsw[idx.vm, :],
-        dva_dsw = dz_dsw[idx.va, :],
-        dpg_dsw = dz_dsw[idx.pg, :],
-        dqg_dsw = dz_dsw[idx.qg, :],
-    )
+function _get_ac_dz_dparam!(prob::ACOPFProblem, param::Symbol)::Matrix{Float64}
+    field = _AC_CACHE_FIELD[param]
+    cached = getfield(prob.cache, field)
+    if isnothing(cached)
+        kkt_lu = _ensure_ac_kkt_factor!(prob)
+        sol = _ensure_ac_solved!(prob)
+        J_p = calc_ac_kkt_jacobian_param(prob, sol, param)
+        result = -(kkt_lu \ J_p)
+        setfield!(prob.cache, field, result)
+        return result
+    end
+    return cached
 end

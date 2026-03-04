@@ -17,7 +17,7 @@ Operand symbols specify what quantity we differentiate.
 | `:pg` / `:g` | Generator active power | DCOPFProblem, ACOPFProblem |
 | `:psh` | Load shedding | DCOPFProblem |
 | `:qg` | Generator reactive power | ACOPFProblem |
-| `:lmp` | Locational marginal prices | DCOPFProblem |
+| `:lmp` | Locational marginal prices | DCOPFProblem, ACOPFProblem |
 | `:vm` | Voltage magnitude | ACPowerFlowState, ACOPFProblem |
 | `:im` | Current magnitude | ACPowerFlowState |
 | `:v` | Complex voltage phasor | ACPowerFlowState |
@@ -30,11 +30,11 @@ Parameter symbols specify what we differentiate with respect to.
 
 | Symbol | Description | Formulations |
 |--------|-------------|------------|
-| `:d` / `:pd` | Active demand | DCPowerFlowState, DCOPFProblem, ACPowerFlowState (via transform) |
-| `:qd` | Reactive demand | ACPowerFlowState (via transform) |
+| `:d` / `:pd` | Active demand | DCPowerFlowState, DCOPFProblem, ACPowerFlowState (via transform), ACOPFProblem |
+| `:qd` | Reactive demand | ACPowerFlowState (via transform), ACOPFProblem |
 | `:sw` | Switching states | DCPowerFlowState, DCOPFProblem, ACOPFProblem |
-| `:cq`, `:cl` | Cost coefficients (quadratic, linear) | DCOPFProblem |
-| `:fmax` | Flow limits | DCOPFProblem |
+| `:cq`, `:cl` | Cost coefficients (quadratic, linear) | DCOPFProblem, ACOPFProblem |
+| `:fmax` | Flow limits | DCOPFProblem, ACOPFProblem |
 | `:b` | Susceptances | DCOPFProblem |
 | `:p`, `:q` | Power injections (active, reactive) | ACPowerFlowState |
 | `:va` | Voltage phase angle | ACPowerFlowState (Jacobian block parameter) |
@@ -85,14 +85,15 @@ Via `∂/∂d = -∂/∂p` and `∂/∂qd = -∂/∂q` (since `p_net = pg - pd` 
 | `:va` | ✓ | ✓ |
 | `:f` | ✓ | ✓ |
 
-### AC OPF (4 combinations)
+### AC OPF (30 combinations)
 
-| | `:sw` |
-|---|---|
-| `:vm` | ✓ |
-| `:va` | ✓ |
-| `:pg` | ✓ |
-| `:qg` | ✓ |
+| | `:sw` | `:d` | `:qd` | `:cq` | `:cl` | `:fmax` |
+|---|---|---|---|---|---|---|
+| `:va` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `:vm` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `:pg` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `:qg` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `:lmp` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ## Power Flow Jacobian
 

@@ -39,7 +39,7 @@ Invalid combinations throw ArgumentError.
 - `:pg` / `:g`: Generator active power (DC OPF, AC OPF)
 - `:psh`: Load shedding (DC OPF only)
 - `:qg`: Generator reactive power (AC OPF)
-- `:lmp`: Locational marginal prices (DC OPF only)
+- `:lmp`: Locational marginal prices (DC OPF, AC OPF)
 - `:vm`: Voltage magnitude (AC PF, AC OPF)
 - `:im`: Current magnitude (AC PF)
 - `:v`: Complex voltage phasor (AC PF) — returns ComplexF64 elements
@@ -47,8 +47,8 @@ Invalid combinations throw ArgumentError.
 - `:q`: Reactive power injection (AC PF, as operand for Jacobian blocks)
 
 # Parameter Symbols
-- `:d` / `:pd`: Active demand (DC PF, DC OPF; AC PF via transform)
-- `:qd`: Reactive demand (AC PF via transform)
+- `:d` / `:pd`: Active demand (DC PF, DC OPF, AC OPF; AC PF via transform)
+- `:qd`: Reactive demand (AC OPF; AC PF via transform)
 - `:sw`: Switching states
 - `:cq`, `:cl`: Cost coefficients (DC OPF)
 - `:fmax`: Flow limits (DC OPF)
@@ -170,7 +170,12 @@ _valid_combinations(::Type{<:ACPowerFlowState}) = [
 ]
 
 _valid_combinations(::Type{<:ACOPFProblem}) = [
-    (:vm, :sw), (:va, :sw), (:pg, :sw), (:qg, :sw),
+    (:vm, :sw), (:va, :sw), (:pg, :sw), (:qg, :sw), (:lmp, :sw),
+    (:vm, :d), (:va, :d), (:pg, :d), (:qg, :d), (:lmp, :d),
+    (:vm, :qd), (:va, :qd), (:pg, :qd), (:qg, :qd), (:lmp, :qd),
+    (:vm, :cq), (:va, :cq), (:pg, :cq), (:qg, :cq), (:lmp, :cq),
+    (:vm, :cl), (:va, :cl), (:pg, :cl), (:qg, :cl), (:lmp, :cl),
+    (:vm, :fmax), (:va, :fmax), (:pg, :fmax), (:qg, :fmax), (:lmp, :fmax),
 ]
 
 _valid_combinations(T::Type) = throw(ArgumentError(
@@ -379,18 +384,20 @@ end
 # =============================================================================
 
 function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, param::Symbol)
-    param === :sw || throw(ArgumentError(
-        "ACOPFProblem currently only supports :sw parameter, got :$param"))
-    dz_dsw = _get_ac_dz_dsw!(prob)
+    dz_dp = _get_ac_dz_dparam!(prob, param)
     idx = ac_kkt_indices(prob)
-    if op === :vm
-        return dz_dsw[idx.vm, :]
-    elseif op === :va
-        return dz_dsw[idx.va, :]
+    if op === :va
+        return dz_dp[idx.va, :]
+    elseif op === :vm
+        return dz_dp[idx.vm, :]
     elseif op === :pg
-        return dz_dsw[idx.pg, :]
-    else  # :qg
-        return dz_dsw[idx.qg, :]
+        return dz_dp[idx.pg, :]
+    elseif op === :qg
+        return dz_dp[idx.qg, :]
+    elseif op === :lmp
+        return dz_dp[idx.nu_p_bal, :]
+    else
+        throw(ArgumentError("Unknown AC OPF operand: $op"))
     end
 end
 

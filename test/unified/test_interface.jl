@@ -216,8 +216,8 @@ using Test
         @test Set(parameter_symbols(ac_state)) == Set([:p, :q, :va, :vm, :d, :qd])
 
         ac_prob = ACOPFProblem(net_data)
-        @test operand_symbols(ac_prob) == [:vm, :va, :pg, :qg]
-        @test parameter_symbols(ac_prob) == [:sw]
+        @test Set(operand_symbols(ac_prob)) == Set([:vm, :va, :pg, :qg, :lmp])
+        @test Set(parameter_symbols(ac_prob)) == Set([:sw, :d, :qd, :cq, :cl, :fmax])
     end
 
     @testset "Base.show Methods" begin
