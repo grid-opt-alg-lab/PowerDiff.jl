@@ -102,6 +102,106 @@ Base.:*(s::Sensitivity, a::Number) = s.matrix * a
 Base.:*(s::Sensitivity, v::AbstractVector) = s.matrix * v
 Base.:*(m::AbstractMatrix, s::Sensitivity) = m * s.matrix
 
+# =============================================================================
+# ID-Aware JVP / VJP
+# =============================================================================
+
+"""
+    dict_to_vec(S::Sensitivity, d::AbstractDict{Int}, axis::Symbol) → Vector
+
+Convert a Dict keyed by original element IDs to a dense vector aligned with
+the sensitivity matrix. Missing keys are treated as zero. Unknown IDs throw
+`ArgumentError`.
+
+`axis` is `:col` (parameter space) or `:row` (operand space).
+"""
+function dict_to_vec(S::Sensitivity{T}, d::AbstractDict{Int,<:Number}, axis::Symbol) where {T}
+    if axis === :col
+        id_to_idx = S.id_to_col
+        n = size(S, 2)
+    elseif axis === :row
+        id_to_idx = S.id_to_row
+        n = size(S, 1)
+    else
+        throw(ArgumentError("axis must be :row or :col, got :$axis"))
+    end
+    v = zeros(T, n)
+    for (id, val) in d
+        idx = get(id_to_idx, id, nothing)
+        if idx === nothing
+            throw(ArgumentError("unknown element ID $id for axis :$axis"))
+        end
+        v[idx] = val
+    end
+    return v
+end
+
+"""
+    vec_to_dict(S::Sensitivity, v::AbstractVector, axis::Symbol) → Dict{Int,T}
+
+Convert a dense vector to a Dict keyed by original element IDs.
+
+`axis` is `:col` (parameter space) or `:row` (operand space).
+"""
+function vec_to_dict(S::Sensitivity{T}, v::AbstractVector, axis::Symbol) where {T}
+    if axis === :col
+        idx_to_id = S.col_to_id
+    elseif axis === :row
+        idx_to_id = S.row_to_id
+    else
+        throw(ArgumentError("axis must be :row or :col, got :$axis"))
+    end
+    length(v) == length(idx_to_id) || throw(DimensionMismatch(
+        "vector length $(length(v)) does not match axis dimension $(length(idx_to_id))"))
+    return Dict{Int,T}(idx_to_id[i] => v[i] for i in eachindex(v))
+end
+
+"""
+    jvp(S::Sensitivity, δp::AbstractDict{Int,<:Number}) → Dict{Int,T}
+
+Jacobian-vector product with ID-aware input and output.
+Computes `S * δp` where `δp` is keyed by original parameter element IDs.
+Returns a Dict keyed by original operand element IDs.
+"""
+function jvp(S::Sensitivity{T}, δp::AbstractDict{Int,<:Number}) where {T}
+    v = dict_to_vec(S, δp, :col)
+    return vec_to_dict(S, S.matrix * v, :row)
+end
+
+"""
+    jvp(S::Sensitivity, δp::AbstractVector) → Dict{Int,T}
+
+Jacobian-vector product with sequential input and ID-aware output.
+"""
+function jvp(S::Sensitivity{T}, δp::AbstractVector) where {T}
+    size(S, 2) == length(δp) || throw(DimensionMismatch(
+        "vector length $(length(δp)) does not match parameter dimension $(size(S, 2))"))
+    return vec_to_dict(S, S.matrix * δp, :row)
+end
+
+"""
+    vjp(S::Sensitivity, δy::AbstractDict{Int,<:Number}) → Dict{Int,T}
+
+Vector-Jacobian product with ID-aware input and output.
+Computes `S' * δy` where `δy` is keyed by original operand element IDs.
+Returns a Dict keyed by original parameter element IDs.
+"""
+function vjp(S::Sensitivity{T}, δy::AbstractDict{Int,<:Number}) where {T}
+    v = dict_to_vec(S, δy, :row)
+    return vec_to_dict(S, S.matrix' * v, :col)
+end
+
+"""
+    vjp(S::Sensitivity, δy::AbstractVector) → Dict{Int,T}
+
+Vector-Jacobian product with sequential input and ID-aware output.
+"""
+function vjp(S::Sensitivity{T}, δy::AbstractVector) where {T}
+    size(S, 1) == length(δy) || throw(DimensionMismatch(
+        "vector length $(length(δy)) does not match operand dimension $(size(S, 1))"))
+    return vec_to_dict(S, S.matrix' * δy, :col)
+end
+
 # Pretty printing
 function Base.show(io::IO, ::MIME"text/plain", s::Sensitivity{T}) where {T}
     if T === Float64

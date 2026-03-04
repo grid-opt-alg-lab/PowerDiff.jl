@@ -133,3 +133,35 @@ sens[2, 3]            # element access
 sens * v              # matrix-vector product
 Matrix(sens)          # extract raw matrix
 ```
+
+## JVP / VJP
+
+For ID-aware Jacobian-vector products, use [`jvp`](@ref) and [`vjp`](@ref). These accept `Dict{Int,Number}` keyed by original element IDs and return `Dict{Int,T}` keyed by original element IDs:
+
+```julia
+S = calc_sensitivity(prob, :lmp, :d)
+
+# JVP: perturb demand at bus 10 by 0.1 MW
+δlmp = jvp(S, Dict(10 => 0.1))
+δlmp[10]  # LMP change at bus 10
+
+# VJP: adjoint seed at bus 10
+δd = vjp(S, Dict(10 => 1.0))
+δd[2]     # adjoint contribution from bus 2
+```
+
+Missing keys are treated as zero; unknown IDs throw `ArgumentError`. Sequential vector inputs are also supported — they return `Dict` output:
+
+```julia
+jvp(S, randn(size(S, 2)))  # Vector in, Dict out
+vjp(S, randn(size(S, 1)))  # Vector in, Dict out
+```
+
+For raw vector-in/vector-out, use `S * v` directly.
+
+Conversion utilities [`dict_to_vec`](@ref) and [`vec_to_dict`](@ref) translate between `Dict{Int}` and dense vectors:
+
+```julia
+v = dict_to_vec(S, Dict(10 => 0.1), :col)   # parameter space
+d = vec_to_dict(S, result_vec, :row)          # operand space
+```

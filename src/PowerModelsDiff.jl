@@ -91,6 +91,7 @@ export IDMapping
 export calc_sensitivity
 export Sensitivity
 export operand_symbols, parameter_symbols
+export jvp, vjp, dict_to_vec, vec_to_dict
 
 # -----------------------------------------------------------------------------
 # DC Power Flow Types
