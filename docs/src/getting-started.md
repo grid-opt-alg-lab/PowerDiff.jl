@@ -8,9 +8,9 @@ This guide walks through the main workflows: DC power flow, DC OPF with LMP anal
 using PowerModelsDiff
 using PowerModels
 
-# Load a MATPOWER case (must use make_basic_network)
-raw = PowerModels.parse_file("case14.m")
-net = PowerModels.make_basic_network(raw)
+# Load a MATPOWER case (make_basic_network is optional)
+net = PowerModels.parse_file("case14.m")
+# OR: net = PowerModels.make_basic_network(raw)  # sequential IDs
 ```
 
 ## Interactive Exploration
@@ -26,7 +26,7 @@ suggested `calc_sensitivity` commands to try.
 
 ## DC Power Flow
 
-DC power flow computes voltage angles from the reduced system ``\theta_r = L_r^{-1} p_r``, where ``L_r`` is the susceptance-weighted Laplacian with the reference bus row and column deleted.
+DC power flow computes voltage angles from the reduced system ``\theta_r = B_r^{-1} p_r``, where ``B_r`` is the susceptance-weighted Laplacian with the reference bus row and column deleted.
 
 ```julia
 dc_net = DCNetwork(net)

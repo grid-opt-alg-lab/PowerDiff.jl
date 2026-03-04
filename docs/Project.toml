@@ -1,3 +1,6 @@
+# Copyright 2026 Samuel Talkington and contributors
+# SPDX-License-Identifier: Apache-2.0
+
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 PowerModels = "c36e90e8-916a-50a6-bd94-075b64ef4655"

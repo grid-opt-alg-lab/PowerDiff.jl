@@ -1,3 +1,17 @@
+# Copyright 2026 Samuel Talkington and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # AC Power Flow Finite-Difference Verification Tests
 #
 # Verifies analytical voltage and current sensitivities against a Newton-Raphson
@@ -113,7 +127,9 @@ end
     # Use PowerModels' admittance matrix for consistency with the PF solution.
     v_base = PowerModels.calc_basic_bus_voltage(pf_data)
     Y = PowerModels.calc_basic_admittance_matrix(pf_data)
-    slack = PowerModelsDiff._find_slack_bus(pf_data)
+    # Find slack bus from reference bus data
+    pf_ref = PowerModels.build_ref(deepcopy(pf_data))[:it][:pm][:nw][0]
+    slack = first(keys(pf_ref[:ref_buses]))
     n = length(v_base)
     n_branch = length(pf_data["branch"])
 

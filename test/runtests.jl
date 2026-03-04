@@ -1,3 +1,17 @@
+# Copyright 2026 Samuel Talkington and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 using Test
 using LinearAlgebra
 using SparseArrays
@@ -594,11 +608,6 @@ end
 # Voltage Topology Sensitivities (existing tests, updated for PowerModels data)
 # =============================================================================
 
-# Note: Voltage Topology Sensitivities tests are temporarily disabled pending
-# investigation of admittance matrix reconstruction issues with standard test cases.
-# The original implementation was tested with a specific case14.m file.
-# TODO: Fix vectorize_laplacian_weights for general MATPOWER cases
-
 # =============================================================================
 # Physics Property Tests
 # =============================================================================
@@ -802,3 +811,5 @@ include("test_dc_opf_verification.jl")
 include("test_ac_pf_verification.jl")
 include("test_update_switching.jl")
 include("test_psh.jl")
+include("test_nonbasic.jl")
+include("test_jvp_vjp.jl")

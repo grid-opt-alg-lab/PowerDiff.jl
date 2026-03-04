@@ -1,3 +1,17 @@
+# Copyright 2026 Samuel Talkington and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # =============================================================================
 # Power Flow Equations (Vectorized, Topology-Agnostic)
 # =============================================================================
@@ -102,7 +116,7 @@ Complex branch current flows: I_branch = diag(A*v) * (G + jB)
 
 Note: This uses the full incidence matrix and returns currents for all edges.
 """
-branch_flow(v, G, B) = Diagonal(full_incidence_matrix(length(v)) * v) * (G .+ B .* im)
+branch_flow(v, G, B) = Diagonal(complete_incidence_matrix(length(v)) * v) * (G .+ B .* im)
 
 """
     p_flow(v, G, B)

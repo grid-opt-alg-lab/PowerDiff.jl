@@ -1,3 +1,17 @@
+# Copyright 2026 Samuel Talkington and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Voltage-Power Sensitivity Analysis for AC Power Flow
 #
 # Computes analytical sensitivity coefficients ∂v/∂p and ∂v/∂q using
@@ -38,11 +52,10 @@ NamedTuple with fields:
 
 # Example
 ```julia
-Y = calc_basic_admittance_matrix(net)
-v = calc_basic_bus_voltage(net)
-sens = calc_voltage_power_sensitivities(v, Y)
+state = ACPowerFlowState(pm_net)
+sens = calc_sensitivity(state, :vm, :p)
 # How does voltage at bus 3 change when active power at bus 2 increases?
-dvdp = sens.dvm_dp[3, 2]
+dvdp = sens[3, 2]
 ```
 """
 function calc_voltage_power_sensitivities(
@@ -62,16 +75,12 @@ end
 
 Compute voltage-power sensitivities from a solved PowerModels network.
 
-The network must be a basic network with a solved power flow.
+Accepts both basic and non-basic networks. For non-basic networks, constructs
+an ACPowerFlowState internally which handles ID translation.
 """
 function calc_voltage_power_sensitivities(net::Dict; full::Bool=true)
-    @assert haskey(net, "basic_network") && net["basic_network"] "Network must be a basic network"
-
-    Y = PM.calc_basic_admittance_matrix(net)
-    v = PM.calc_basic_bus_voltage(net)
-    idx_slack = _find_slack_bus(net)
-
-    return calc_voltage_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
+    state = ACPowerFlowState(net)
+    return calc_voltage_power_sensitivities(state; full=full)
 end
 
 """
@@ -293,6 +302,3 @@ function _insert_slack_zeros(K::Matrix{T}, idx_slack::Int, ::Type{T}) where T
 
     return K_full
 end
-
-# NOTE: _find_slack_bus(net::Dict) is defined in types/ac_network.jl
-# NOTE: ACPowerFlowState(net::Dict) constructor is defined in types/ac_network.jl

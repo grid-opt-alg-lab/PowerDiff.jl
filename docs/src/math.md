@@ -12,7 +12,7 @@ subject to:
 
 ```math
 \begin{aligned}
-G_{\text{inc}} g + \text{psh} - d &= L \theta & (\nu_{\text{bal}}) \\
+G_{\text{inc}} g + \text{psh} - d &= B \theta & (\nu_{\text{bal}}) \\
 f &= W A \theta & (\nu_{\text{flow}}) \\
 -f_{\max} \leq f &\leq f_{\max} & (\lambda_{\text{lb}}, \lambda_{\text{ub}}) \\
 g_{\min} \leq g &\leq g_{\max} & (\rho_{\text{lb}}, \rho_{\text{ub}}) \\
@@ -22,7 +22,7 @@ g_{\min} \leq g &\leq g_{\max} & (\rho_{\text{lb}}, \rho_{\text{ub}}) \\
 ```
 
 where:
-- ``L = A^\top \text{diag}(-b \circ \text{sw}) A`` is the susceptance-weighted Laplacian
+- ``B = A^\top \text{diag}(-b \circ \text{sw}) A`` is the susceptance-weighted Laplacian
 - ``W = \text{diag}(-b \circ \text{sw})`` is the branch weight matrix
 - ``A`` is the ``m \times n`` incidence matrix (branches × buses)
 - ``G_{\text{inc}}`` is the ``n \times k`` generator-bus incidence matrix
@@ -35,10 +35,10 @@ For non-OPF power flow with fixed generation, the voltage angles satisfy the
 reduced system obtained by eliminating the reference (slack) bus:
 
 ```math
-\theta_r = L_r^{-1} \, p_r
+\theta_r = B_r^{-1} \, p_r
 ```
 
-where ``L_r`` is the Laplacian with the reference bus row and column deleted
+where ``B_r`` is the susceptance-weighted Laplacian with the reference bus row and column deleted
 (invertible for a connected network), ``p_r`` is the net injection with the
 reference entry removed, and ``\theta_{\text{ref}} = 0``.
 
@@ -46,10 +46,10 @@ Switching sensitivity follows from matrix perturbation theory:
 
 ```math
 \frac{\partial \theta_r}{\partial \text{sw}_e}
-  = -L_r^{-1} \frac{\partial L_r}{\partial \text{sw}_e} \, \theta_r
+  = -B_r^{-1} \frac{\partial B_r}{\partial \text{sw}_e} \, \theta_r
 ```
 
-where ``\frac{\partial L_r}{\partial \text{sw}_e} = -b_e \, a_{e,r} \, a_{e,r}^\top``
+where ``\frac{\partial B_r}{\partial \text{sw}_e} = -b_e \, a_{e,r} \, a_{e,r}^\top``
 is a rank-1 update from the incidence column of branch ``e`` restricted to non-reference buses.
 
 ## KKT System for Implicit Differentiation

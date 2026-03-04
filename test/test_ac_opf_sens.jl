@@ -1,3 +1,17 @@
+# Copyright 2026 Samuel Talkington and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Test AC OPF switching sensitivity
 
 using PowerModelsDiff
@@ -107,7 +121,7 @@ using Test
             # Build perturbed problem with sw[e] -= ε baked into JuMP model
             net_pert = ACNetwork(pm_data)
             net_pert.sw[e] -= ε
-            prob_pert = ACOPFProblem(net_pert, pm_data; silent=true)
+            prob_pert = ACOPFProblem(net_pert; silent=true)
             sol_pert = solve!(prob_pert)
 
             fd_dvm = (sol_base.vm - sol_pert.vm) / ε

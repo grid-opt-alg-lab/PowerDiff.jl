@@ -1,3 +1,17 @@
+# Copyright 2026 Samuel Talkington and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Current-Power Sensitivity Analysis for AC Power Flow
 #
 # Computes analytical sensitivity coefficients ∂I/∂p and ∂I/∂q for branch currents
@@ -40,11 +54,10 @@ NamedTuple with fields:
 
 # Example
 ```julia
-Y = calc_basic_admittance_matrix(net)
-v = calc_basic_bus_voltage(net)
-sens = calc_current_power_sensitivities(v, Y, net["branch"])
+state = ACPowerFlowState(pm_net)
+sens = calc_sensitivity(state, :im, :p)
 # How does current on line 2 change when active power at bus 3 increases?
-dI_dp = sens.dIm_dp[2, 3]
+dI_dp = sens[2, 3]
 ```
 """
 function calc_current_power_sensitivities(
@@ -102,17 +115,13 @@ end
 
 Compute current-power sensitivities from a solved PowerModels network.
 
-The network must be a basic network with a solved power flow.
+Accepts both basic and non-basic networks. For non-basic networks, constructs
+an ACPowerFlowState internally which handles ID translation.
 """
 function calc_current_power_sensitivities(net::Dict; full::Bool=true)
-    @assert haskey(net, "basic_network") && net["basic_network"] "Network must be a basic network"
-    @assert haskey(net, "branch") "Network must have branch data"
-
-    Y = PM.calc_basic_admittance_matrix(net)
-    v = PM.calc_basic_bus_voltage(net)
-    idx_slack = _find_slack_bus(net)
-
-    return calc_current_power_sensitivities(v, Y, net["branch"]; idx_slack=idx_slack, full=full)
+    state = ACPowerFlowState(net)
+    @assert !isnothing(state.branch_data) "Failed to extract branch data from network"
+    return calc_current_power_sensitivities(state; full=full)
 end
 
 """

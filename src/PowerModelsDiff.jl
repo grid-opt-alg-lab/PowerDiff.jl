@@ -1,3 +1,17 @@
+# Copyright 2026 Samuel Talkington and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 module PowerModelsDiff
 
 using LinearAlgebra
@@ -19,6 +33,7 @@ include("types/abstract.jl")
 # =============================================================================
 # Core type definitions (modular structure)
 # =============================================================================
+include("types/id_mapping.jl")      # IDMapping (must come before network types)
 include("types/dc_network.jl")      # DCNetwork, DCPowerFlowState, DCOPFSolution + constructors
 include("types/dc_opf_problem.jl")  # DCOPFProblem + constructors
 include("types/ac_network.jl")      # ACNetwork, ACPowerFlowState
@@ -32,12 +47,6 @@ include("types/show.jl")           # Pretty-printing (Base.show methods)
 include("pf/admittance_matrix.jl")
 include("graphs/laplacian.jl")
 include("pf/pf_eqns.jl")
-
-# =============================================================================
-# Deprecated types (for backwards compatibility)
-# =============================================================================
-include("deprecated/pf_structs.jl")
-include("deprecated/measurements.jl")
 
 # =============================================================================
 # DC OPF (B-theta formulation) - solving and KKT conditions
@@ -74,6 +83,7 @@ include("sens/interface.jl")
 # -----------------------------------------------------------------------------
 export AbstractPowerNetwork, AbstractPowerFlowState, AbstractOPFSolution
 export AbstractOPFProblem
+export IDMapping
 
 # -----------------------------------------------------------------------------
 # Sensitivity Interface
@@ -81,6 +91,7 @@ export AbstractOPFProblem
 export calc_sensitivity
 export Sensitivity
 export operand_symbols, parameter_symbols
+export jvp, vjp, dict_to_vec, vec_to_dict
 
 # -----------------------------------------------------------------------------
 # DC Power Flow Types
@@ -123,14 +134,11 @@ export admittance_matrix, branch_current, branch_power
 # Graph Utilities
 # -----------------------------------------------------------------------------
 export VectorizedAdmittanceMatrix, vectorize_laplacian_weights
-export laplacian, full_incidence_matrix, calc_incidence_matrix
+export laplacian, complete_incidence_matrix, calc_incidence_matrix
 
 # Power Flow Equations
 export p, q, vm, vm2, pf_eqns
 export p_polar, q_polar
 export branch_flow, p_flow, q_flow
-
-# Deprecated types (kept for backwards compatibility; emit depwarn on construction)
-export NetworkTopology, PowerFlowEquations
 
 end # module PowerModelsDiff

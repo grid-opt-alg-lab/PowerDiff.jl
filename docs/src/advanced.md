@@ -8,7 +8,7 @@ AbstractPowerNetwork
 └── ACNetwork           # AC with vectorized admittance
 
 AbstractPowerFlowState
-├── DCPowerFlowState    # DC power flow (θ_r = L_r \ p_r)
+├── DCPowerFlowState    # DC power flow (θ_r = B_r \ p_r)
 ├── ACPowerFlowState    # AC power flow (complex voltages)
 └── AbstractOPFSolution
     ├── DCOPFSolution   # DC OPF with generation, flows, duals
@@ -34,12 +34,15 @@ Stores the DC network topology and parameters.
 | `sw` | `Vector{Float64}` | Switching states in [0,1] |
 | `fmax` | `Vector{Float64}` | Branch flow limits |
 | `gmax`, `gmin` | `Vector{Float64}` | Generator limits |
+| `angmax`, `angmin` | `Vector{Float64}` | Phase angle difference limits |
 | `cq`, `cl` | `Vector{Float64}` | Cost coefficients (quadratic, linear) |
 | `c_shed` | `Vector{Float64}` | Load-shedding cost per bus |
-| `ref_bus` | `Int` | Reference bus index |
-| `τ` | `Float64` | Regularization parameter |
+| `ref_bus` | `Int` | Reference bus index (sequential) |
+| `tau` | `Float64` | Regularization parameter |
+| `id_map` | `IDMapping` | Bidirectional element ID mapping (original ↔ sequential) |
+| `ref` | `Union{Nothing,Dict}` | Stored `build_ref` result (nothing for programmatic constructors) |
 
-Construct from PowerModels data: `DCNetwork(net)` or with explicit parameters: `DCNetwork(n, m, k, A, G_inc, b; ...)`.
+Construct from PowerModels data: `DCNetwork(net)` (accepts both basic and non-basic networks) or with explicit parameters: `DCNetwork(n, m, k, A, G_inc, b; ...)`.
 
 ### ACNetwork
 
@@ -48,11 +51,17 @@ Stores the AC network with vectorized admittance representation.
 | Field | Type | Description |
 |-------|------|-------------|
 | `n`, `m` | `Int` | Buses, branches |
-| `A` | `SparseMatrixCSC` | Incidence matrix |
-| `incidences` | `Vector{Tuple}` | Edge list [(i,j), ...] |
-| `g`, `b` | `Vector{Float64}` | Conductances, susceptances |
-| `g_shunt`, `b_shunt` | `Vector{Float64}` | Shunt admittances |
-| `sw` | `Vector{Float64}` | Switching states |
+| `A` | `SparseMatrixCSC` | Incidence matrix (m × n) |
+| `incidences` | `Vector{Tuple}` | Edge list [(i,j), ...] (sequential indices) |
+| `g`, `b` | `Vector{Float64}` | Branch conductances, susceptances |
+| `g_shunt`, `b_shunt` | `Vector{Float64}` | Shunt admittances per bus |
+| `sw` | `Vector{Float64}` | Switching states in [0,1] |
+| `is_switchable` | `BitVector` | Which branches can be switched |
+| `idx_slack` | `Int` | Slack bus index (sequential) |
+| `vm_min`, `vm_max` | `Vector{Float64}` | Voltage magnitude limits per bus |
+| `i_max` | `Vector{Float64}` | Branch current magnitude limits |
+| `id_map` | `IDMapping` | Bidirectional element ID mapping (original ↔ sequential) |
+| `ref` | `Union{Nothing,Dict}` | Stored `build_ref` result (nothing for Y-matrix constructors) |
 
 ## Sensitivity Caching
 

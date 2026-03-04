@@ -1,3 +1,17 @@
+# Copyright 2026 Samuel Talkington and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # =============================================================================
 # Index Mapping Utilities for Sensitivity Results
 # =============================================================================
@@ -5,25 +19,18 @@
 # Provides bidirectional index mappings between internal matrix indices
 # and external element IDs (bus numbers, branch indices, generator indices).
 #
-# Design note: All mappings are currently identity (1:n → 1:n) because
-# make_basic_network() guarantees sequential 1-based indexing. The mapping
-# infrastructure exists so that Sensitivity{T} exposes row_to_id/col_to_id
-# as public API. Supporting non-basic networks in the future would only
-# require implementing non-identity versions of _bus_mapping(), _branch_mapping(),
-# and _gen_mapping() — no changes to the Sensitivity type or interface.jl needed.
-#
-# Following PowerModels' AdmittanceMatrix pattern for consistent indexing.
+# Mappings are derived from the IDMapping stored in each network/state object.
+# For basic networks (sequential 1-based IDs), these are identity mappings.
+# For non-basic networks, they map original IDs to sequential indices.
 
 """
-    _identity_mapping(n::Int) → (idx_to_id, id_to_idx)
+    _mapping_from(ids::Vector{Int}) → (idx_to_id, id_to_idx)
 
-Create an identity mapping for dimension `n`.
-Since `make_basic_network()` produces sequential 1-based indexing,
-all mappings are identity (i → i).
+Create a bidirectional mapping from a sorted vector of original IDs.
 """
-function _identity_mapping(n::Int)
-    idx_to_id = collect(1:n)
-    id_to_idx = Dict(i => i for i in 1:n)
+function _mapping_from(ids::Vector{Int})
+    idx_to_id = copy(ids)  # defensive copy to prevent aliasing IDMapping internals
+    id_to_idx = Dict(id => i for (i, id) in enumerate(ids))
     (idx_to_id, id_to_idx)
 end
 
@@ -36,10 +43,18 @@ Returns:
 - `idx_to_id::Vector{Int}`: Internal row/col index → external bus ID
 - `id_to_idx::Dict{Int,Int}`: External bus ID → internal row/col index
 """
-_bus_mapping(state::DCPowerFlowState) = _identity_mapping(state.net.n)
-_bus_mapping(prob::DCOPFProblem) = _identity_mapping(prob.network.n)
-_bus_mapping(state::ACPowerFlowState) = _identity_mapping(state.n)
-_bus_mapping(prob::ACOPFProblem) = _identity_mapping(prob.network.n)
+_bus_mapping(state::DCPowerFlowState) = _mapping_from(state.net.id_map.bus_ids)
+_bus_mapping(prob::DCOPFProblem) = _mapping_from(prob.network.id_map.bus_ids)
+_bus_mapping(prob::ACOPFProblem) = _mapping_from(prob.network.id_map.bus_ids)
+
+function _bus_mapping(state::ACPowerFlowState)
+    if !isnothing(state.net)
+        return _mapping_from(state.net.id_map.bus_ids)
+    end
+    # Fallback for states constructed without a network (e.g. from raw Y matrix)
+    ids = collect(1:state.n)
+    return (ids, Dict(i => i for i in 1:state.n))
+end
 
 """
     _branch_mapping(state) → (idx_to_id, id_to_idx)
@@ -50,10 +65,17 @@ Returns:
 - `idx_to_id::Vector{Int}`: Internal row/col index → external branch ID
 - `id_to_idx::Dict{Int,Int}`: External branch ID → internal row/col index
 """
-_branch_mapping(state::DCPowerFlowState) = _identity_mapping(state.net.m)
-_branch_mapping(prob::DCOPFProblem) = _identity_mapping(prob.network.m)
-_branch_mapping(state::ACPowerFlowState) = _identity_mapping(state.m)
-_branch_mapping(prob::ACOPFProblem) = _identity_mapping(prob.network.m)
+_branch_mapping(state::DCPowerFlowState) = _mapping_from(state.net.id_map.branch_ids)
+_branch_mapping(prob::DCOPFProblem) = _mapping_from(prob.network.id_map.branch_ids)
+_branch_mapping(prob::ACOPFProblem) = _mapping_from(prob.network.id_map.branch_ids)
+
+function _branch_mapping(state::ACPowerFlowState)
+    if !isnothing(state.net)
+        return _mapping_from(state.net.id_map.branch_ids)
+    end
+    ids = collect(1:state.m)
+    return (ids, Dict(i => i for i in 1:state.m))
+end
 
 """
     _gen_mapping(state) → (idx_to_id, id_to_idx)
@@ -64,8 +86,8 @@ Returns:
 - `idx_to_id::Vector{Int}`: Internal row/col index → external generator ID
 - `id_to_idx::Dict{Int,Int}`: External generator ID → internal row/col index
 """
-_gen_mapping(prob::DCOPFProblem) = _identity_mapping(prob.network.k)
-_gen_mapping(prob::ACOPFProblem) = _identity_mapping(prob.n_gen)
+_gen_mapping(prob::DCOPFProblem) = _mapping_from(prob.network.id_map.gen_ids)
+_gen_mapping(prob::ACOPFProblem) = _mapping_from(prob.network.id_map.gen_ids)
 
 # Power flow states don't have generator-level dispatch
 function _gen_mapping(::DCPowerFlowState)

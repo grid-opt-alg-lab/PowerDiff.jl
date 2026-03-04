@@ -1,9 +1,28 @@
+# Copyright 2026 Samuel Talkington and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
     voltage_topology_sensitivities(net; voltages=nothing, full_nodes=true,
         full_edges=false, check_solution=true)
 
 Compute the linearized sensitivity of bus-voltage magnitudes with respect to
 perturbations in the network topology parameters of a PowerModels-style network.
+
+!!! note "Requires basic network"
+    Unlike the main constructors (DCNetwork, ACNetwork, etc.), this legacy function
+    requires `net` to be converted with `make_basic_network` first. It uses
+    `PM.calc_basic_bus_voltage` and `PM.calc_basic_bus_injection` internally.
 
 The function assumes that `net` has been converted with `make_basic_network`
 and that a steady-state power flow solution is available. If `voltages` is not
@@ -181,7 +200,7 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
         # ∂L_r/∂swₑ * θ_r = -bₑ * a_{e,r} * (a_{e,r}' * θ_r)
         coeff = -net.b[e] * dot(a_e_r, θ_r)
         rhs = Vector(coeff * a_e_r)   # dense RHS for UmfpackLU backsolve
-        dva_dsw[nr, e] = -(state.L_r_factor \ rhs)
+        dva_dsw[nr, e] = -(state.B_r_factor \ rhs)
         # dva_dsw[ref, e] = 0 by construction
     end
 
@@ -229,7 +248,7 @@ function calc_sensitivity_demand(state::DCPowerFlowState)
     # The output is inherently dense (L_r⁻¹), so we use a batched solve.
     dva_dd = zeros(n, n)
     n_r = length(nr)
-    dva_dd[nr, nr] = -(state.L_r_factor \ Matrix(1.0I, n_r, n_r))
+    dva_dd[nr, nr] = -(state.B_r_factor \ Matrix(1.0I, n_r, n_r))
 
     # ∂f/∂d = W · A · ∂va/∂d
     W = Diagonal(-net.b .* net.sw)
