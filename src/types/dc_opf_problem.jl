@@ -231,6 +231,7 @@ end
 
 Convenience constructor: build DCOPFProblem directly from PowerModels dict.
 
+Accepts both basic and non-basic networks.
 If `d` is not provided, extracts demand from the network data.
 """
 function DCOPFProblem(net::Dict; d::Union{Nothing,AbstractVector}=nothing, tau::Float64=DEFAULT_TAU, kwargs...)

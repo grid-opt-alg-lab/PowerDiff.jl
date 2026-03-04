@@ -24,6 +24,7 @@ topology sensitivity analysis and integration with RandomizedSwitching tools.
 - `c_shed`: Load-shedding cost per bus (penalty for involuntary load curtailment)
 - `ref_bus`: Reference bus index (phase angle = 0)
 - `tau`: Regularization parameter for strong convexity
+- `id_map`: Bidirectional mapping between original and sequential element IDs
 """
 struct DCNetwork <: AbstractPowerNetwork
     n::Int
@@ -43,6 +44,7 @@ struct DCNetwork <: AbstractPowerNetwork
     c_shed::Vector{Float64}
     ref_bus::Int
     tau::Float64
+    id_map::IDMapping
 end
 
 # =============================================================================
@@ -134,64 +136,96 @@ const DEFAULT_SHED_COST_MULTIPLIER = 10
 
 Construct a DCNetwork from a PowerModels network dictionary.
 
-The network must be a basic network (`net["basic_network"] == true`).
-If `ref_bus` is not specified, uses the reference bus from the network data.
+Accepts both basic and non-basic networks. Non-basic networks (with arbitrary
+bus/branch/gen IDs) are automatically translated to sequential indices internally.
+The original IDs are preserved in `id_map` for result interpretation.
 
 # Example
 ```julia
 raw = PowerModels.parse_file("case14.m")
+dc_net = DCNetwork(raw)  # non-basic OK
+# or
 net = PowerModels.make_basic_network(raw)
-dc_net = DCNetwork(net)
+dc_net = DCNetwork(net)  # basic also OK
 ```
 """
 function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
-    @assert haskey(net, "basic_network") && net["basic_network"] == true "Network must be a basic network (use make_basic_network)"
+    # Preprocess: standardize costs and compute thermal limits
+    pm_data = deepcopy(net)
+    PM.standardize_cost_terms!(pm_data, order=2)
+    PM.calc_thermal_limits!(pm_data)
 
-    gen = net["gen"]
-    load = net["load"]
-    branch = net["branch"]
+    # Build ref structure (works on any network, basic or not)
+    ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
 
-    # Dimensions
-    n = length(net["bus"])
-    m = length(branch)
-    k = length(gen)
+    # Build ID mapping
+    id_map = IDMapping(ref)
 
-    # Incidence matrix (m × n)
-    A = Float64.(PM.calc_basic_incidence_matrix(net))
+    n = length(id_map.bus_ids)
+    m = length(id_map.branch_ids)
+    k = length(id_map.gen_ids)
 
-    # Generator-bus incidence matrix (n × k)
-    G_inc = _calc_gen_incidence_matrix(gen, n, k)
+    # Incidence matrix A (m × n) from ref[:branch] using id_map translation
+    A = spzeros(m, n)
+    for (orig_id, br) in ref[:branch]
+        row = id_map.branch_to_idx[orig_id]
+        f_col = id_map.bus_to_idx[br["f_bus"]]
+        t_col = id_map.bus_to_idx[br["t_bus"]]
+        A[row, f_col] = 1.0
+        A[row, t_col] = -1.0
+    end
+
+    # Generator-bus incidence matrix G_inc (n × k)
+    G_inc = spzeros(n, k)
+    for (orig_id, gen) in ref[:gen]
+        col = id_map.gen_to_idx[orig_id]
+        row = id_map.bus_to_idx[gen["gen_bus"]]
+        G_inc[row, col] = 1.0
+    end
 
     # Branch susceptances: b = imag(1/z)
-    z_branch = PM.calc_basic_branch_series_impedance(net)
-    b = imag.(inv.(z_branch))
+    b = zeros(m)
+    for (orig_id, br) in ref[:branch]
+        idx = id_map.branch_to_idx[orig_id]
+        r = br["br_r"]
+        x = br["br_x"]
+        z2 = r^2 + x^2
+        if z2 > 1e-10
+            b[idx] = -x / z2
+        end
+    end
 
     # All branches initially active
     sw = ones(m)
 
-    # Limits
-    fmax = [branch[string(i)]["rate_a"] for i in 1:m]
-    gmax = [gen[string(i)]["pmax"] for i in 1:k]
-    gmin = [gen[string(i)]["pmin"] for i in 1:k]
+    # Limits (iterate in sequential order via sorted IDs)
+    fmax = [ref[:branch][id_map.branch_ids[i]]["rate_a"] for i in 1:m]
+    gmax = [ref[:gen][id_map.gen_ids[i]]["pmax"] for i in 1:k]
+    gmin = [ref[:gen][id_map.gen_ids[i]]["pmin"] for i in 1:k]
 
     # Phase angle difference limits
-    angmax = [branch[string(i)]["angmax"] for i in 1:m]
-    angmin = [branch[string(i)]["angmin"] for i in 1:m]
+    angmax = [ref[:branch][id_map.branch_ids[i]]["angmax"] for i in 1:m]
+    angmin = [ref[:branch][id_map.branch_ids[i]]["angmin"] for i in 1:m]
 
     # Cost coefficients (assumes polynomial cost with at least 2 terms)
-    cq = [gen[string(i)]["cost"][1] for i in 1:k]
-    cl = [gen[string(i)]["cost"][2] for i in 1:k]
+    cq = [ref[:gen][id_map.gen_ids[i]]["cost"][1] for i in 1:k]
+    cl = [ref[:gen][id_map.gen_ids[i]]["cost"][2] for i in 1:k]
 
     # Load-shedding cost: high penalty to discourage shedding when feasible
     marginal_cost_ub = max(maximum(2cq .* gmax .+ cl), 1.0)
     c_shed = fill(DEFAULT_SHED_COST_MULTIPLIER * marginal_cost_ub, n)
 
-    # Reference bus
+    # Reference bus (translate original ID to sequential index)
     if isnothing(ref_bus)
-        ref_bus = _find_reference_bus(net)
+        orig_ref = first(keys(ref[:ref_buses]))
+        ref_bus = id_map.bus_to_idx[orig_ref]
+    else
+        # If user provided an original bus ID, translate it
+        ref_bus = get(id_map.bus_to_idx, ref_bus, ref_bus)
     end
 
-    return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, angmax, angmin, cq, cl, c_shed, ref_bus, tau)
+    return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, angmax, angmin,
+                     cq, cl, c_shed, ref_bus, tau, id_map)
 end
 
 """
@@ -225,7 +259,8 @@ function DCNetwork(
         Float64.(angmax), Float64.(angmin),
         Float64.(cq), Float64.(cl),
         Float64.(c_shed),
-        ref_bus, tau
+        ref_bus, tau,
+        IDMapping(n, m, k, 0)
     )
 end
 
@@ -234,19 +269,7 @@ end
 # =============================================================================
 
 """
-Generator-bus incidence matrix (n × k).
-"""
-function _calc_gen_incidence_matrix(gen::Dict, n::Int, k::Int)
-    G_inc = spzeros(n, k)
-    for i in 1:k
-        bus_idx = gen[string(i)]["gen_bus"]
-        G_inc[bus_idx, i] = 1.0
-    end
-    return G_inc
-end
-
-"""
-Find reference bus from network data.
+Find reference bus from network data (returns original bus ID).
 """
 function _find_reference_bus(net::Dict)
     for (_, bus) in net["bus"]
@@ -262,19 +285,32 @@ end
     calc_demand_vector(net::Dict)
 
 Extract demand vector from PowerModels network dictionary.
+
+Works with both basic and non-basic networks. For non-basic networks,
+uses `PM.build_ref` to resolve load-bus mappings and returns a vector
+in sequential bus order (matching `IDMapping` from `DCNetwork(net)`).
 """
 function calc_demand_vector(net::Dict)
-    n = length(net["bus"])
-    load = net["load"]
-    n_load = length(load)
+    pm_data = deepcopy(net)
+    PM.standardize_cost_terms!(pm_data, order=2)
+    PM.calc_thermal_limits!(pm_data)
+    ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
+    id_map = IDMapping(ref)
+    return _calc_demand_vector(ref, id_map)
+end
 
+"""
+Internal demand vector extraction from ref + id_map (avoids redundant build_ref).
+"""
+function _calc_demand_vector(ref::Dict, id_map::IDMapping)
+    n = length(id_map.bus_ids)
     d = zeros(n)
-    for i in 1:n_load
-        load_data = load[string(i)]
-        bus_idx = load_data["load_bus"]
-        d[bus_idx] = load_data["pd"]
+    for (bus_orig_id, load_ids) in ref[:bus_loads]
+        bus_idx = id_map.bus_to_idx[bus_orig_id]
+        for load_id in load_ids
+            d[bus_idx] += ref[:load][load_id]["pd"]
+        end
     end
-
     return d
 end
 
@@ -289,22 +325,30 @@ function calc_susceptance_matrix(network::DCNetwork)
 end
 
 """
-Aggregate generation to bus-level vector.
+Aggregate generation to bus-level vector (uses ref + id_map).
 """
-function _calc_generation_vector(net::Dict, n::Int)
-    gen = net["gen"]
-    k = length(gen)
-
+function _calc_generation_vector(ref::Dict, id_map::IDMapping)
+    n = length(id_map.bus_ids)
     g = zeros(n)
-    for i in 1:k
-        gen_data = gen[string(i)]
-        bus_idx = gen_data["gen_bus"]
-        # Use pg if available (from solved power flow), otherwise use midpoint of limits
-        pg = get(gen_data, "pg", (gen_data["pmin"] + gen_data["pmax"]) / 2)
-        g[bus_idx] += pg
+    for (bus_orig_id, gen_ids) in ref[:bus_gens]
+        bus_idx = id_map.bus_to_idx[bus_orig_id]
+        for gen_id in gen_ids
+            gen_data = ref[:gen][gen_id]
+            pg = get(gen_data, "pg", (gen_data["pmin"] + gen_data["pmax"]) / 2)
+            g[bus_idx] += pg
+        end
     end
-
     return g
+end
+
+# Legacy overload for backward compatibility
+function _calc_generation_vector(net::Dict, n::Int)
+    pm_data = deepcopy(net)
+    PM.standardize_cost_terms!(pm_data, order=2)
+    PM.calc_thermal_limits!(pm_data)
+    ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
+    id_map = IDMapping(ref)
+    return _calc_generation_vector(ref, id_map)
 end
 
 # =============================================================================
@@ -384,6 +428,7 @@ end
 
 Construct DCPowerFlowState from PowerModels network dictionary.
 
+Accepts both basic and non-basic networks.
 If `d` is not provided, extracts demand from the network.
 If `g` is not provided, aggregates generation from gen data to buses.
 """

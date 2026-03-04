@@ -19,6 +19,7 @@ include("types/abstract.jl")
 # =============================================================================
 # Core type definitions (modular structure)
 # =============================================================================
+include("types/id_mapping.jl")      # IDMapping (must come before network types)
 include("types/dc_network.jl")      # DCNetwork, DCPowerFlowState, DCOPFSolution + constructors
 include("types/dc_opf_problem.jl")  # DCOPFProblem + constructors
 include("types/ac_network.jl")      # ACNetwork, ACPowerFlowState
@@ -74,6 +75,7 @@ include("sens/interface.jl")
 # -----------------------------------------------------------------------------
 export AbstractPowerNetwork, AbstractPowerFlowState, AbstractOPFSolution
 export AbstractOPFProblem
+export IDMapping
 
 # -----------------------------------------------------------------------------
 # Sensitivity Interface

@@ -102,17 +102,13 @@ end
 
 Compute current-power sensitivities from a solved PowerModels network.
 
-The network must be a basic network with a solved power flow.
+Accepts both basic and non-basic networks. For non-basic networks, constructs
+an ACPowerFlowState internally which handles ID translation.
 """
 function calc_current_power_sensitivities(net::Dict; full::Bool=true)
-    @assert haskey(net, "basic_network") && net["basic_network"] "Network must be a basic network"
-    @assert haskey(net, "branch") "Network must have branch data"
-
-    Y = PM.calc_basic_admittance_matrix(net)
-    v = PM.calc_basic_bus_voltage(net)
-    idx_slack = _find_slack_bus(net)
-
-    return calc_current_power_sensitivities(v, Y, net["branch"]; idx_slack=idx_slack, full=full)
+    state = ACPowerFlowState(net)
+    @assert !isnothing(state.branch_data) "Failed to extract branch data from network"
+    return calc_current_power_sensitivities(state; full=full)
 end
 
 """

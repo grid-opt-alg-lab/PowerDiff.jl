@@ -185,18 +185,18 @@ end
 Build a polar AC OPF problem for the given network.
 
 Uses PowerModels-style data dict for load/gen/branch parameters.
+Accepts both basic and non-basic networks; internally remaps to sequential indices.
 
 # Arguments
 - `network`: ACNetwork containing topology and admittances
-- `pm_data`: PowerModels data dictionary (basic network)
+- `pm_data`: PowerModels data dictionary (basic or non-basic)
 - `optimizer`: JuMP-compatible optimizer (default: Ipopt)
 - `silent`: Suppress solver output (default: true)
 
 # Example
 ```julia
-pm_data = PowerModels.make_basic_network(PowerModels.parse_file("case5.m"))
-net = ACNetwork(pm_data)
-prob = ACOPFProblem(net, pm_data)
+pm_data = PowerModels.parse_file("case5.m")
+prob = ACOPFProblem(pm_data)
 solve!(prob)
 ```
 """
@@ -206,8 +206,6 @@ function ACOPFProblem(
     optimizer=Ipopt.Optimizer,
     silent::Bool=true
 )
-    @assert haskey(pm_data, "basic_network") && pm_data["basic_network"] == true "Network must be a basic network"
-
     if optimizer === Clarabel.Optimizer
         throw(ArgumentError(
             "Clarabel is a convex solver and cannot solve nonconvex AC OPF. " *
@@ -221,34 +219,146 @@ function ACOPFProblem(
     PM.calc_thermal_limits!(pm_data)
     ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
 
-    n_gen = length(ref[:gen])
-    gen_buses = [ref[:gen][i]["gen_bus"] for i in 1:n_gen]
+    id_map = network.id_map
 
-    # Convert ref to Symbol-keyed dict for storage
-    ref_sym = Dict{Symbol, Any}(
-        :bus => ref[:bus],
-        :gen => ref[:gen],
-        :branch => ref[:branch],
-        :load => ref[:load],
-        :shunt => ref[:shunt],
-        :arcs => ref[:arcs],
-        :arcs_from => ref[:arcs_from],
-        :arcs_to => ref[:arcs_to],
-        :bus_arcs => ref[:bus_arcs],
-        :bus_gens => ref[:bus_gens],
-        :bus_loads => ref[:bus_loads],
-        :bus_shunts => ref[:bus_shunts],
-        :ref_buses => ref[:ref_buses]
-    )
+    # Remap ref to sequential keys so JuMP/KKT code can iterate 1:n, 1:m, 1:k
+    seq_ref = _remap_ref_to_sequential(ref, id_map)
+
+    n_gen = length(seq_ref[:gen])
+    gen_buses = [seq_ref[:gen][i]["gen_bus"] for i in 1:n_gen]
 
     prob = ACOPFProblem(
         JuMP.Model(), network,
         VariableRef[], VariableRef[], VariableRef[], VariableRef[],
         Dict{Tuple{Int,Int,Int}, VariableRef}(), Dict{Tuple{Int,Int,Int}, VariableRef}(),
-        (;), ref_sym, gen_buses, n_gen, ACSensitivityCache(), optimizer, silent
+        (;), seq_ref, gen_buses, n_gen, ACSensitivityCache(), optimizer, silent
     )
     _rebuild_jump_model!(prob)
     return prob
+end
+
+"""
+Remap a `build_ref` result to sequential 1-based keys so that the JuMP model
+and KKT code can iterate `for i in 1:n` without change.
+
+Internal bus/branch/gen/load IDs within each dict entry (e.g. `f_bus`, `gen_bus`,
+`load_bus`) are also remapped to sequential indices.
+"""
+function _remap_ref_to_sequential(ref::Dict, id_map::IDMapping)
+    n = length(id_map.bus_ids)
+    m = length(id_map.branch_ids)
+    k = length(id_map.gen_ids)
+
+    # Helper: remap bus IDs inside a dict entry
+    function _remap_bus_fields!(d::Dict, fields)
+        for f in fields
+            if haskey(d, f)
+                d[f] = id_map.bus_to_idx[d[f]]
+            end
+        end
+        return d
+    end
+
+    # Remap buses: orig_id → sequential idx
+    seq_bus = Dict{Int, Any}()
+    for (orig_id, bus) in ref[:bus]
+        idx = id_map.bus_to_idx[orig_id]
+        new_bus = copy(bus)
+        new_bus["bus_i"] = idx
+        new_bus["index"] = idx
+        seq_bus[idx] = new_bus
+    end
+
+    # Remap branches
+    seq_branch = Dict{Int, Any}()
+    for (orig_id, br) in ref[:branch]
+        idx = id_map.branch_to_idx[orig_id]
+        new_br = copy(br)
+        new_br["index"] = idx
+        _remap_bus_fields!(new_br, ["f_bus", "t_bus"])
+        seq_branch[idx] = new_br
+    end
+
+    # Remap generators
+    seq_gen = Dict{Int, Any}()
+    for (orig_id, gen) in ref[:gen]
+        idx = id_map.gen_to_idx[orig_id]
+        new_gen = copy(gen)
+        new_gen["index"] = idx
+        _remap_bus_fields!(new_gen, ["gen_bus"])
+        seq_gen[idx] = new_gen
+    end
+
+    # Remap loads
+    seq_load = Dict{Int, Any}()
+    for (orig_id, load) in ref[:load]
+        idx = id_map.load_to_idx[orig_id]
+        new_load = copy(load)
+        new_load["index"] = idx
+        _remap_bus_fields!(new_load, ["load_bus"])
+        seq_load[idx] = new_load
+    end
+
+    # Remap shunts
+    seq_shunt = Dict{Int, Any}()
+    for (orig_id, shunt) in ref[:shunt]
+        new_shunt = copy(shunt)
+        _remap_bus_fields!(new_shunt, ["shunt_bus"])
+        seq_shunt[orig_id] = new_shunt  # shunt IDs don't matter much, keep original
+    end
+
+    # Remap arcs: (l, i, j) → (seq_l, seq_i, seq_j)
+    function _remap_arc(arc)
+        (l, i, j) = arc
+        return (id_map.branch_to_idx[l], id_map.bus_to_idx[i], id_map.bus_to_idx[j])
+    end
+
+    seq_arcs = [_remap_arc(a) for a in ref[:arcs]]
+    seq_arcs_from = [_remap_arc(a) for a in ref[:arcs_from]]
+    seq_arcs_to = [_remap_arc(a) for a in ref[:arcs_to]]
+
+    # Remap bus_arcs, bus_gens, bus_loads, bus_shunts to sequential bus keys
+    seq_bus_arcs = Dict{Int, Vector{Tuple{Int,Int,Int}}}()
+    for (orig_bus, arcs) in ref[:bus_arcs]
+        seq_bus_arcs[id_map.bus_to_idx[orig_bus]] = [_remap_arc(a) for a in arcs]
+    end
+
+    seq_bus_gens = Dict{Int, Vector{Int}}()
+    for (orig_bus, gen_ids) in ref[:bus_gens]
+        seq_bus_gens[id_map.bus_to_idx[orig_bus]] = [id_map.gen_to_idx[g] for g in gen_ids]
+    end
+
+    seq_bus_loads = Dict{Int, Vector{Int}}()
+    for (orig_bus, load_ids) in ref[:bus_loads]
+        seq_bus_loads[id_map.bus_to_idx[orig_bus]] = [id_map.load_to_idx[l] for l in load_ids]
+    end
+
+    seq_bus_shunts = Dict{Int, Vector{Int}}()
+    for (orig_bus, shunt_ids) in ref[:bus_shunts]
+        seq_bus_shunts[id_map.bus_to_idx[orig_bus]] = shunt_ids  # keep shunt IDs as-is
+    end
+
+    # Remap ref_buses
+    seq_ref_buses = Dict{Int, Any}()
+    for (orig_bus, val) in ref[:ref_buses]
+        seq_ref_buses[id_map.bus_to_idx[orig_bus]] = val
+    end
+
+    return Dict{Symbol, Any}(
+        :bus => seq_bus,
+        :gen => seq_gen,
+        :branch => seq_branch,
+        :load => seq_load,
+        :shunt => seq_shunt,
+        :arcs => seq_arcs,
+        :arcs_from => seq_arcs_from,
+        :arcs_to => seq_arcs_to,
+        :bus_arcs => seq_bus_arcs,
+        :bus_gens => seq_bus_gens,
+        :bus_loads => seq_bus_loads,
+        :bus_shunts => seq_bus_shunts,
+        :ref_buses => seq_ref_buses,
+    )
 end
 
 """
@@ -421,11 +531,10 @@ end
     ACOPFProblem(pm_data::Dict; kwargs...)
 
 Convenience constructor: build ACOPFProblem directly from PowerModels dict.
+
+Accepts both basic and non-basic networks.
 """
 function ACOPFProblem(pm_data::Dict; kwargs...)
-    if !haskey(pm_data, "basic_network") || !pm_data["basic_network"]
-        pm_data = PM.make_basic_network(pm_data)
-    end
     network = ACNetwork(pm_data)
     return ACOPFProblem(network, pm_data; kwargs...)
 end

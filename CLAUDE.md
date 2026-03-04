@@ -121,20 +121,36 @@ Fields:
 - `row_to_id`, `id_to_row`: Row index ↔ element ID
 - `col_to_id`, `id_to_col`: Column index ↔ element ID
 
+### Non-Basic Network Support & IDMapping
+
+All constructors (`DCNetwork`, `ACNetwork`, `DCOPFProblem`, `ACOPFProblem`, `ACPowerFlowState`) accept networks with arbitrary element IDs. Internally, IDs are translated to sequential 1-based indices via `IDMapping`:
+
+```julia
+struct IDMapping
+    bus_ids::Vector{Int}           # sorted original bus IDs
+    branch_ids::Vector{Int}        # sorted original branch IDs
+    gen_ids::Vector{Int}           # sorted original gen IDs
+    load_ids::Vector{Int}          # sorted original load IDs
+    bus_to_idx::Dict{Int,Int}      # original ID → sequential index
+    # ... (branch_to_idx, gen_to_idx, load_to_idx)
+end
+```
+
+- Stored in `network.id_map` on `DCNetwork` and `ACNetwork`
+- Internal computation uses sequential indices; original IDs flow to `Sensitivity.row_to_id`/`col_to_id`
+- For basic networks, IDMapping is identity (1:n → 1:n)
+
 ### Matrix Indexing Conventions
 
-Sensitivity matrices use **sequential 1-based indexing** matching PowerModels keys:
+Sensitivity matrices use **sequential 1-based indexing** internally, but `row_to_id`/`col_to_id` map back to original element IDs:
 
 - `S[i,j]` = ∂(operand element i) / ∂(parameter element j)
-- Buses: indices 1:n → `net["bus"]["1"]` through `net["bus"]["$n"]`
-- Branches: indices 1:m → `net["branch"]["1"]` through `net["branch"]["$m"]`
-- Generators: indices 1:k → `net["gen"]["1"]` through `net["gen"]["$k"]`
+- `S.row_to_id[i]` gives the original element ID for row i
+- `S.col_to_id[j]` gives the original element ID for column j
 
-To find connections:
-- Generator i is at bus: `net["gen"]["$i"]["gen_bus"]`
-- Branch j connects: `net["branch"]["$j"]["f_bus"]` → `net["branch"]["$j"]["t_bus"]`
+For basic networks (sequential IDs), `row_to_id == 1:n`. For non-basic networks (e.g., case5.m with bus IDs `[1,2,3,4,10]`), `row_to_id == [1,2,3,4,10]`.
 
-Example: `dg_dsw[i,j]` = ∂(generation at generator i) / ∂(switching state of branch j)
+Example: `dg_dsw[i,j]` = ∂(generation at generator `dpg.row_to_id[i]`) / ∂(switching state of branch `dpg.col_to_id[j]`)
 
 ### DC OPF - B-theta Formulation
 
@@ -174,11 +190,13 @@ src/
 ├── PowerModelsDiff.jl          # Main module with exports
 ├── types/
 │   ├── abstract.jl             # Abstract type hierarchy
+│   ├── id_mapping.jl           # IDMapping (original ↔ sequential ID translation)
 │   ├── dc_network.jl           # DCNetwork, DCPowerFlowState, DCOPFSolution + constructors
 │   ├── dc_opf_problem.jl       # DCOPFProblem, DCSensitivityCache + constructors
 │   ├── ac_network.jl           # ACNetwork, ACPowerFlowState
 │   ├── ac_opf_problem.jl       # ACOPFProblem, ACOPFSolution, ACSensitivityCache + constructors
-│   └── sensitivities.jl        # Sensitivity{T} <: AbstractMatrix{T}
+│   ├── sensitivities.jl        # Sensitivity{T} <: AbstractMatrix{T}
+│   └── show.jl                 # Pretty-printing (Base.show methods)
 ├── prob/
 │   ├── dc_opf.jl               # DC OPF solve!, update_demand!
 │   ├── kkt_dc_opf.jl           # DC KKT system, Jacobians, cached parameter derivatives
@@ -200,16 +218,22 @@ src/
 └── deprecated/                 # Legacy types
 
 test/
-├── runtests.jl                 # Main test runner
+├── runtests.jl                 # Main test runner (~790 lines inline + includes below)
+├── common.jl                   # Shared helpers: load_test_case, create_2bus_network, etc.
 ├── test_ac_opf_sens.jl         # AC OPF sensitivity tests
 ├── test_ac_pf_verification.jl  # AC PF finite-difference verification
 ├── test_sensitivity_coverage.jl # Exhaustive (operand, parameter) coverage tests
 ├── test_dc_opf_verification.jl # DC OPF finite-difference verification
 ├── test_update_switching.jl    # update_switching! correctness tests
+├── test_psh.jl                 # Load shedding sensitivity tests
+├── test_nonbasic.jl            # Non-basic network support (arbitrary element IDs)
 ├── unified/
 │   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
 │   └── test_sensitivity_verification.jl  # ForwardDiff verification
 └── mwe_unified.jl              # Minimum working example (symbol API)
+
+examples/
+└── interactive_repl.jl         # Interactive REPL walkthrough (case14)
 
 docs/
 ├── Project.toml                # Documenter.jl dependencies
@@ -227,7 +251,9 @@ docs/
 ## Important Conventions
 
 **PowerModels Integration**
-- Networks must be processed with `make_basic_network()` before use
+- Both basic and non-basic networks are accepted (arbitrary bus/branch/gen IDs)
+- `make_basic_network()` is optional; non-basic networks are translated internally via `IDMapping`
+- All network constructors use `PM.build_ref()` internally for consistent data access
 - Access via string keys: `net["branch"]["1"]`, `net["gen"]["1"]`
 - Module alias: `const PM = PowerModels`
 
@@ -242,6 +268,12 @@ docs/
 **Default Solver**
 - Clarabel for DC OPF, Ipopt for AC OPF
 - Override: `DCOPFProblem(net, d; optimizer=Ipopt.Optimizer)`
+
+**Testing**
+- `runtests.jl` contains ~790 lines of inline tests plus `include()` calls for 7 additional test files
+- Tests call `PowerModels.silence()` at startup to suppress solver output
+- `test/common.jl` provides `load_test_case()`, `create_2bus_network()`, `create_3bus_congested_network()` helpers (used by included test files, not by runtests.jl which defines its own `load_test_case`)
+- `test/test_nonbasic.jl` verifies all features work with non-basic networks (case5.m, bus IDs `[1,2,3,4,10]`)
 
 **Sensitivity Verification**
 - All sensitivities are verified against ForwardDiff or finite differences in tests
