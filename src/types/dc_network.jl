@@ -118,7 +118,7 @@ constraint handling.
 - `pg`: Generation vector
 - `d`: Demand vector
 - `f`: Branch flows (computed from va)
-- `L_r_factor`: LU factorization of `B[non_ref, non_ref]`
+- `B_r_factor`: LU factorization of `B[non_ref, non_ref]`
 - `non_ref`: Indices of non-reference buses
 """
 struct DCPowerFlowState{F<:Factorization{Float64}} <: AbstractPowerFlowState
@@ -128,7 +128,7 @@ struct DCPowerFlowState{F<:Factorization{Float64}} <: AbstractPowerFlowState
     pg::Vector{Float64}
     d::Vector{Float64}
     f::Vector{Float64}
-    L_r_factor::F
+    B_r_factor::F
     non_ref::Vector{Int}
 end
 

@@ -44,7 +44,7 @@ AbstractPowerNetwork
 └── ACNetwork           # AC with vectorized admittance
 
 AbstractPowerFlowState
-├── DCPowerFlowState    # DC power flow (θ = L⁺ * p)
+├── DCPowerFlowState    # DC power flow (θ_r = B_r \ p_r)
 ├── ACPowerFlowState    # AC power flow (complex voltages)
 └── AbstractOPFSolution
     ├── DCOPFSolution   # DC OPF with generation, flows, duals
@@ -131,6 +131,7 @@ struct IDMapping
     branch_ids::Vector{Int}        # sorted original branch IDs
     gen_ids::Vector{Int}           # sorted original gen IDs
     load_ids::Vector{Int}          # sorted original load IDs
+    shunt_ids::Vector{Int}         # sorted original shunt IDs
     bus_to_idx::Dict{Int,Int}      # original ID → sequential index
     # ... (branch_to_idx, gen_to_idx, load_to_idx, shunt_to_idx)
 end
@@ -159,7 +160,7 @@ Uses susceptance-weighted Laplacian `B = A' * Diagonal(-b .* sw) * A`:
 - `DCNetwork`: Network data (topology `A`, susceptances `b`, switching `sw`, limits, costs, `c_shed`)
 - `DCOPFProblem`: JuMP optimization wrapper with `DCSensitivityCache` for efficient KKT reuse
 - `DCOPFSolution`: Primal (θ, g, f, psh) and dual variables (ν_bal for LMPs)
-- `DCPowerFlowState`: Non-OPF power flow (θ = L⁺ * p, no optimization)
+- `DCPowerFlowState`: Non-OPF power flow (θ_r = B_r \ p_r, no optimization)
 
 ### AC OPF - Polar Formulation
 
@@ -226,6 +227,7 @@ test/
 ├── test_update_switching.jl    # update_switching! correctness tests
 ├── test_psh.jl                 # Load shedding sensitivity tests
 ├── test_nonbasic.jl            # Non-basic network support (arbitrary element IDs)
+├── test_jvp_vjp.jl             # JVP/VJP with ID-aware Dict I/O
 ├── unified/
 │   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
 │   └── test_sensitivity_verification.jl  # ForwardDiff verification
@@ -271,7 +273,7 @@ docs/
 - Override: `DCOPFProblem(net, d; optimizer=Ipopt.Optimizer)`
 
 **Testing**
-- `runtests.jl` contains ~800 lines of inline tests plus `include()` calls for 8 additional test files
+- `runtests.jl` contains ~800 lines of inline tests plus `include()` calls for 9 additional test files
 - Tests call `PowerModels.silence()` at startup to suppress solver output
 - `test/common.jl` provides `load_test_case()`, `create_2bus_network()`, `create_3bus_congested_network()` helpers (used by included test files, not by runtests.jl which defines its own `load_test_case`)
 - `test/test_nonbasic.jl` verifies all features work with non-basic networks (case5.m, bus IDs `[1,2,3,4,10]`)

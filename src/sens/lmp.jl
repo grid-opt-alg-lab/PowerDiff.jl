@@ -19,7 +19,7 @@
 # where B = A' * Diag(-b .* sw) * A is the susceptance-weighted Laplacian.
 #
 # The LMP at bus i equals the power balance dual ν_bal[i]. The network topology
-# is embedded in the constraint through L, so ν_bal already incorporates both
+# is embedded in the constraint through B, so ν_bal already incorporates both
 # energy and congestion effects.
 #
 # LMP Decomposition (for analysis):

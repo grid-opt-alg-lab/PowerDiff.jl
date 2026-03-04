@@ -136,7 +136,7 @@ Matrix(sens)          # extract raw matrix
 
 ## JVP / VJP
 
-For ID-aware Jacobian-vector products, use [`jvp`](@ref) and [`vjp`](@ref). These accept `Dict{Int,Number}` keyed by original element IDs and return `Dict{Int,T}` keyed by original element IDs:
+For ID-aware Jacobian-vector products, use [`jvp`](@ref) and [`vjp`](@ref). These accept a `Dict` keyed by original element IDs (e.g., `Dict(10 => 0.1)`) and return `Dict{Int,T}` keyed by original element IDs:
 
 ```julia
 S = calc_sensitivity(prob, :lmp, :d)

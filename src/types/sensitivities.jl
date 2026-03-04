@@ -107,7 +107,7 @@ Base.:*(m::AbstractMatrix, s::Sensitivity) = m * s.matrix
 # =============================================================================
 
 """
-    dict_to_vec(S::Sensitivity, d::AbstractDict{Int}, axis::Symbol) → Vector
+    dict_to_vec(S::Sensitivity, d::AbstractDict{Int,<:Number}, axis::Symbol) → Vector
 
 Convert a Dict keyed by original element IDs to a dense vector aligned with
 the sensitivity matrix. Missing keys are treated as zero. Unknown IDs throw
@@ -137,7 +137,7 @@ function dict_to_vec(S::Sensitivity{T}, d::AbstractDict{Int,<:Number}, axis::Sym
 end
 
 """
-    vec_to_dict(S::Sensitivity, v::AbstractVector, axis::Symbol) → Dict{Int,T}
+    vec_to_dict(S::Sensitivity{T}, v::AbstractVector, axis::Symbol) → Dict{Int,T}
 
 Convert a dense vector to a Dict keyed by original element IDs.
 

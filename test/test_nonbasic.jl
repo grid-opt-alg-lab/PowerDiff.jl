@@ -386,4 +386,155 @@
         d2 = calc_demand_vector(dc_nb)
         @test isapprox(d1, d2, atol=1e-10)
     end
+
+    # =================================================================
+    # update_switching! with non-basic networks
+    # =================================================================
+    @testset "DC update_switching! non-basic" begin
+        prob_nb = DCOPFProblem(raw)
+        sol1 = solve!(prob_nb)
+        obj1 = sol1.objective
+
+        # Open one branch (reduce to 0.5) and re-solve
+        sw_new = ones(prob_nb.network.m)
+        sw_new[1] = 0.5
+        update_switching!(prob_nb, sw_new)
+        sol2 = solve!(prob_nb)
+
+        # Objective should change (different topology → different dispatch)
+        @test sol2.objective > 0
+        @test !isapprox(sol1.objective, sol2.objective, atol=1e-6)
+
+        # Sensitivities should still be finite after update
+        S = calc_sensitivity(prob_nb, :va, :d)
+        @test all(isfinite, Matrix(S))
+        @test S.row_to_id == [1, 2, 3, 4, 10]  # IDs preserved after update
+    end
+
+    @testset "AC update_switching! non-basic" begin
+        prob_nb = ACOPFProblem(raw)
+        sol1 = solve!(prob_nb)
+        obj1 = sol1.objective
+
+        # Slightly reduce a branch switching state
+        sw_new = ones(prob_nb.network.m)
+        sw_new[1] = 0.8
+        update_switching!(prob_nb, sw_new)
+        sol2 = solve!(prob_nb)
+
+        # Solution should still be feasible
+        @test sol2.objective > 0
+        @test all(isfinite, sol2.vm)
+
+        # Sensitivities should still work after update
+        S = calc_sensitivity(prob_nb, :vm, :sw)
+        @test all(isfinite, Matrix(S))
+        @test S.row_to_id == [1, 2, 3, 4, 10]
+    end
+
+    # =================================================================
+    # IDMapping constructor validation
+    # =================================================================
+    @testset "IDMapping constructor validation" begin
+        # Unsorted bus_ids should throw
+        @test_throws ArgumentError IDMapping(
+            [3, 1, 2], [1, 2], [1], [1], Int[],
+            Dict(3=>1, 1=>2, 2=>3), Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict{Int,Int}())
+
+        # Unsorted branch_ids should throw
+        @test_throws ArgumentError IDMapping(
+            [1, 2, 3], [2, 1], [1], [1], Int[],
+            Dict(1=>1, 2=>2, 3=>3), Dict(2=>1, 1=>2), Dict(1=>1), Dict(1=>1), Dict{Int,Int}())
+
+        # Unsorted gen_ids should throw
+        @test_throws ArgumentError IDMapping(
+            [1, 2], [1], [3, 1], [1], Int[],
+            Dict(1=>1, 2=>2), Dict(1=>1), Dict(3=>1, 1=>2), Dict(1=>1), Dict{Int,Int}())
+
+        # Unsorted load_ids should throw
+        @test_throws ArgumentError IDMapping(
+            [1, 2], [1], [1], [5, 2], Int[],
+            Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict(5=>1, 2=>2), Dict{Int,Int}())
+
+        # Unsorted shunt_ids should throw
+        @test_throws ArgumentError IDMapping(
+            [1, 2], [1], [1], [1], [3, 1],
+            Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict(1=>1), Dict(3=>1, 1=>2))
+
+        # Length mismatch: bus_ids vs bus_to_idx
+        @test_throws ArgumentError IDMapping(
+            [1, 2, 3], [1], [1], [1], Int[],
+            Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict(1=>1), Dict{Int,Int}())
+
+        # Length mismatch: branch_ids vs branch_to_idx
+        @test_throws ArgumentError IDMapping(
+            [1, 2], [1, 2], [1], [1], Int[],
+            Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict(1=>1), Dict{Int,Int}())
+
+        # Valid construction should work
+        id_map = IDMapping(
+            [1, 5, 10], [1, 2], [1], [1], Int[],
+            Dict(1=>1, 5=>2, 10=>3), Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict{Int,Int}())
+        @test id_map.bus_ids == [1, 5, 10]
+        @test id_map.bus_to_idx[10] == 3
+    end
+
+    # =================================================================
+    # _remap_ref_to_sequential
+    # =================================================================
+    @testset "_remap_ref_to_sequential" begin
+        # Build ref from non-basic network
+        pm_data = deepcopy(raw)
+        PowerModels.standardize_cost_terms!(pm_data, order=2)
+        PowerModels.calc_thermal_limits!(pm_data)
+        ref = PowerModels.build_ref(pm_data)[:it][:pm][:nw][0]
+        id_map = IDMapping(ref)
+
+        seq_ref = PowerModelsDiff._remap_ref_to_sequential(ref, id_map)
+
+        # Sequential ref should have keys 1:n for buses
+        n = length(id_map.bus_ids)
+        @test sort(collect(keys(seq_ref[:bus]))) == collect(1:n)
+
+        # Sequential ref should have keys 1:m for branches
+        m = length(id_map.branch_ids)
+        @test sort(collect(keys(seq_ref[:branch]))) == collect(1:m)
+
+        # Sequential ref should have keys 1:k for generators
+        k = length(id_map.gen_ids)
+        @test sort(collect(keys(seq_ref[:gen]))) == collect(1:k)
+
+        # Bus-level fields should be remapped
+        for (seq_idx, bus_data) in seq_ref[:bus]
+            @test bus_data["bus_i"] == seq_idx
+        end
+
+        # Branch f_bus / t_bus should be sequential
+        for (seq_idx, br_data) in seq_ref[:branch]
+            @test 1 <= br_data["f_bus"] <= n
+            @test 1 <= br_data["t_bus"] <= n
+        end
+
+        # Generator gen_bus should be sequential
+        for (seq_idx, gen_data) in seq_ref[:gen]
+            @test 1 <= gen_data["gen_bus"] <= n
+        end
+
+        # Arcs should all use sequential IDs
+        for (l, i, j) in seq_ref[:arcs]
+            @test 1 <= l <= m
+            @test 1 <= i <= n
+            @test 1 <= j <= n
+        end
+
+        # bus_gens keys should be sequential bus IDs
+        for bus_idx in keys(seq_ref[:bus_gens])
+            @test 1 <= bus_idx <= n
+        end
+
+        # ref_buses should be remapped
+        for ref_bus in keys(seq_ref[:ref_buses])
+            @test 1 <= ref_bus <= n
+        end
+    end
 end

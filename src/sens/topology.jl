@@ -200,7 +200,7 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
         # ∂L_r/∂swₑ * θ_r = -bₑ * a_{e,r} * (a_{e,r}' * θ_r)
         coeff = -net.b[e] * dot(a_e_r, θ_r)
         rhs = Vector(coeff * a_e_r)   # dense RHS for UmfpackLU backsolve
-        dva_dsw[nr, e] = -(state.L_r_factor \ rhs)
+        dva_dsw[nr, e] = -(state.B_r_factor \ rhs)
         # dva_dsw[ref, e] = 0 by construction
     end
 
@@ -248,7 +248,7 @@ function calc_sensitivity_demand(state::DCPowerFlowState)
     # The output is inherently dense (L_r⁻¹), so we use a batched solve.
     dva_dd = zeros(n, n)
     n_r = length(nr)
-    dva_dd[nr, nr] = -(state.L_r_factor \ Matrix(1.0I, n_r, n_r))
+    dva_dd[nr, nr] = -(state.B_r_factor \ Matrix(1.0I, n_r, n_r))
 
     # ∂f/∂d = W · A · ∂va/∂d
     W = Diagonal(-net.b .* net.sw)

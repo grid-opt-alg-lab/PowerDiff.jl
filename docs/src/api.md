@@ -7,6 +7,28 @@ calc_sensitivity
 Sensitivity
 ```
 
+## ID Mapping
+
+```@docs
+IDMapping
+```
+
+## JVP / VJP
+
+```@docs
+jvp
+vjp
+dict_to_vec
+vec_to_dict
+```
+
+## Introspection
+
+```@docs
+operand_symbols
+parameter_symbols
+```
+
 ## DC Types
 
 ```@docs
