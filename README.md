@@ -5,7 +5,7 @@
 # PowerModelsDiff.jl
 
 [![CI](https://github.com/grid-opt-alg-lab/PowerModelsDiff.jl/actions/workflows/CI.yml/badge.svg)](https://github.com/grid-opt-alg-lab/PowerModelsDiff.jl/actions/workflows/CI.yml)
-[![Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://grid-opt-alg-lab.github.io/PowerModelsDiff.jl/dev/)
+[![Docs](https://img.shields.io/badge/docs-dev-blue.svg)](https://samueltalkington.com/research/pmdiff/)
 
 A Julia package for differentiable power system analysis. Compute sensitivities of power flow solutions, optimal power flow dispatch, and locational marginal prices with respect to network parameters.
 
@@ -46,15 +46,15 @@ dlmp_dd.formulation  # :dcopf
 dlmp_dd[2, 3]        # dLMP_2 / dd_3
 ```
 
-See the [Getting Started guide](https://grid-opt-alg-lab.github.io/PowerModelsDiff.jl/dev/getting-started/) for DC/AC power flow and OPF walkthroughs.
+See the [Getting Started guide](https://samueltalkington.com/research/pmdiff/getting-started/) for DC/AC power flow and OPF walkthroughs.
 
 ## Documentation
 
-- [Getting Started](https://grid-opt-alg-lab.github.io/PowerModelsDiff.jl/dev/getting-started/) — DC PF, DC OPF, AC PF, AC OPF walkthroughs
-- [Sensitivity API](https://grid-opt-alg-lab.github.io/PowerModelsDiff.jl/dev/sensitivity-api/) — Operand/parameter tables, valid combinations, indexing
-- [Mathematical Background](https://grid-opt-alg-lab.github.io/PowerModelsDiff.jl/dev/math/) — B-theta formulation, KKT implicit differentiation
-- [Advanced Topics](https://grid-opt-alg-lab.github.io/PowerModelsDiff.jl/dev/advanced/) — Type hierarchy, caching, solver configuration
-- [API Reference](https://grid-opt-alg-lab.github.io/PowerModelsDiff.jl/dev/api/) — Full docstring reference
+- [Getting Started](https://samueltalkington.com/research/pmdiff/getting-started/) — DC PF, DC OPF, AC PF, AC OPF walkthroughs
+- [Sensitivity API](https://samueltalkington.com/research/pmdiff/sensitivity-api/) — Operand/parameter tables, valid combinations, indexing
+- [Mathematical Background](https://samueltalkington.com/research/pmdiff/math/) — B-theta formulation, KKT implicit differentiation
+- [Advanced Topics](https://samueltalkington.com/research/pmdiff/advanced/) — Type hierarchy, caching, solver configuration
+- [API Reference](https://samueltalkington.com/research/pmdiff/api/) — Full docstring reference
 
 ## Dependencies
 
