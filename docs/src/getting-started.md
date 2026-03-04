@@ -107,10 +107,39 @@ AC power flow sensitivities require a solved AC power flow solution.
 PowerModels.compute_ac_pf!(net)
 ac_state = ACPowerFlowState(net)
 
+# Voltage and current sensitivities
 dvm_dp = calc_sensitivity(ac_state, :vm, :p)   # d|V|/dp (n x n)
 dvm_dq = calc_sensitivity(ac_state, :vm, :q)   # d|V|/dq (n x n)
 dv_dp  = calc_sensitivity(ac_state, :v, :p)    # dV/dp (ComplexF64, n x n)
 dim_dp = calc_sensitivity(ac_state, :im, :p)   # d|I|/dp (m x n)
+
+# Voltage angle and branch flow sensitivities
+dva_dp = calc_sensitivity(ac_state, :va, :p)   # dθ/dp (n x n)
+df_dp  = calc_sensitivity(ac_state, :f, :p)    # dP_flow/dp (m x n)
+
+# Demand sensitivities (∂/∂d = -∂/∂p since p_net = pg - pd)
+dvm_dd = calc_sensitivity(ac_state, :vm, :d)   # d|V|/dd (n x n)
+```
+
+### Power Flow Jacobian
+
+The 4 standard Jacobian blocks are available as sensitivity combinations:
+
+```julia
+J1 = calc_sensitivity(ac_state, :p, :va)   # ∂P/∂θ  (n x n)
+J2 = calc_sensitivity(ac_state, :p, :vm)   # ∂P/∂|V| (n x n)
+J3 = calc_sensitivity(ac_state, :q, :va)   # ∂Q/∂θ  (n x n)
+J4 = calc_sensitivity(ac_state, :q, :vm)   # ∂Q/∂|V| (n x n)
+```
+
+Or compute all 4 at once:
+
+```julia
+jac = calc_power_flow_jacobian(ac_state)
+jac.dp_dva   # J1
+jac.dp_dvm   # J2
+jac.dq_dva   # J3
+jac.dq_dvm   # J4
 ```
 
 ## AC OPF

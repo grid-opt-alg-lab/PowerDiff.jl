@@ -12,8 +12,8 @@ Operand symbols specify what quantity we differentiate.
 
 | Symbol | Description | Formulations |
 |--------|-------------|------------|
-| `:va` | Voltage phase angles | DCPowerFlowState, DCOPFProblem, ACOPFProblem |
-| `:f` | Branch flows | DCPowerFlowState, DCOPFProblem |
+| `:va` | Voltage phase angles | DCPowerFlowState, DCOPFProblem, ACPowerFlowState, ACOPFProblem |
+| `:f` | Branch active power flows | DCPowerFlowState, DCOPFProblem, ACPowerFlowState |
 | `:pg` / `:g` | Generator active power | DCOPFProblem, ACOPFProblem |
 | `:psh` | Load shedding | DCOPFProblem |
 | `:qg` | Generator reactive power | ACOPFProblem |
@@ -21,6 +21,8 @@ Operand symbols specify what quantity we differentiate.
 | `:vm` | Voltage magnitude | ACPowerFlowState, ACOPFProblem |
 | `:im` | Current magnitude | ACPowerFlowState |
 | `:v` | Complex voltage phasor | ACPowerFlowState |
+| `:p` | Active power injection | ACPowerFlowState (Jacobian block) |
+| `:q` | Reactive power injection | ACPowerFlowState (Jacobian block) |
 
 ## Parameter Symbols
 
@@ -28,12 +30,15 @@ Parameter symbols specify what we differentiate with respect to.
 
 | Symbol | Description | Formulations |
 |--------|-------------|------------|
-| `:d` / `:pd` | Demand | DCPowerFlowState, DCOPFProblem |
+| `:d` / `:pd` | Active demand | DCPowerFlowState, DCOPFProblem, ACPowerFlowState (via transform) |
+| `:qd` | Reactive demand | ACPowerFlowState (via transform) |
 | `:sw` | Switching states | DCPowerFlowState, DCOPFProblem, ACOPFProblem |
 | `:cq`, `:cl` | Cost coefficients (quadratic, linear) | DCOPFProblem |
 | `:fmax` | Flow limits | DCOPFProblem |
 | `:b` | Susceptances | DCOPFProblem |
 | `:p`, `:q` | Power injections (active, reactive) | ACPowerFlowState |
+| `:va` | Voltage phase angle | ACPowerFlowState (Jacobian block parameter) |
+| `:vm` | Voltage magnitude | ACPowerFlowState (Jacobian block parameter) |
 
 ## Valid Combinations
 
@@ -54,13 +59,31 @@ Parameter symbols specify what we differentiate with respect to.
 | `:psh` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `:lmp` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-### AC Power Flow (6 combinations)
+### AC Power Flow (24 combinations: 14 native + 10 via transforms)
 
-| | `:p` | `:q` |
+**Native combinations (14):**
+
+| | `:p` | `:q` | `:va` | `:vm` |
+|---|---|---|---|---|
+| `:vm` | ✓ | ✓ | | |
+| `:v` | ✓ | ✓ | | |
+| `:im` | ✓ | ✓ | | |
+| `:va` | ✓ | ✓ | | |
+| `:f` | ✓ | ✓ | | |
+| `:p` | | | ✓ | ✓ |
+| `:q` | | | ✓ | ✓ |
+
+**Transform-derived combinations (10):**
+
+Via `∂/∂d = -∂/∂p` and `∂/∂qd = -∂/∂q` (since `p_net = pg - pd` with `pg` fixed in power flow). Only applies to operands that have `:p`/`:q` as a native parameter:
+
+| | `:d` | `:qd` |
 |---|---|---|
 | `:vm` | ✓ | ✓ |
 | `:v` | ✓ | ✓ |
 | `:im` | ✓ | ✓ |
+| `:va` | ✓ | ✓ |
+| `:f` | ✓ | ✓ |
 
 ### AC OPF (4 combinations)
 
@@ -70,6 +93,55 @@ Parameter symbols specify what we differentiate with respect to.
 | `:va` | ✓ |
 | `:pg` | ✓ |
 | `:qg` | ✓ |
+
+## Power Flow Jacobian
+
+The AC power flow Jacobian relates power injections to voltage state variables. The 4 standard blocks are available as sensitivity combinations:
+
+```julia
+state = ACPowerFlowState(pf_data)
+
+J1 = calc_sensitivity(state, :p, :va)   # ∂P/∂θ  (n × n)
+J2 = calc_sensitivity(state, :p, :vm)   # ∂P/∂|V| (n × n)
+J3 = calc_sensitivity(state, :q, :va)   # ∂Q/∂θ  (n × n)
+J4 = calc_sensitivity(state, :q, :vm)   # ∂Q/∂|V| (n × n)
+```
+
+These are **raw** Jacobian blocks for ALL buses (not reduced by bus type). For the reduced Newton-Raphson Jacobian, extract the non-reference bus submatrix:
+
+```julia
+non_ref = [i for i in 1:n if i != slack_bus]
+J_NR = [Matrix(J1)[non_ref, non_ref]  Matrix(J2)[non_ref, non_ref];
+        Matrix(J3)[non_ref, non_ref]  Matrix(J4)[non_ref, non_ref]]
+```
+
+The direct function `calc_power_flow_jacobian(state)` returns all 4 blocks at once as a NamedTuple.
+
+### Bus-Type Enforcement
+
+By default, the Jacobian contains raw partial derivatives for all buses. To get the Newton-Raphson form matching PowerModels' `calc_basic_jacobian_matrix`, pass a `bus_types` vector:
+
+```julia
+bus_types = [pf_data["bus"]["$i"]["bus_type"] for i in 1:n]
+jac = calc_power_flow_jacobian(state; bus_types=bus_types)
+```
+
+Bus-type column modifications:
+- **PQ (type 1)**: No modification — raw derivatives
+- **PV (type 2)**: θ columns unchanged; |V| columns zeroed with `∂Q_j/∂|V_j| = 1`
+- **Slack (type 3)**: Both θ and |V| columns become unit vectors (`e_j`)
+
+The `calc_sensitivity` interface (`:p`/`:q` w.r.t. `:va`/`:vm`) always returns raw derivatives, which is correct for sensitivity analysis.
+
+## Parameter Transforms
+
+Some parameter symbols are derived from native parameters via type-specific transforms. These transforms are only valid for specific state types:
+
+- **ACPowerFlowState**: `∂/∂d = -∂/∂p` and `∂/∂qd = -∂/∂q`
+  - Valid because in power flow, `p_net = pg - pd` with `pg` fixed, so `∂p_net/∂pd = -1`
+  - Does NOT apply to OPF, where demand sensitivity goes through KKT re-optimization
+
+Transforms are transparent: `calc_sensitivity(state, :vm, :d)` automatically computes `-calc_sensitivity(state, :vm, :p)`.
 
 ## Symbol Aliases
 
@@ -101,7 +173,7 @@ S[S.id_to_row[10], S.id_to_col[2]]  # ∂LMP(bus 10) / ∂d(bus 2)
 
 ## Error Handling
 
-Invalid operand/parameter combinations throw `ArgumentError` with a message listing all valid combinations for the given state type:
+Invalid operand/parameter combinations throw `ArgumentError` with a message listing all valid combinations (including transform-derived) for the given state type:
 
 ```julia
 # DCPowerFlowState has no LMP

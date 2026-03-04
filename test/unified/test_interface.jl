@@ -212,8 +212,8 @@ using Test
 
         PowerModels.compute_ac_pf!(net_data)
         ac_state = ACPowerFlowState(net_data)
-        @test operand_symbols(ac_state) == [:vm, :v, :im]
-        @test parameter_symbols(ac_state) == [:p, :q]
+        @test Set(operand_symbols(ac_state)) == Set([:vm, :v, :im, :va, :f, :p, :q])
+        @test Set(parameter_symbols(ac_state)) == Set([:p, :q, :va, :vm, :d, :qd])
 
         ac_prob = ACOPFProblem(net_data)
         @test operand_symbols(ac_prob) == [:vm, :va, :pg, :qg]

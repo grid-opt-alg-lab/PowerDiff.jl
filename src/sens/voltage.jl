@@ -64,10 +64,11 @@ function calc_voltage_power_sensitivities(
     idx_slack::Int=1,
     full::Bool=true
 )
-    ∂v_∂p, ∂vm_∂p = calc_voltage_active_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
-    ∂v_∂q, ∂vm_∂q = calc_voltage_reactive_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
+    ∂v_∂p, ∂vm_∂p, ∂va_∂p = calc_voltage_active_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
+    ∂v_∂q, ∂vm_∂q, ∂va_∂q = calc_voltage_reactive_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
 
-    return (dv_dp=∂v_∂p, dv_dq=∂v_∂q, dvm_dp=∂vm_∂p, dvm_dq=∂vm_∂q)
+    return (dv_dp=∂v_∂p, dv_dq=∂v_∂q, dvm_dp=∂vm_∂p, dvm_dq=∂vm_∂q,
+            dva_dp=∂va_∂p, dva_dq=∂va_∂q)
 end
 
 """
@@ -100,9 +101,10 @@ end
 Compute sensitivity of bus voltages with respect to active power injections.
 
 # Returns
-Tuple (∂v_∂p, ∂vm_∂p) where:
+Tuple (∂v_∂p, ∂vm_∂p, ∂va_∂p) where:
 - `∂v_∂p`: Complex phasor sensitivity ∂v/∂p (n × n or (n-1) × (n-1) if full=false)
 - `∂vm_∂p`: Magnitude sensitivity ∂|v|/∂p
+- `∂va_∂p`: Angle sensitivity ∂θ/∂p
 """
 function calc_voltage_active_power_sensitivities(
     v::AbstractVector{ComplexF64},
@@ -120,6 +122,7 @@ function calc_voltage_active_power_sensitivities(
     # Solve for each column (unit power perturbation at bus k)
     ∂v_∂p = Matrix{ComplexF64}(undef, d, d)
     ∂vm_∂p = Matrix{Float64}(undef, d, d)
+    ∂va_∂p = Matrix{Float64}(undef, d, d)
 
     for k in 1:d
         if abs(v_[k]) > 1e-6
@@ -136,9 +139,13 @@ function calc_voltage_active_power_sensitivities(
 
             # Magnitude sensitivity: ∂|v|/∂p = Re(∂v/∂p · conj(v)) / |v|
             ∂vm_∂p[:, k] = real.(∂v_∂p[:, k] .* conj.(v_)) ./ abs.(v_)
+
+            # Angle sensitivity: ∂θ/∂p = Im(∂v/∂p · conj(v)) / |v|²
+            ∂va_∂p[:, k] = imag.(∂v_∂p[:, k] .* conj.(v_)) ./ abs2.(v_)
         else
             ∂v_∂p[:, k] .= 0
             ∂vm_∂p[:, k] .= 0
+            ∂va_∂p[:, k] .= 0
         end
     end
 
@@ -146,9 +153,10 @@ function calc_voltage_active_power_sensitivities(
     if full
         ∂v_∂p = _insert_slack_zeros(∂v_∂p, idx_slack, ComplexF64)
         ∂vm_∂p = _insert_slack_zeros(∂vm_∂p, idx_slack, Float64)
+        ∂va_∂p = _insert_slack_zeros(∂va_∂p, idx_slack, Float64)
     end
 
-    return ∂v_∂p, ∂vm_∂p
+    return ∂v_∂p, ∂vm_∂p, ∂va_∂p
 end
 
 """
@@ -157,9 +165,10 @@ end
 Compute sensitivity of bus voltages with respect to reactive power injections.
 
 # Returns
-Tuple (∂v_∂q, ∂vm_∂q) where:
+Tuple (∂v_∂q, ∂vm_∂q, ∂va_∂q) where:
 - `∂v_∂q`: Complex phasor sensitivity ∂v/∂q
 - `∂vm_∂q`: Magnitude sensitivity ∂|v|/∂q
+- `∂va_∂q`: Angle sensitivity ∂θ/∂q
 """
 function calc_voltage_reactive_power_sensitivities(
     v::AbstractVector{ComplexF64},
@@ -177,6 +186,7 @@ function calc_voltage_reactive_power_sensitivities(
     # Solve for each column (unit reactive power perturbation at bus k)
     ∂v_∂q = Matrix{ComplexF64}(undef, d, d)
     ∂vm_∂q = Matrix{Float64}(undef, d, d)
+    ∂va_∂q = Matrix{Float64}(undef, d, d)
 
     for k in 1:d
         if abs(v_[k]) > 1e-6
@@ -193,9 +203,13 @@ function calc_voltage_reactive_power_sensitivities(
 
             # Magnitude sensitivity
             ∂vm_∂q[:, k] = real.(∂v_∂q[:, k] .* conj.(v_)) ./ abs.(v_)
+
+            # Angle sensitivity: ∂θ/∂q = Im(∂v/∂q · conj(v)) / |v|²
+            ∂va_∂q[:, k] = imag.(∂v_∂q[:, k] .* conj.(v_)) ./ abs2.(v_)
         else
             ∂v_∂q[:, k] .= 0
             ∂vm_∂q[:, k] .= 0
+            ∂va_∂q[:, k] .= 0
         end
     end
 
@@ -203,9 +217,10 @@ function calc_voltage_reactive_power_sensitivities(
     if full
         ∂v_∂q = _insert_slack_zeros(∂v_∂q, idx_slack, ComplexF64)
         ∂vm_∂q = _insert_slack_zeros(∂vm_∂q, idx_slack, Float64)
+        ∂va_∂q = _insert_slack_zeros(∂va_∂q, idx_slack, Float64)
     end
 
-    return ∂v_∂q, ∂vm_∂q
+    return ∂v_∂q, ∂vm_∂q, ∂va_∂q
 end
 
 # =============================================================================

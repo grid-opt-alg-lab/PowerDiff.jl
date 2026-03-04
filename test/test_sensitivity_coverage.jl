@@ -91,23 +91,36 @@ using Test
         @test_throws ArgumentError calc_sensitivity(prob, :qg, :d)
     end
 
-    @testset "AC Power Flow — all 6 combinations" begin
+    @testset "AC Power Flow — 14 native + 10 transform = 24 combinations" begin
         # Solve AC power flow first
         pf_data = deepcopy(net_data)
         PowerModels.compute_ac_pf!(pf_data)
         state = ACPowerFlowState(pf_data)
 
-        combos = [
+        # 14 native combinations
+        native_combos = [
+            # Existing 6
             (:vm, :p, (state.n, state.n)),
             (:vm, :q, (state.n, state.n)),
             (:v,  :p, (state.n, state.n)),
             (:v,  :q, (state.n, state.n)),
             (:im, :p, (state.m, state.n)),
             (:im, :q, (state.m, state.n)),
+            # New: voltage angle
+            (:va, :p, (state.n, state.n)),
+            (:va, :q, (state.n, state.n)),
+            # New: branch flow
+            (:f,  :p, (state.m, state.n)),
+            (:f,  :q, (state.m, state.n)),
+            # New: Jacobian blocks
+            (:p,  :va, (state.n, state.n)),
+            (:p,  :vm, (state.n, state.n)),
+            (:q,  :va, (state.n, state.n)),
+            (:q,  :vm, (state.n, state.n)),
         ]
 
-        for (op, param, expected_size) in combos
-            @testset "$op w.r.t. $param" begin
+        for (op, param, expected_size) in native_combos
+            @testset "native: $op w.r.t. $param" begin
                 S = calc_sensitivity(state, op, param)
                 @test S isa Sensitivity
                 @test S.formulation == :acpf
@@ -115,6 +128,48 @@ using Test
                 @test all(isfinite, Matrix(S))
             end
         end
+
+        # 10 transform-derived combinations (:d and :qd)
+        # Note: (:p,:d) and (:q,:d) are NOT valid — the Jacobian blocks (:p,:va)
+        # and (:p,:vm) don't have :p as a native parameter, so the :d transform
+        # (which requires native (:op,:p)) doesn't apply to :p/:q operands.
+        transform_combos = [
+            # 5 via :d (from :p)
+            (:vm, :d, (state.n, state.n)),
+            (:v,  :d, (state.n, state.n)),
+            (:im, :d, (state.m, state.n)),
+            (:va, :d, (state.n, state.n)),
+            (:f,  :d, (state.m, state.n)),
+            # 5 via :qd (from :q)
+            (:vm, :qd, (state.n, state.n)),
+            (:v,  :qd, (state.n, state.n)),
+            (:im, :qd, (state.m, state.n)),
+            (:va, :qd, (state.n, state.n)),
+            (:f,  :qd, (state.m, state.n)),
+        ]
+
+        for (op, param, expected_size) in transform_combos
+            @testset "transform: $op w.r.t. $param" begin
+                S = calc_sensitivity(state, op, param)
+                @test S isa Sensitivity
+                @test S.formulation == :acpf
+                @test size(S) == expected_size
+                @test all(isfinite, Matrix(S))
+            end
+        end
+
+        # Verify transform relationship: ∂/∂d = -∂/∂p
+        dvm_dp = calc_sensitivity(state, :vm, :p)
+        dvm_dd = calc_sensitivity(state, :vm, :d)
+        @test Matrix(dvm_dd) ≈ -Matrix(dvm_dp)
+
+        dvm_dq = calc_sensitivity(state, :vm, :q)
+        dvm_dqd = calc_sensitivity(state, :vm, :qd)
+        @test Matrix(dvm_dqd) ≈ -Matrix(dvm_dq)
+
+        # Jacobian block + demand transform is invalid
+        @test_throws ArgumentError calc_sensitivity(state, :p, :d)
+        @test_throws ArgumentError calc_sensitivity(state, :q, :d)
 
         # Invalid combinations
         @test_throws ArgumentError calc_sensitivity(state, :lmp, :p)

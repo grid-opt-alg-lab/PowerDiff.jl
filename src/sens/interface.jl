@@ -34,8 +34,8 @@ Returns a `Sensitivity{T}` result that:
 Invalid combinations throw ArgumentError.
 
 # Operand Symbols
-- `:va`: Voltage phase angles (DC PF, DC OPF, AC OPF)
-- `:f`: Branch flows (DC PF, DC OPF)
+- `:va`: Voltage phase angles (DC PF, DC OPF, AC PF, AC OPF)
+- `:f`: Branch active power flows (DC PF, DC OPF, AC PF)
 - `:pg` / `:g`: Generator active power (DC OPF, AC OPF)
 - `:psh`: Load shedding (DC OPF only)
 - `:qg`: Generator reactive power (AC OPF)
@@ -43,15 +43,20 @@ Invalid combinations throw ArgumentError.
 - `:vm`: Voltage magnitude (AC PF, AC OPF)
 - `:im`: Current magnitude (AC PF)
 - `:v`: Complex voltage phasor (AC PF) — returns ComplexF64 elements
+- `:p`: Active power injection (AC PF, as operand for Jacobian blocks)
+- `:q`: Reactive power injection (AC PF, as operand for Jacobian blocks)
 
 # Parameter Symbols
-- `:d` / `:pd`: Demand
+- `:d` / `:pd`: Active demand (DC PF, DC OPF; AC PF via transform)
+- `:qd`: Reactive demand (AC PF via transform)
 - `:sw`: Switching states
 - `:cq`, `:cl`: Cost coefficients (DC OPF)
 - `:fmax`: Flow limits (DC OPF)
 - `:b`: Susceptances (DC OPF)
-- `:p`: Active power injection (AC)
-- `:q`: Reactive power injection (AC)
+- `:p`: Active power injection (AC PF)
+- `:q`: Reactive power injection (AC PF)
+- `:va`: Voltage phase angle (AC PF, as parameter for Jacobian blocks)
+- `:vm`: Voltage magnitude (AC PF, as parameter for Jacobian blocks)
 
 # Examples
 ```julia
@@ -67,8 +72,15 @@ prob = DCOPFProblem(net, demand)
 solve!(prob)
 sens = calc_sensitivity(prob, :lmp, :d)
 
-# AC Power Flow
+# AC Power Flow — voltage/current sensitivities
 sens = calc_sensitivity(ac_state, :vm, :p)
+
+# AC Power Flow — Jacobian blocks
+J1 = calc_sensitivity(ac_state, :p, :va)   # ∂P/∂θ
+J2 = calc_sensitivity(ac_state, :p, :vm)   # ∂P/∂|V|
+
+# AC Power Flow — demand transform (∂/∂d = -∂/∂p since p_net = pg - pd)
+dvm_dd = calc_sensitivity(ac_state, :vm, :d)
 ```
 """
 function calc_sensitivity end
@@ -85,20 +97,20 @@ const _PARAMETER_ALIASES = Dict{Symbol, Symbol}(
     :pd => :d,
 )
 
-const _VALID_OPERANDS = Set([:va, :f, :pg, :lmp, :psh, :vm, :im, :v, :qg])
-const _VALID_PARAMETERS = Set([:d, :sw, :cq, :cl, :fmax, :b, :p, :q])
+const _VALID_OPERANDS = Set([:va, :f, :pg, :lmp, :psh, :vm, :im, :v, :qg, :p, :q])
+const _VALID_PARAMETERS = Set([:d, :sw, :cq, :cl, :fmax, :b, :p, :q, :va, :vm, :qd])
 
 function _resolve_operand(s::Symbol)
     s = get(_OPERAND_ALIASES, s, s)
     s in _VALID_OPERANDS || throw(ArgumentError(
-        "Unknown operand symbol :$s. Valid: :va, :f, :pg, :psh, :lmp, :vm, :im, :v, :qg (alias: :g → :pg)"))
+        "Unknown operand symbol :$s. Valid: :va, :f, :pg, :psh, :lmp, :vm, :im, :v, :qg, :p, :q (alias: :g → :pg)"))
     return s
 end
 
 function _resolve_parameter(s::Symbol)
     s = get(_PARAMETER_ALIASES, s, s)
     s in _VALID_PARAMETERS || throw(ArgumentError(
-        "Unknown parameter symbol :$s. Valid: :d, :sw, :cq, :cl, :fmax, :b, :p, :q (alias: :pd → :d)"))
+        "Unknown parameter symbol :$s. Valid: :d, :sw, :cq, :cl, :fmax, :b, :p, :q, :va, :vm, :qd (alias: :pd → :d)"))
     return s
 end
 
@@ -109,13 +121,14 @@ end
 # Map operand symbol to element type for rows
 const _OPERAND_ELEMENT = Dict{Symbol, Symbol}(
     :va => :bus, :vm => :bus, :v => :bus, :lmp => :bus, :psh => :bus,
+    :p => :bus, :q => :bus,
     :f => :branch, :im => :branch,
     :pg => :gen, :qg => :gen,
 )
 
 # Map parameter symbol to element type for cols
 const _PARAM_ELEMENT = Dict{Symbol, Symbol}(
-    :d => :bus, :p => :bus, :q => :bus,
+    :d => :bus, :p => :bus, :q => :bus, :va => :bus, :vm => :bus, :qd => :bus,
     :sw => :branch, :fmax => :branch, :b => :branch,
     :cq => :gen, :cl => :gen,
 )
@@ -128,6 +141,9 @@ _formulation_symbol(::DCPowerFlowState) = :dcpf
 _formulation_symbol(::DCOPFProblem) = :dcopf
 _formulation_symbol(::ACPowerFlowState) = :acpf
 _formulation_symbol(::ACOPFProblem) = :acopf
+_formulation_symbol(state) = throw(ArgumentError(
+    "No formulation symbol defined for $(typeof(state)). " *
+    "Define _formulation_symbol(::$(typeof(state))) to add support."))
 
 # =============================================================================
 # Valid Combinations per Formulation
@@ -148,11 +164,75 @@ _valid_combinations(::Type{<:DCOPFProblem}) = [
 
 _valid_combinations(::Type{<:ACPowerFlowState}) = [
     (:vm, :p), (:vm, :q), (:v, :p), (:v, :q), (:im, :p), (:im, :q),
+    (:va, :p), (:va, :q),
+    (:f, :p), (:f, :q),
+    (:p, :va), (:p, :vm), (:q, :va), (:q, :vm),
 ]
 
 _valid_combinations(::Type{<:ACOPFProblem}) = [
     (:vm, :sw), (:va, :sw), (:pg, :sw), (:qg, :sw),
 ]
+
+_valid_combinations(T::Type) = throw(ArgumentError(
+    "No valid sensitivity combinations defined for $T. " *
+    "Define _valid_combinations(::Type{<:$T}) to add support."))
+
+# =============================================================================
+# Type-Specific Parameter Transforms
+# =============================================================================
+#
+# Transforms allow derived parameter symbols (e.g., :d) to be computed from
+# a native parameter (e.g., :p) via a simple scaling. This is type-specific:
+#
+# For power flow states: p_net = pg - pd with pg fixed, so ∂/∂pd = -∂/∂p.
+# For OPF: demand sensitivity goes through KKT — the transform does NOT apply.
+
+"""
+    _parameter_transform(::Type{T}, ::Val{param}) → (base_param, transform_fn) or nothing
+
+Return a tuple (base_param, transform_fn) if `param` can be derived from a
+native parameter for type `T`. The result satisfies:
+    ∂(operand)/∂param = transform_fn(∂(operand)/∂base_param)
+
+Returns `nothing` if no transform exists (default).
+"""
+_parameter_transform(::Type, ::Val) = nothing
+
+# For ACPowerFlowState: ∂/∂d = -∂/∂p (since p_net = pg - pd, pg fixed)
+_parameter_transform(::Type{<:ACPowerFlowState}, ::Val{:d}) = (:p, -)
+# For ACPowerFlowState: ∂/∂qd = -∂/∂q (since q_net = qg - qd, qg fixed)
+_parameter_transform(::Type{<:ACPowerFlowState}, ::Val{:qd}) = (:q, -)
+
+"""
+    _all_valid_combinations(T) → Vector{Tuple{Symbol,Symbol}}
+
+All valid (operand, parameter) combinations for type `T`, including both
+native combinations and those derived via parameter transforms.
+"""
+function _all_valid_combinations(T::Type)
+    native = _valid_combinations(T)
+    all_combos = copy(native)
+
+    # Collect all transform-derived combinations
+    native_params = unique(last.(native))
+    native_operands = unique(first.(native))
+
+    # Check all known parameters for transforms
+    for param in _VALID_PARAMETERS
+        param in native_params && continue
+        transform = _parameter_transform(T, Val(param))
+        isnothing(transform) && continue
+        base_param, _ = transform
+        # Add (op, param) for every operand that has (op, base_param)
+        for (op, p) in native
+            if p === base_param
+                push!(all_combos, (op, param))
+            end
+        end
+    end
+
+    return all_combos
+end
 
 # =============================================================================
 # Main Entry Point
@@ -168,23 +248,31 @@ function calc_sensitivity(state, operand::Symbol, parameter::Symbol)
     op = _resolve_operand(operand)
     param = _resolve_parameter(parameter)
 
-    # Check validity
-    valid = _valid_combinations(typeof(state))
-    if (op, param) ∉ valid
-        state_name = _state_display_name(typeof(state))
-        msg = "calc_sensitivity($state_name, :$op, :$param) is not defined."
-        if !isempty(valid)
-            msg *= "\nValid combinations for $state_name:\n"
-            msg *= join(["  :$(o) w.r.t. :$(p)" for (o, p) in valid], "\n")
-        end
-        throw(ArgumentError(msg))
-    end
+    T = typeof(state)
+    valid = _valid_combinations(T)
 
-    # Compute raw matrix via internal dispatch
-    matrix = _calc_sensitivity_matrix(state, op, param)
+    if (op, param) in valid
+        # Native combination — compute directly
+        matrix = _calc_sensitivity_matrix(state, op, param)
+    else
+        # Check for a parameter transform
+        transform = _parameter_transform(T, Val(param))
+        if !isnothing(transform)
+            base_param, transform_fn = transform
+            if (op, base_param) in valid
+                base_matrix = _calc_sensitivity_matrix(state, op, base_param)
+                matrix = transform_fn(base_matrix)
+            else
+                _throw_invalid_combo(state, op, param)
+            end
+        else
+            _throw_invalid_combo(state, op, param)
+        end
+    end
 
     # Build bidirectional index mappings
     row_element = _OPERAND_ELEMENT[op]
+    # For transform-derived params, use the original param's element type
     col_element = _PARAM_ELEMENT[param]
     row_mapping = _element_mapping(state, row_element)
     col_mapping = _element_mapping(state, col_element)
@@ -192,6 +280,18 @@ function calc_sensitivity(state, operand::Symbol, parameter::Symbol)
     mat = Matrix(matrix)
     form = _formulation_symbol(state)
     return Sensitivity(mat, form, op, param, row_mapping, col_mapping)
+end
+
+function _throw_invalid_combo(state, op, param)
+    T = typeof(state)
+    state_name = _state_display_name(T)
+    all_valid = _all_valid_combinations(T)
+    msg = "calc_sensitivity($state_name, :$op, :$param) is not defined."
+    if !isempty(all_valid)
+        msg *= "\nValid combinations for $state_name:\n"
+        msg *= join(["  :$(o) w.r.t. :$(p)" for (o, p) in all_valid], "\n")
+    end
+    throw(ArgumentError(msg))
 end
 
 # =============================================================================
@@ -237,17 +337,41 @@ end
 # =============================================================================
 
 function _calc_sensitivity_matrix(state::ACPowerFlowState, op::Symbol, param::Symbol)
-    if op === :vm || op === :v
+    # Voltage/phasor/angle sensitivities w.r.t. power injections
+    if op in (:vm, :v, :va) && param in (:p, :q)
         sens = calc_voltage_power_sensitivities(state)
         if op === :vm
             return param === :p ? sens.dvm_dp : sens.dvm_dq
-        else  # :v
+        elseif op === :v
             return param === :p ? sens.dv_dp : sens.dv_dq
+        else  # :va
+            return param === :p ? sens.dva_dp : sens.dva_dq
         end
-    else  # :im
+    end
+
+    # Current magnitude sensitivity
+    if op === :im && param in (:p, :q)
         sens = calc_current_power_sensitivities(state)
         return param === :p ? sens.dIm_dp : sens.dIm_dq
     end
+
+    # Branch active power flow sensitivity
+    if op === :f && param in (:p, :q)
+        sens = calc_branch_flow_power_sensitivities(state)
+        return param === :p ? sens.df_dp : sens.df_dq
+    end
+
+    # Power flow Jacobian blocks (operand is :p or :q, param is :va or :vm)
+    if op in (:p, :q) && param in (:va, :vm)
+        jac = calc_power_flow_jacobian(state)
+        if op === :p
+            return param === :va ? jac.dp_dva : jac.dp_dvm
+        else  # :q
+            return param === :va ? jac.dq_dva : jac.dq_dvm
+        end
+    end
+
+    error("Unhandled AC PF combination (:$op, :$param)")
 end
 
 # =============================================================================
@@ -278,6 +402,7 @@ end
     operand_symbols(state) → Vector{Symbol}
 
 Return the valid operand symbols for `calc_sensitivity` on the given state or problem.
+Includes symbols available via parameter transforms.
 
 # Examples
 ```julia
@@ -285,12 +410,13 @@ operand_symbols(pf_state)  # [:va, :f]
 operand_symbols(prob)       # [:va, :pg, :f, :psh, :lmp]  (DCOPFProblem)
 ```
 """
-operand_symbols(state) = unique(first.(_valid_combinations(typeof(state))))
+operand_symbols(state) = unique(first.(_all_valid_combinations(typeof(state))))
 
 """
     parameter_symbols(state) → Vector{Symbol}
 
 Return the valid parameter symbols for `calc_sensitivity` on the given state or problem.
+Includes symbols available via parameter transforms.
 
 # Examples
 ```julia
@@ -298,4 +424,4 @@ parameter_symbols(pf_state)  # [:d, :sw]
 parameter_symbols(prob)       # [:d, :sw, :cq, :cl, :fmax, :b]  (DCOPFProblem)
 ```
 """
-parameter_symbols(state) = unique(last.(_valid_combinations(typeof(state))))
+parameter_symbols(state) = unique(last.(_all_valid_combinations(typeof(state))))

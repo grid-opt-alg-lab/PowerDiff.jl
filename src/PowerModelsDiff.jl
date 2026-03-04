@@ -72,6 +72,7 @@ include("sens/flowlimit.jl")
 include("sens/susceptance.jl")
 include("sens/voltage.jl")
 include("sens/current.jl")
+include("sens/jacobian.jl")
 include("sens/interface.jl")
 
 # =============================================================================
@@ -129,6 +130,7 @@ export calc_ac_kkt_jacobian, ac_kkt
 # -----------------------------------------------------------------------------
 export ACNetwork, ACPowerFlowState
 export admittance_matrix, branch_current, branch_power
+export calc_power_flow_jacobian
 
 # -----------------------------------------------------------------------------
 # Graph Utilities

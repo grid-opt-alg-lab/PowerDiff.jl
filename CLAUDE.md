@@ -66,8 +66,8 @@ calc_sensitivity(state, :operand, :parameter) → Sensitivity{T}
 Returns a `Sensitivity{T}` result that acts like a matrix but carries formulation/operand/parameter as symbol fields, plus bidirectional index mappings.
 
 **Operand symbols** (what we differentiate):
-- `:va` - Voltage phase angles (DC PF, DC OPF, AC OPF)
-- `:f` - Branch flows (DC PF, DC OPF)
+- `:va` - Voltage phase angles (DC PF, DC OPF, AC PF, AC OPF)
+- `:f` - Branch active power flows (DC PF, DC OPF, AC PF)
 - `:pg` or `:g` - Generator active power (DC OPF, AC OPF)
 - `:psh` - Load shedding (DC OPF)
 - `:qg` - Generator reactive power (AC OPF)
@@ -75,14 +75,19 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 - `:vm` - Voltage magnitude (AC PF, AC OPF)
 - `:im` - Current magnitude (AC PF)
 - `:v` - Complex voltage phasor (AC PF)
+- `:p` - Active power injection (AC PF, Jacobian block operand)
+- `:q` - Reactive power injection (AC PF, Jacobian block operand)
 
 **Parameter symbols** (what we differentiate w.r.t.):
-- `:d` or `:pd` - Demand
+- `:d` or `:pd` - Active demand (DC PF, DC OPF; AC PF via transform)
+- `:qd` - Reactive demand (AC PF via transform)
 - `:sw` - Switching states
 - `:cq`, `:cl` - Cost coefficients (DC OPF)
 - `:fmax` - Flow limits (DC OPF)
 - `:b` - Susceptances (DC OPF)
 - `:p`, `:q` - Power injections (AC PF)
+- `:va` - Voltage phase angle (AC PF, Jacobian block parameter)
+- `:vm` - Voltage magnitude (AC PF, Jacobian block parameter)
 
 **Examples**:
 ```julia
@@ -99,6 +104,10 @@ dpg_dcq = calc_sensitivity(prob, :pg, :cq)      # .formulation == :dcopf, .opera
 
 # AC Power Flow
 dvm_dp = calc_sensitivity(ac_state, :vm, :p)    # .formulation == :acpf, .operand == :vm
+dva_dp = calc_sensitivity(ac_state, :va, :p)    # .formulation == :acpf, .operand == :va
+df_dp  = calc_sensitivity(ac_state, :f, :p)     # .formulation == :acpf, .operand == :f
+J1     = calc_sensitivity(ac_state, :p, :va)    # ∂P/∂θ Jacobian block
+dvm_dd = calc_sensitivity(ac_state, :vm, :d)    # via transform: -∂|V|/∂p
 
 # AC OPF
 ac_prob = ACOPFProblem(pm_data)

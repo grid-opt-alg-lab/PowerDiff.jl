@@ -71,8 +71,8 @@ function calc_current_power_sensitivities(
     m = length(branch_data)
 
     # First, compute voltage-power sensitivities (always with full=true for indexing)
-    ∂v_∂p, _ = calc_voltage_active_power_sensitivities(v, Y; idx_slack=idx_slack, full=true)
-    ∂v_∂q, _ = calc_voltage_reactive_power_sensitivities(v, Y; idx_slack=idx_slack, full=true)
+    ∂v_∂p, _, _ = calc_voltage_active_power_sensitivities(v, Y; idx_slack=idx_slack, full=true)
+    ∂v_∂q, _, _ = calc_voltage_reactive_power_sensitivities(v, Y; idx_slack=idx_slack, full=true)
 
     # Initialize current sensitivity matrices
     ∂I_∂p = zeros(ComplexF64, m, n)
@@ -135,5 +135,63 @@ Requires that `state.branch_data` is not nothing.
 function calc_current_power_sensitivities(state::ACPowerFlowState; full::Bool=true)
     @assert !isnothing(state.branch_data) "ACPowerFlowState must have branch_data for current sensitivities"
     return calc_current_power_sensitivities(state.v, state.Y, state.branch_data; idx_slack=state.idx_slack, full=full)
+end
+
+# =============================================================================
+# Branch Active Power Flow Sensitivity
+# =============================================================================
+
+"""
+    calc_branch_flow_power_sensitivities(state::ACPowerFlowState)
+
+Compute sensitivity of branch active power flows w.r.t. power injections.
+
+Uses product rule: P_ℓ = Re(v_f · conj(I_ℓ)), so
+    ∂P_ℓ/∂p_k = Re(∂v_f/∂p_k · conj(I_ℓ) + v_f · conj(∂I_ℓ/∂p_k))
+
+Requires `state.branch_data` to be set.
+
+# Returns
+NamedTuple with:
+- `df_dp`: ∂P_flow/∂p (m × n)
+- `df_dq`: ∂P_flow/∂q (m × n)
+"""
+function calc_branch_flow_power_sensitivities(state::ACPowerFlowState)
+    @assert !isnothing(state.branch_data) "ACPowerFlowState must have branch_data for flow sensitivities"
+
+    v = state.v
+    Y = state.Y
+    n = state.n
+    m = state.m
+
+    # Get complex voltage sensitivities (full=true for indexing)
+    ∂v_∂p, _, _ = calc_voltage_active_power_sensitivities(v, Y; idx_slack=state.idx_slack, full=true)
+    ∂v_∂q, _, _ = calc_voltage_reactive_power_sensitivities(v, Y; idx_slack=state.idx_slack, full=true)
+
+    # Get complex current sensitivities
+    cur_sens = calc_current_power_sensitivities(state; full=true)
+    ∂I_∂p = cur_sens.dI_dp
+    ∂I_∂q = cur_sens.dI_dq
+
+    df_dp = zeros(Float64, m, n)
+    df_dq = zeros(Float64, m, n)
+
+    for (_, br) in state.branch_data
+        ℓ = br["index"]
+        f_bus = br["f_bus"]
+        t_bus = br["t_bus"]
+
+        Y_ft = Y[f_bus, t_bus]
+        I_ℓ = Y_ft * (v[f_bus] - v[t_bus])
+        v_f = v[f_bus]
+
+        for k in 1:n
+            # Product rule: ∂P_ℓ/∂p_k = Re(∂v_f/∂p_k · conj(I_ℓ) + v_f · conj(∂I_ℓ/∂p_k))
+            df_dp[ℓ, k] = real(∂v_∂p[f_bus, k] * conj(I_ℓ) + v_f * conj(∂I_∂p[ℓ, k]))
+            df_dq[ℓ, k] = real(∂v_∂q[f_bus, k] * conj(I_ℓ) + v_f * conj(∂I_∂q[ℓ, k]))
+        end
+    end
+
+    return (df_dp=df_dp, df_dq=df_dq)
 end
 
