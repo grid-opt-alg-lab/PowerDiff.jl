@@ -141,7 +141,7 @@ rows from the same cached `dz_d*` matrix — no recomputation needed.
 """
 mutable struct ACSensitivityCache
     solution::Union{Nothing, ACOPFSolution}
-    kkt_factor::Union{Nothing, LinearAlgebra.LU{Float64, Matrix{Float64}, Vector{Int}}}
+    kkt_factor::Union{Nothing, Factorization}
     dz_dsw::Union{Nothing, Matrix{Float64}}
     dz_dd::Union{Nothing, Matrix{Float64}}
     dz_dqd::Union{Nothing, Matrix{Float64}}
