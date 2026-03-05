@@ -357,7 +357,13 @@ function _calc_sensitivity_matrix(state::ACPowerFlowState, op::Symbol, param::Sy
             ∂v, ∂vm, ∂va = calc_voltage_reactive_power_sensitivities(
                 state.v, state.Y; idx_slack=state.idx_slack)
         end
-        return op === :vm ? ∂vm : (op === :v ? ∂v : ∂va)
+        if op === :vm
+            return ∂vm
+        elseif op === :v
+            return ∂v
+        else
+            return ∂va
+        end
     end
 
     # Current magnitude sensitivity — compute only needed direction

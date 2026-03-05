@@ -306,5 +306,6 @@ end
         @test isnothing(prob.cache.dz_dcq)
         @test isnothing(prob.cache.dz_dcl)
         @test isnothing(prob.cache.dz_dfmax)
+        @test isnothing(prob.cache.kkt_constants)
     end
 end

@@ -49,6 +49,8 @@ NamedTuple with fields:
 - `dv_dq`: Complex phasor voltage sensitivity to reactive power (n × n)
 - `dvm_dp`: Voltage magnitude sensitivity to active power (n × n)
 - `dvm_dq`: Voltage magnitude sensitivity to reactive power (n × n)
+- `dva_dp`: Voltage angle sensitivity to active power (n × n)
+- `dva_dq`: Voltage angle sensitivity to reactive power (n × n)
 
 # Example
 ```julia

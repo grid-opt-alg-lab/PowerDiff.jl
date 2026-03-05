@@ -583,6 +583,9 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     # =========================================================================
     # 3. Complementary slackness conditions (vectorized)
     # =========================================================================
+    # Sign convention: λ * residual = 0 where residual is non-negative at feasibility.
+    # Lower bounds: residual = (x - lb) ≥ 0;  Upper bounds: residual = (ub - x) ≥ 0.
+    # This matches the Lagrangian L = f(x) - Σ λ * residual used in _reduced_lagrangian.
 
     # Use pre-extracted bounds when available to avoid allocations in ForwardDiff
     if isnothing(constants)
@@ -760,6 +763,8 @@ const _AC_PARAM_EXTRACT = Dict{Symbol, Function}(
     :fmax => _extract_branch_fmax,
 )
 
+# Maps external parameter symbols to ac_kkt keyword argument names
+# (e.g., user-facing :d becomes the internal :pd kwarg for active demand)
 const _PARAM_KWARG_MAP = Dict{Symbol, Symbol}(
     :d => :pd, :qd => :qd, :cq => :cq, :cl => :cl, :fmax => :fmax,
 )

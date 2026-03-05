@@ -59,7 +59,8 @@ function _ensure_kkt_factor!(prob::DCOPFProblem)
                 try
                     lu(J_reg)
                 catch e2
-                    error("KKT Jacobian remains singular after Tikhonov perturbation: $(e2)")
+                    e2 isa LinearAlgebra.SingularException || rethrow(e2)
+                    error("KKT Jacobian remains singular after Tikhonov perturbation")
                 end
             else
                 rethrow(e)
