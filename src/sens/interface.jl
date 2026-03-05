@@ -348,27 +348,28 @@ end
 
 function _calc_sensitivity_matrix(state::ACPowerFlowState, op::Symbol, param::Symbol)
     # Voltage/phasor/angle sensitivities w.r.t. power injections
+    # Compute only the needed direction (P or Q) instead of both
     if op in (:vm, :v, :va) && param in (:p, :q)
-        sens = calc_voltage_power_sensitivities(state)
-        if op === :vm
-            return param === :p ? sens.dvm_dp : sens.dvm_dq
-        elseif op === :v
-            return param === :p ? sens.dv_dp : sens.dv_dq
-        else  # :va
-            return param === :p ? sens.dva_dp : sens.dva_dq
+        if param === :p
+            ∂v, ∂vm, ∂va = calc_voltage_active_power_sensitivities(
+                state.v, state.Y; idx_slack=state.idx_slack)
+        else
+            ∂v, ∂vm, ∂va = calc_voltage_reactive_power_sensitivities(
+                state.v, state.Y; idx_slack=state.idx_slack)
         end
+        return op === :vm ? ∂vm : (op === :v ? ∂v : ∂va)
     end
 
-    # Current magnitude sensitivity
+    # Current magnitude sensitivity — compute only needed direction
     if op === :im && param in (:p, :q)
-        sens = calc_current_power_sensitivities(state)
-        return param === :p ? sens.dIm_dp : sens.dIm_dq
+        ∂v = _voltage_phasor_single_dir(state, param)
+        return _current_magnitude_from_dv(∂v, state)
     end
 
-    # Branch active power flow sensitivity
+    # Branch active power flow sensitivity — compute only needed direction
     if op === :f && param in (:p, :q)
-        sens = calc_branch_flow_power_sensitivities(state)
-        return param === :p ? sens.df_dp : sens.df_dq
+        ∂v = _voltage_phasor_single_dir(state, param)
+        return _branch_flow_from_dv(∂v, state)
     end
 
     # Power flow Jacobian blocks (operand is :p or :q, param is :va or :vm)
@@ -382,6 +383,71 @@ function _calc_sensitivity_matrix(state::ACPowerFlowState, op::Symbol, param::Sy
     end
 
     error("Unhandled AC PF combination (:$op, :$param)")
+end
+
+# =============================================================================
+# AC PF Single-Direction Helpers
+# =============================================================================
+
+"""Compute complex voltage phasor sensitivity for a single direction (:p or :q)."""
+function _voltage_phasor_single_dir(state::ACPowerFlowState, param::Symbol)
+    if param === :p
+        ∂v, _, _ = calc_voltage_active_power_sensitivities(
+            state.v, state.Y; idx_slack=state.idx_slack)
+    else
+        ∂v, _, _ = calc_voltage_reactive_power_sensitivities(
+            state.v, state.Y; idx_slack=state.idx_slack)
+    end
+    return ∂v
+end
+
+"""Compute current magnitude sensitivity from pre-computed voltage phasor sensitivity."""
+function _current_magnitude_from_dv(∂v, state::ACPowerFlowState)
+    !isnothing(state.branch_data) || throw(ArgumentError(
+        "ACPowerFlowState must have branch_data for current sensitivities"))
+    v = state.v
+    n = state.n
+    m = state.m
+    ∂Im = zeros(Float64, m, n)
+    for (_, br) in state.branch_data
+        ℓ = br["index"]
+        f_bus = br["f_bus"]
+        t_bus = br["t_bus"]
+        Y_ft = state.Y[f_bus, t_bus]
+        I_ℓ = Y_ft * (v[f_bus] - v[t_bus])
+        for i in 1:n
+            if i != state.idx_slack
+                ∂I = Y_ft * (∂v[f_bus, i] - ∂v[t_bus, i])
+                if abs(I_ℓ) > 1e-6
+                    ∂Im[ℓ, i] = real(∂I * conj(I_ℓ)) / abs(I_ℓ)
+                end
+            end
+        end
+    end
+    return ∂Im
+end
+
+"""Compute branch active power flow sensitivity from pre-computed voltage phasor sensitivity."""
+function _branch_flow_from_dv(∂v, state::ACPowerFlowState)
+    !isnothing(state.branch_data) || throw(ArgumentError(
+        "ACPowerFlowState must have branch_data for flow sensitivities"))
+    v = state.v
+    n = state.n
+    m = state.m
+    df = zeros(Float64, m, n)
+    for (_, br) in state.branch_data
+        ℓ = br["index"]
+        f_bus = br["f_bus"]
+        t_bus = br["t_bus"]
+        Y_ft = state.Y[f_bus, t_bus]
+        I_ℓ = Y_ft * (v[f_bus] - v[t_bus])
+        v_f = v[f_bus]
+        for k in 1:n
+            ∂I = Y_ft * (∂v[f_bus, k] - ∂v[t_bus, k])
+            df[ℓ, k] = real(∂v[f_bus, k] * conj(I_ℓ) + v_f * conj(∂I))
+        end
+    end
+    return df
 end
 
 # =============================================================================
