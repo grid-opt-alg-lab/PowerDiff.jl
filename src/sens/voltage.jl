@@ -190,6 +190,11 @@ function _solve_voltage_sensitivities(A_lu, v_, d, rhs_offset)
     ∂vm = Matrix{Float64}(undef, d, d)
     ∂va = Matrix{Float64}(undef, d, d)
     b = zeros(2d)
+    # Hoist v_safe and derived vectors outside the loop — they depend only on v_, not k
+    v_safe = ifelse.(abs.(v_) .> eps(Float64), v_, one(ComplexF64))
+    abs_v_safe = abs.(v_safe)
+    abs2_v_safe = abs2.(v_safe)
+    conj_v_safe = conj.(v_safe)
     for k in 1:d
         if abs(v_[k]) > 1e-6
             fill!(b, 0.0)
@@ -200,9 +205,8 @@ function _solve_voltage_sensitivities(A_lu, v_, d, rhs_offset)
                       "The Jacobian may be near-singular.")
             end
             ∂v[:, k] = x[1:d] + im * x[d+1:2d]
-            v_safe = ifelse.(abs.(v_) .> eps(Float64), v_, one(ComplexF64))
-            ∂vm[:, k] = real.(∂v[:, k] .* conj.(v_safe)) ./ abs.(v_safe)
-            ∂va[:, k] = imag.(∂v[:, k] .* conj.(v_safe)) ./ abs2.(v_safe)
+            ∂vm[:, k] = real.(∂v[:, k] .* conj_v_safe) ./ abs_v_safe
+            ∂va[:, k] = imag.(∂v[:, k] .* conj_v_safe) ./ abs2_v_safe
         else
             ∂v[:, k] .= 0; ∂vm[:, k] .= 0; ∂va[:, k] .= 0
         end

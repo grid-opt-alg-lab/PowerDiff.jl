@@ -782,13 +782,28 @@ function calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, para
         constants = _extract_kkt_constants(prob)
         prob.cache.kkt_constants = constants
     end
+
+    # Pre-extract all fixed parameters so the ForwardDiff closure avoids Dict lookups.
+    # Only the differentiated parameter is passed as the ForwardDiff variable;
+    # all others are passed as fixed keyword arguments.
+    pd0 = _extract_bus_pd(prob)
+    qd0 = _extract_bus_qd(prob)
+    cq0 = _extract_gen_cq(prob)
+    cl0 = _extract_gen_cl(prob)
+    fmax0 = _extract_branch_fmax(prob)
+
     if param === :sw
         return ForwardDiff.jacobian(
-            s -> ac_kkt(z0, prob, s; idx=idx, constants=constants), p0)
+            s -> ac_kkt(z0, prob, s; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0,
+                        idx=idx, constants=constants), p0)
     else
         kw = _PARAM_KWARG_MAP[param]
+        # Build fixed kwargs with all parameters except the one being differentiated
+        all_params = Dict{Symbol,Any}(:pd => pd0, :qd => qd0, :cq => cq0, :cl => cl0, :fmax => fmax0)
+        delete!(all_params, kw)
+        fixed_nt = (; (k => v for (k, v) in all_params)...)
         return ForwardDiff.jacobian(
-            x -> ac_kkt(z0, prob, sw; NamedTuple{(kw,)}((x,))...,
+            x -> ac_kkt(z0, prob, sw; NamedTuple{(kw,)}((x,))..., fixed_nt...,
                         idx=idx, constants=constants), p0)
     end
 end

@@ -29,7 +29,7 @@
 Create a bidirectional mapping from a sorted vector of original IDs.
 """
 function _mapping_from(ids::Vector{Int})
-    idx_to_id = ids  # Sensitivity constructor will copy
+    idx_to_id = copy(ids)
     id_to_idx = Dict(id => i for (i, id) in enumerate(ids))
     (idx_to_id, id_to_idx)
 end

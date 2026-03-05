@@ -224,7 +224,7 @@ end
 # ACSensitivityCache
 # =============================================================================
 
-const _AC_CACHE_FIELDS = (:solution, :kkt_factor, :dz_dsw, :dz_dd, :dz_dqd, :dz_dcq, :dz_dcl, :dz_dfmax)
+const _AC_CACHE_FIELDS = (:solution, :kkt_factor, :kkt_constants, :dz_dsw, :dz_dd, :dz_dqd, :dz_dcq, :dz_dcl, :dz_dfmax)
 
 function Base.show(io::IO, cache::ACSensitivityCache)
     n = count(f -> !isnothing(getfield(cache, f)), _AC_CACHE_FIELDS)
