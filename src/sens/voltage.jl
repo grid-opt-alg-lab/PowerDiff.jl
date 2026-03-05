@@ -178,9 +178,8 @@ function _solve_voltage_sensitivities(A, v_, d, rhs_offset)
             b[rhs_offset + k] = 1.0
             x = A \ b
             if any(!isfinite, x)
-                @warn "Voltage sensitivity produced non-finite values at bus $k; the Jacobian may be near-singular"
-                ∂v[:, k] .= 0; ∂vm[:, k] .= 0; ∂va[:, k] .= 0
-                continue
+                error("Voltage sensitivity solve produced non-finite values at bus $k. " *
+                      "The Jacobian may be near-singular.")
             end
             ∂v[:, k] = x[1:d] + im * x[d+1:2d]
             ∂vm[:, k] = real.(∂v[:, k] .* conj.(v_)) ./ abs.(v_)

@@ -420,6 +420,11 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
     W = Diagonal(-net.b .* net.sw)
     f = W * net.A * θ
 
+    if any(!isfinite, f)
+        error("DC power flow produced non-finite branch flows. " *
+              "Check branch impedances for extreme values.")
+    end
+
     return DCPowerFlowState(net, θ, p, Float64.(g), Float64.(d), f, F, non_ref)
 end
 

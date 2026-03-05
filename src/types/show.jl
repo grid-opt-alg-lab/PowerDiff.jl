@@ -253,10 +253,6 @@ function _problem_status_str(model::JuMP.Model)
     end
 end
 
-function _dc_cache_count(cache::DCSensitivityCache)
-    count(f -> !isnothing(getfield(cache, f)), _DC_CACHE_FIELDS)
-end
-
 function _dc_cache_list(cache::DCSensitivityCache)
     [string(f) for f in _DC_CACHE_FIELDS if !isnothing(getfield(cache, f))]
 end

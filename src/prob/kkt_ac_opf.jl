@@ -527,7 +527,7 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     rate_a = isnothing(fmax) ? T[ref[:branch][l]["rate_a"] for l in 1:m] : fmax
 
     # Pre-allocate KKT residual vector
-    K = Vector{T}(undef, ac_kkt_dims(prob))
+    K = fill(T(NaN), ac_kkt_dims(prob))
 
     # =========================================================================
     # 1. Stationarity conditions via ForwardDiff on the Lagrangian
@@ -677,6 +677,8 @@ Compute ∂K/∂param via ForwardDiff for any supported parameter symbol.
 Returns matrix of size (kkt_dims × param_dims).
 """
 function calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol)
+    haskey(_AC_PARAM_EXTRACT, param) || throw(ArgumentError(
+        "Unknown AC OPF parameter: $param. Valid: $(keys(_AC_PARAM_EXTRACT))"))
     z0 = ac_flatten_variables(sol, prob)
     sw = prob.network.sw
     p0 = _AC_PARAM_EXTRACT[param](prob)
@@ -724,7 +726,8 @@ function _ensure_ac_kkt_factor!(prob::ACOPFProblem)
                 try
                     lu(J_reg)
                 catch e2
-                    error("AC KKT Jacobian remains singular after Tikhonov perturbation: $(e2)")
+                    e2 isa LinearAlgebra.SingularException || rethrow(e2)
+                    error("AC KKT Jacobian remains singular after Tikhonov perturbation")
                 end
             else
                 rethrow(e)
