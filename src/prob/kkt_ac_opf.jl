@@ -223,6 +223,7 @@ function calc_ac_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothi
     # on every ForwardDiff evaluation
     idx = ac_kkt_indices(prob)
     constants = _extract_kkt_constants(prob)
+    prob.cache.kkt_constants = constants
 
     J = ForwardDiff.jacobian(
         z -> ac_kkt(z, prob, sw; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0,
@@ -776,7 +777,11 @@ function calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, para
     sw = prob.network.sw
     p0 = _AC_PARAM_EXTRACT[param](prob)
     idx = ac_kkt_indices(prob)
-    constants = _extract_kkt_constants(prob)
+    constants = prob.cache.kkt_constants
+    if isnothing(constants)
+        constants = _extract_kkt_constants(prob)
+        prob.cache.kkt_constants = constants
+    end
     if param === :sw
         return ForwardDiff.jacobian(
             s -> ac_kkt(z0, prob, s; idx=idx, constants=constants), p0)
@@ -858,9 +863,10 @@ function _get_ac_dz_dparam!(prob::ACOPFProblem, param::Symbol)::Matrix{Float64}
         kkt_lu = _ensure_ac_kkt_factor!(prob)
         sol = _ensure_ac_solved!(prob)
         J_p = calc_ac_kkt_jacobian_param(prob, sol, param)
-        result = -(kkt_lu \ J_p)
-        setfield!(prob.cache, field, result)
-        return result
+        ldiv!(kkt_lu, J_p)
+        lmul!(-1, J_p)
+        setfield!(prob.cache, field, J_p)
+        return J_p
     end
     return cached
 end

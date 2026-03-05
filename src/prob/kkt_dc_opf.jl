@@ -84,7 +84,9 @@ function _get_dz_dd!(prob::DCOPFProblem)::Matrix{Float64}
         kkt_lu = _ensure_kkt_factor!(prob)
         sol = _ensure_solved!(prob)
         J_d = calc_kkt_jacobian_demand(prob.network, prob.d, sol)
-        prob.cache.dz_dd = -(kkt_lu \ Matrix(J_d))
+        rhs = Matrix(J_d)
+        ldiv!(kkt_lu, rhs)
+        prob.cache.dz_dd = lmul!(-1, rhs)
     end
     return prob.cache.dz_dd
 end
@@ -98,7 +100,9 @@ function _get_dz_dcl!(prob::DCOPFProblem)::Matrix{Float64}
     if isnothing(prob.cache.dz_dcl)
         kkt_lu = _ensure_kkt_factor!(prob)
         J_cl = calc_kkt_jacobian_cost_linear(prob.network)
-        prob.cache.dz_dcl = -(kkt_lu \ Matrix(J_cl))
+        rhs = Matrix(J_cl)
+        ldiv!(kkt_lu, rhs)
+        prob.cache.dz_dcl = lmul!(-1, rhs)
     end
     return prob.cache.dz_dcl
 end
@@ -113,7 +117,9 @@ function _get_dz_dcq!(prob::DCOPFProblem)::Matrix{Float64}
         kkt_lu = _ensure_kkt_factor!(prob)
         sol = _ensure_solved!(prob)
         J_cq = calc_kkt_jacobian_cost_quadratic(prob, sol)
-        prob.cache.dz_dcq = -(kkt_lu \ Matrix(J_cq))
+        rhs = Matrix(J_cq)
+        ldiv!(kkt_lu, rhs)
+        prob.cache.dz_dcq = lmul!(-1, rhs)
     end
     return prob.cache.dz_dcq
 end
@@ -128,7 +134,9 @@ function _get_dz_dsw!(prob::DCOPFProblem)::Matrix{Float64}
         kkt_lu = _ensure_kkt_factor!(prob)
         sol = _ensure_solved!(prob)
         J_s = calc_kkt_jacobian_switching(prob, sol)
-        prob.cache.dz_dsw = -(kkt_lu \ Matrix(J_s))
+        rhs = Matrix(J_s)
+        ldiv!(kkt_lu, rhs)
+        prob.cache.dz_dsw = lmul!(-1, rhs)
     end
     return prob.cache.dz_dsw
 end
@@ -143,7 +151,9 @@ function _get_dz_dfmax!(prob::DCOPFProblem)::Matrix{Float64}
         kkt_lu = _ensure_kkt_factor!(prob)
         sol = _ensure_solved!(prob)
         J_fmax = calc_kkt_jacobian_flowlimit(prob, sol)
-        prob.cache.dz_dfmax = -(kkt_lu \ Matrix(J_fmax))
+        rhs = Matrix(J_fmax)
+        ldiv!(kkt_lu, rhs)
+        prob.cache.dz_dfmax = lmul!(-1, rhs)
     end
     return prob.cache.dz_dfmax
 end
@@ -158,7 +168,9 @@ function _get_dz_db!(prob::DCOPFProblem)::Matrix{Float64}
         kkt_lu = _ensure_kkt_factor!(prob)
         sol = _ensure_solved!(prob)
         J_b = calc_kkt_jacobian_susceptance(prob, sol)
-        prob.cache.dz_db = -(kkt_lu \ Matrix(J_b))
+        rhs = Matrix(J_b)
+        ldiv!(kkt_lu, rhs)
+        prob.cache.dz_db = lmul!(-1, rhs)
     end
     return prob.cache.dz_db
 end

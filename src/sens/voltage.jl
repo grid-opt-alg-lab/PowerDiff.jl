@@ -200,8 +200,9 @@ function _solve_voltage_sensitivities(A_lu, v_, d, rhs_offset)
                       "The Jacobian may be near-singular.")
             end
             ∂v[:, k] = x[1:d] + im * x[d+1:2d]
-            ∂vm[:, k] = real.(∂v[:, k] .* conj.(v_)) ./ abs.(v_)
-            ∂va[:, k] = imag.(∂v[:, k] .* conj.(v_)) ./ abs2.(v_)
+            v_safe = ifelse.(abs.(v_) .> eps(Float64), v_, one(ComplexF64))
+            ∂vm[:, k] = real.(∂v[:, k] .* conj.(v_safe)) ./ abs.(v_safe)
+            ∂va[:, k] = imag.(∂v[:, k] .* conj.(v_safe)) ./ abs2.(v_safe)
         else
             ∂v[:, k] .= 0; ∂vm[:, k] .= 0; ∂va[:, k] .= 0
         end

@@ -132,6 +132,7 @@ rows from the same cached `dz_d*` matrix — no recomputation needed.
 # Fields
 - `solution`: Cached ACOPFSolution (or nothing if not yet solved)
 - `kkt_factor`: Cached LU factorization of KKT Jacobian (or nothing)
+- `kkt_constants`: Cached KKT constants NamedTuple (or nothing)
 - `dz_dsw`: Full KKT derivative w.r.t. switching (or nothing)
 - `dz_dd`: Full KKT derivative w.r.t. active demand (or nothing)
 - `dz_dqd`: Full KKT derivative w.r.t. reactive demand (or nothing)
@@ -142,6 +143,7 @@ rows from the same cached `dz_d*` matrix — no recomputation needed.
 mutable struct ACSensitivityCache
     solution::Union{Nothing, ACOPFSolution}
     kkt_factor::Union{Nothing, Factorization}
+    kkt_constants::Union{Nothing, NamedTuple}
     dz_dsw::Union{Nothing, Matrix{Float64}}
     dz_dd::Union{Nothing, Matrix{Float64}}
     dz_dqd::Union{Nothing, Matrix{Float64}}
@@ -155,7 +157,7 @@ end
 
 Create an empty AC sensitivity cache with all fields set to nothing.
 """
-ACSensitivityCache() = ACSensitivityCache(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
+ACSensitivityCache() = ACSensitivityCache(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 
 """
     invalidate!(cache::ACSensitivityCache)
@@ -165,6 +167,7 @@ Clear all cached AC sensitivity data. Called when problem parameters change.
 function invalidate!(cache::ACSensitivityCache)
     cache.solution = nothing
     cache.kkt_factor = nothing
+    cache.kkt_constants = nothing
     cache.dz_dsw = nothing
     cache.dz_dd = nothing
     cache.dz_dqd = nothing

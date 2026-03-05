@@ -400,7 +400,7 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
     length(d) == n || throw(DimensionMismatch("Demand vector length $(length(d)) must match number of buses $n"))
 
     # Net injection
-    p = Float64.(g) - Float64.(d)
+    p = Float64.(g .- d)
 
     # Build reduced susceptance matrix (delete reference bus row/col) and factorize
     B = calc_susceptance_matrix(net)
@@ -425,7 +425,7 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
               "Check branch impedances for extreme values.")
     end
 
-    return DCPowerFlowState(net, θ, p, Float64.(g), Float64.(d), f, F, non_ref)
+    return DCPowerFlowState(net, θ, p, convert(Vector{Float64}, g), convert(Vector{Float64}, d), f, F, non_ref)
 end
 
 """
