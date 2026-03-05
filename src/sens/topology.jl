@@ -197,7 +197,7 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
         # Incidence row restricted to non-reference buses (sparse for efficient dot)
         a_e_r = net.A[e, nr]
 
-        # ∂L_r/∂swₑ * θ_r = -bₑ * a_{e,r} * (a_{e,r}' * θ_r)
+        # ∂B_r/∂swₑ * θ_r = -bₑ * a_{e,r} * (a_{e,r}' * θ_r)
         coeff = -net.b[e] * dot(a_e_r, θ_r)
         rhs = Vector(coeff * a_e_r)   # dense RHS for UmfpackLU backsolve
         dva_dsw[nr, e] = -(state.B_r_factor \ rhs)
@@ -244,8 +244,8 @@ function calc_sensitivity_demand(state::DCPowerFlowState)
     n = net.n
     nr = state.non_ref
 
-    # dθ/dd: solve L_r * X = I for the reduced block, embed in n×n
-    # The output is inherently dense (L_r⁻¹), so we use a batched solve.
+    # dθ/dd: solve B_r * X = I for the reduced block, embed in n×n
+    # The output is inherently dense (B_r⁻¹), so we use a batched solve.
     dva_dd = zeros(n, n)
     n_r = length(nr)
     dva_dd[nr, nr] = -(state.B_r_factor \ Matrix(1.0I, n_r, n_r))

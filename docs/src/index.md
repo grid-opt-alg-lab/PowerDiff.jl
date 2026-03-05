@@ -50,7 +50,10 @@ See [Getting Started](@ref) for a full walkthrough.
 Pages = [
     "getting-started.md",
     "sensitivity-api.md",
-    "math.md",
+    "math/dc-power-flow.md",
+    "math/dc-opf.md",
+    "math/ac-power-flow.md",
+    "math/ac-opf.md",
     "advanced.md",
     "api.md",
 ]
