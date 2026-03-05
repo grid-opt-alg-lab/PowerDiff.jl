@@ -76,7 +76,7 @@ The KKT Jacobian ``\partial K / \partial z`` is computed analytically as a spars
 
 ### AC OPF
 
-The AC OPF uses the full nonlinear polar power flow equations with Ipopt as the solver. The KKT Jacobian is computed via ForwardDiff, and sensitivities are extracted for switching parameters via the same implicit differentiation framework.
+The AC OPF uses the full nonlinear polar power flow equations with Ipopt as the solver. The KKT Jacobian is computed via ForwardDiff, and sensitivities are extracted for all supported parameters (switching, demand, reactive demand, costs, and flow limits) via the same implicit differentiation framework.
 
 ## AC Admittance
 

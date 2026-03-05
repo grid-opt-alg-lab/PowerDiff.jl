@@ -21,6 +21,18 @@ using PowerModels
 using LinearAlgebra
 using Test
 
+"""Check FD agreement for LMP (dual) sensitivities."""
+function _check_fd_lmp(sol_base, sol_pert, sens, col_idx, ε)
+    fd_lmp = (sol_pert.nu_p_bal - sol_base.nu_p_bal) / ε
+    analytical_lmp = Matrix(sens[:lmp])[:, col_idx]
+    # Dual variables (LMPs) can have smaller magnitudes than primal
+    # operands, so use a looser skip threshold (1e-4 vs 1e-6)
+    if norm(fd_lmp) > 1e-4
+        rel_err = norm(analytical_lmp - fd_lmp) / norm(fd_lmp)
+        @test rel_err < 1e-2
+    end
+end
+
 @testset "AC OPF All Sensitivities" begin
     pm_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
     file = joinpath(pm_path, "case5.m")
@@ -108,13 +120,7 @@ using Test
                 end
             end
 
-            # LMP = nu_p_bal duals
-            fd_lmp = (sol_pert.nu_p_bal - sol_base.nu_p_bal) / ε
-            analytical_lmp = Matrix(sens[:lmp])[:, bus_idx]
-            if norm(fd_lmp) > 1e-4
-                rel_err = norm(analytical_lmp - fd_lmp) / norm(fd_lmp)
-                @test rel_err < 1e-2
-            end
+            _check_fd_lmp(sol_base, sol_pert, sens, bus_idx, ε)
         end
     end
 
@@ -156,6 +162,8 @@ using Test
                     @test rel_err < 1e-2
                 end
             end
+
+            _check_fd_lmp(sol_base, sol_pert, sens, bus_idx, ε)
         end
     end
 
@@ -184,6 +192,8 @@ using Test
                     @test rel_err < 1e-2
                 end
             end
+
+            _check_fd_lmp(sol_base, sol_pert, sens, gen_idx, ε)
         end
     end
 
@@ -212,6 +222,8 @@ using Test
                     @test rel_err < 1e-2
                 end
             end
+
+            _check_fd_lmp(sol_base, sol_pert, sens, gen_idx, ε)
         end
     end
 
@@ -240,6 +252,8 @@ using Test
                     @test rel_err < 1e-2
                 end
             end
+
+            _check_fd_lmp(sol_base, sol_pert, sens, branch_idx, ε)
         end
     end
 

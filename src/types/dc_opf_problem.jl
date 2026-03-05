@@ -34,11 +34,12 @@ factorization is reused for subsequent parameters. Different operand queries
 (e.g. `:va` vs `:pg` vs `:lmp`) for the *same* parameter type all extract
 rows from the same cached `dz_d*` matrix — no recomputation needed.
 
-By contrast, `ACSensitivityCache` only needs 2 fields because AC OPF currently
-supports only switching (`:sw`) as a parameter, and `dz_dsw` already contains all
-operand rows. Power flow states (`DCPowerFlowState`, `ACPowerFlowState`) have no
-cache at all because their sensitivities are cheap direct algebra (reduced-Laplacian
-factorization or Jacobian factorization is precomputed at construction time).
+`ACSensitivityCache` follows the same design: one KKT factorization shared across
+6 parameter types (`:sw`, `:d`, `:qd`, `:cq`, `:cl`, `:fmax`), each producing a
+separate cached `dz_d*` matrix. Power flow states (`DCPowerFlowState`,
+`ACPowerFlowState`) have no cache at all because their sensitivities are cheap
+direct algebra (reduced-Laplacian factorization or Jacobian factorization is
+precomputed at construction time).
 
 # Fields
 - `solution`: Cached DCOPFSolution (or nothing if not yet solved)
@@ -144,7 +145,7 @@ solve!(prob)
 ```
 """
 function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.Optimizer, silent::Bool=true)
-    @assert length(d) == network.n "Demand vector length must match number of buses"
+    length(d) == network.n || throw(DimensionMismatch("Demand vector length $(length(d)) must match number of buses $(network.n)"))
 
     _warn_negative_demand(d)
 

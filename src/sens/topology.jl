@@ -53,7 +53,7 @@ function voltage_topology_sensitivities(
     full_edges::Bool=false,
     check_solution::Bool=true,
 )
-    net["basic_network"] == true ||
+    get(net, "basic_network", false) ||
         throw(ArgumentError("network must be built with `make_basic_network`"))
 
     base_v = isnothing(voltages) ? PM.calc_basic_bus_voltage(net) : voltages
@@ -166,13 +166,13 @@ end
 
 Compute switching sensitivity for DC power flow (not OPF).
 
-For DC power flow `θ_r = L_r⁻¹ p_r`, the sensitivity of angles w.r.t. switching is:
+For DC power flow `θ_r = B_r⁻¹ p_r`, the sensitivity of angles w.r.t. switching is:
 
-    ∂θ_r/∂swₑ = -L_r⁻¹ · (∂L_r/∂swₑ) · θ_r
+    ∂θ_r/∂swₑ = -B_r⁻¹ · (∂B_r/∂swₑ) · θ_r
 
-where `∂L_r/∂swₑ = -bₑ · a_{e,r} · a_{e,r}'` is a rank-1 update from the incidence
-column of branch `e` restricted to non-reference buses, and `L_r` is the Laplacian
-with the reference bus row and column deleted.
+where `∂B_r/∂swₑ = -bₑ · a_{e,r} · a_{e,r}'` is a rank-1 update from the incidence
+column of branch `e` restricted to non-reference buses, and `B_r` is the susceptance
+matrix with the reference bus row and column deleted.
 
 # Arguments
 - `state`: DCPowerFlowState containing the solved power flow
@@ -225,9 +225,9 @@ end
 
 Compute demand sensitivity for DC power flow (not OPF).
 
-For DC power flow `θ_r = L_r⁻¹ p_r`, the sensitivity of angles w.r.t. demand is:
+For DC power flow `θ_r = B_r⁻¹ p_r`, the sensitivity of angles w.r.t. demand is:
 
-    ∂va/∂d = -L_r⁻¹  (embedded in the non-reference block)
+    ∂va/∂d = -B_r⁻¹  (embedded in the non-reference block)
 
 since `p = g - d` and `∂p/∂d = -I`.
 

@@ -205,36 +205,38 @@ end
 # DCSensitivityCache
 # =============================================================================
 
+const _DC_CACHE_FIELDS = (:solution, :kkt_factor, :dz_dd, :dz_dcl, :dz_dcq, :dz_dsw, :dz_dfmax, :dz_db)
+
 function Base.show(io::IO, cache::DCSensitivityCache)
-    n = _dc_cache_count(cache)
-    print(io, "DCSensitivityCache($n/8 cached)")
+    n = count(f -> !isnothing(getfield(cache, f)), _DC_CACHE_FIELDS)
+    print(io, "DCSensitivityCache($n/$(length(_DC_CACHE_FIELDS)) cached)")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", cache::DCSensitivityCache)
     println(io, "DCSensitivityCache")
-    _show_cache_field(io, "solution",   cache.solution)
-    _show_cache_field(io, "kkt_factor", cache.kkt_factor)
-    _show_cache_field(io, "dz_dd",      cache.dz_dd)
-    _show_cache_field(io, "dz_dcl",     cache.dz_dcl)
-    _show_cache_field(io, "dz_dcq",     cache.dz_dcq)
-    _show_cache_field(io, "dz_dsw",     cache.dz_dsw)
-    _show_cache_field(io, "dz_dfmax",   cache.dz_dfmax)
-    _show_cache_field(io, "dz_db",      cache.dz_db; last=true)
+    for (i, f) in enumerate(_DC_CACHE_FIELDS)
+        _show_cache_field(io, string(f), getfield(cache, f);
+                          last=(i == length(_DC_CACHE_FIELDS)))
+    end
 end
 
 # =============================================================================
 # ACSensitivityCache
 # =============================================================================
 
+const _AC_CACHE_FIELDS = (:solution, :kkt_factor, :dz_dsw, :dz_dd, :dz_dqd, :dz_dcq, :dz_dcl, :dz_dfmax)
+
 function Base.show(io::IO, cache::ACSensitivityCache)
-    n = count(!isnothing, (cache.solution, cache.dz_dsw))
-    print(io, "ACSensitivityCache($n/2 cached)")
+    n = count(f -> !isnothing(getfield(cache, f)), _AC_CACHE_FIELDS)
+    print(io, "ACSensitivityCache($n/$(length(_AC_CACHE_FIELDS)) cached)")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", cache::ACSensitivityCache)
     println(io, "ACSensitivityCache")
-    _show_cache_field(io, "solution", cache.solution)
-    _show_cache_field(io, "dz_dsw",  cache.dz_dsw; last=true)
+    for (i, f) in enumerate(_AC_CACHE_FIELDS)
+        _show_cache_field(io, string(f), getfield(cache, f);
+                          last=(i == length(_AC_CACHE_FIELDS)))
+    end
 end
 
 # =============================================================================
@@ -252,31 +254,15 @@ function _problem_status_str(model::JuMP.Model)
 end
 
 function _dc_cache_count(cache::DCSensitivityCache)
-    return count(!isnothing, (
-        cache.solution, cache.kkt_factor,
-        cache.dz_dd, cache.dz_dcl, cache.dz_dcq,
-        cache.dz_dsw, cache.dz_dfmax, cache.dz_db
-    ))
+    count(f -> !isnothing(getfield(cache, f)), _DC_CACHE_FIELDS)
 end
 
 function _dc_cache_list(cache::DCSensitivityCache)
-    names = String[]
-    !isnothing(cache.solution)   && push!(names, "solution")
-    !isnothing(cache.kkt_factor) && push!(names, "kkt_factor")
-    !isnothing(cache.dz_dd)      && push!(names, "dz_dd")
-    !isnothing(cache.dz_dcl)     && push!(names, "dz_dcl")
-    !isnothing(cache.dz_dcq)     && push!(names, "dz_dcq")
-    !isnothing(cache.dz_dsw)     && push!(names, "dz_dsw")
-    !isnothing(cache.dz_dfmax)   && push!(names, "dz_dfmax")
-    !isnothing(cache.dz_db)      && push!(names, "dz_db")
-    return names
+    [string(f) for f in _DC_CACHE_FIELDS if !isnothing(getfield(cache, f))]
 end
 
 function _ac_cache_list(cache::ACSensitivityCache)
-    names = String[]
-    !isnothing(cache.solution) && push!(names, "solution")
-    !isnothing(cache.dz_dsw)   && push!(names, "dz_dsw")
-    return names
+    [string(f) for f in _AC_CACHE_FIELDS if !isnothing(getfield(cache, f))]
 end
 
 function _show_cache_field(io::IO, name::String, value; last::Bool=false)

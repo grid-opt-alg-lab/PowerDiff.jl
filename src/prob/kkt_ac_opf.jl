@@ -168,8 +168,10 @@ Unflatten KKT variable vector into named components.
 NamedTuple with fields for all primal and dual variables.
 """
 function ac_unflatten_variables(z::AbstractVector, prob::ACOPFProblem)
-    idx = ac_kkt_indices(prob)
+    ac_unflatten_variables(z, ac_kkt_indices(prob))
+end
 
+function ac_unflatten_variables(z::AbstractVector, idx::NamedTuple)
     return (
         va = z[idx.va], vm = z[idx.vm], pg = z[idx.pg], qg = z[idx.qg],
         nu_p_bal = z[idx.nu_p_bal], nu_q_bal = z[idx.nu_q_bal], nu_ref_bus = z[idx.nu_ref_bus],
@@ -217,8 +219,11 @@ function calc_ac_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothi
     cl0 = _extract_gen_cl(prob)
     fmax0 = _extract_branch_fmax(prob)
 
+    # Pre-compute indices so ac_kkt doesn't recompute them on every ForwardDiff evaluation
+    idx = ac_kkt_indices(prob)
+
     J = ForwardDiff.jacobian(
-        z -> ac_kkt(z, prob, sw; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0),
+        z -> ac_kkt(z, prob, sw; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0, idx=idx),
         z0
     )
 
@@ -499,8 +504,12 @@ Returns a vector of KKT residuals (should be zero at optimum).
 3. Complementary slackness for all inequality constraints
 """
 function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
-                pd=nothing, qd=nothing, cq=nothing, cl=nothing, fmax=nothing)
-    vars = ac_unflatten_variables(z, prob)
+                pd=nothing, qd=nothing, cq=nothing, cl=nothing, fmax=nothing,
+                idx=nothing)
+    if isnothing(idx)
+        idx = ac_kkt_indices(prob)
+    end
+    vars = ac_unflatten_variables(z, idx)
     net = prob.network
     ref = prob.ref
     n, m, k = net.n, net.m, prob.n_gen
@@ -517,8 +526,8 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     # Materialize rate_a vector once to avoid repeated isnothing checks
     rate_a = isnothing(fmax) ? T[ref[:branch][l]["rate_a"] for l in 1:m] : fmax
 
-    # Build KKT residual vector
-    K = T[]
+    # Pre-allocate KKT residual vector
+    K = Vector{T}(undef, ac_kkt_dims(prob))
 
     # =========================================================================
     # 1. Stationarity conditions via ForwardDiff on the Lagrangian
@@ -530,7 +539,10 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
         x_primal
     )
     # grad = [∂L/∂va; ∂L/∂vm; ∂L/∂pg; ∂L/∂qg]
-    append!(K, grad)
+    K[idx.va] = grad[idx.va]
+    K[idx.vm] = grad[idx.vm]
+    K[idx.pg] = grad[idx.pg]
+    K[idx.qg] = grad[idx.qg]
 
     # =========================================================================
     # 2. Primal feasibility
@@ -539,90 +551,58 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     # Power balance
     K_p_bal, K_q_bal = _power_balance_residuals(va, vm, pg, qg, p_fr, q_fr, p_to, q_to,
                                                  net, ref, prob; pd=pd, qd=qd)
-    append!(K, K_p_bal)
-    append!(K, K_q_bal)
+    K[idx.nu_p_bal] = K_p_bal
+    K[idx.nu_q_bal] = K_q_bal
 
     # Reference bus: va[ref_bus] == 0
     ref_bus_keys = _ref_bus_indices(prob)
-    for ref_bus_idx in ref_bus_keys
-        push!(K, va[ref_bus_idx])
+    for (j, ref_bus_idx) in enumerate(ref_bus_keys)
+        K[idx.nu_ref_bus[j]] = va[ref_bus_idx]
     end
 
     # =========================================================================
-    # 3. Complementary slackness conditions
+    # 3. Complementary slackness conditions (vectorized)
     # =========================================================================
+
+    # Pre-extract bound vectors for vectorized complementary slackness
+    vmin = T[ref[:bus][i]["vmin"] for i in 1:n]
+    vmax = T[ref[:bus][i]["vmax"] for i in 1:n]
+    pmin = T[ref[:gen][i]["pmin"] for i in 1:k]
+    pmax = T[ref[:gen][i]["pmax"] for i in 1:k]
+    qmin = T[ref[:gen][i]["qmin"] for i in 1:k]
+    qmax = T[ref[:gen][i]["qmax"] for i in 1:k]
+    f_bus_idx = [ref[:branch][l]["f_bus"] for l in 1:m]
+    t_bus_idx = [ref[:branch][l]["t_bus"] for l in 1:m]
+    angmin = T[ref[:branch][l]["angmin"] for l in 1:m]
+    angmax = T[ref[:branch][l]["angmax"] for l in 1:m]
 
     # Thermal limits
-    for l in 1:m
-        push!(K, vars.lam_thermal_fr[l] * (p_fr[l]^2 + q_fr[l]^2 - rate_a[l]^2))
-    end
-    for l in 1:m
-        push!(K, vars.lam_thermal_to[l] * (p_to[l]^2 + q_to[l]^2 - rate_a[l]^2))
-    end
+    K[idx.lam_thermal_fr] .= vars.lam_thermal_fr .* (p_fr.^2 .+ q_fr.^2 .- rate_a.^2)
+    K[idx.lam_thermal_to] .= vars.lam_thermal_to .* (p_to.^2 .+ q_to.^2 .- rate_a.^2)
 
     # Angle difference limits
-    for l in 1:m
-        branch = ref[:branch][l]
-        f_bus = branch["f_bus"]
-        t_bus = branch["t_bus"]
-        push!(K, vars.lam_angle_lb[l] * (va[f_bus] - va[t_bus] - branch["angmin"]))
-    end
-    for l in 1:m
-        branch = ref[:branch][l]
-        f_bus = branch["f_bus"]
-        t_bus = branch["t_bus"]
-        push!(K, vars.lam_angle_ub[l] * (branch["angmax"] - va[f_bus] + va[t_bus]))
-    end
+    K[idx.lam_angle_lb] .= vars.lam_angle_lb .* (va[f_bus_idx] .- va[t_bus_idx] .- angmin)
+    K[idx.lam_angle_ub] .= vars.lam_angle_ub .* (angmax .- va[f_bus_idx] .+ va[t_bus_idx])
 
     # Voltage bounds
-    for i in 1:n
-        push!(K, vars.mu_vm_lb[i] * (vm[i] - ref[:bus][i]["vmin"]))
-    end
-    for i in 1:n
-        push!(K, vars.mu_vm_ub[i] * (ref[:bus][i]["vmax"] - vm[i]))
-    end
+    K[idx.mu_vm_lb] .= vars.mu_vm_lb .* (vm .- vmin)
+    K[idx.mu_vm_ub] .= vars.mu_vm_ub .* (vmax .- vm)
 
     # Generation bounds
-    for i in 1:k
-        push!(K, vars.rho_pg_lb[i] * (pg[i] - ref[:gen][i]["pmin"]))
-    end
-    for i in 1:k
-        push!(K, vars.rho_pg_ub[i] * (ref[:gen][i]["pmax"] - pg[i]))
-    end
-    for i in 1:k
-        push!(K, vars.rho_qg_lb[i] * (qg[i] - ref[:gen][i]["qmin"]))
-    end
-    for i in 1:k
-        push!(K, vars.rho_qg_ub[i] * (ref[:gen][i]["qmax"] - qg[i]))
-    end
+    K[idx.rho_pg_lb] .= vars.rho_pg_lb .* (pg .- pmin)
+    K[idx.rho_pg_ub] .= vars.rho_pg_ub .* (pmax .- pg)
+    K[idx.rho_qg_lb] .= vars.rho_qg_lb .* (qg .- qmin)
+    K[idx.rho_qg_ub] .= vars.rho_qg_ub .* (qmax .- qg)
 
     # Flow variable bounds (reduced-space)
-    for l in 1:m
-        push!(K, vars.sig_p_fr_lb[l] * (p_fr[l] + rate_a[l]))
-    end
-    for l in 1:m
-        push!(K, vars.sig_p_fr_ub[l] * (rate_a[l] - p_fr[l]))
-    end
-    for l in 1:m
-        push!(K, vars.sig_q_fr_lb[l] * (q_fr[l] + rate_a[l]))
-    end
-    for l in 1:m
-        push!(K, vars.sig_q_fr_ub[l] * (rate_a[l] - q_fr[l]))
-    end
-    for l in 1:m
-        push!(K, vars.sig_p_to_lb[l] * (p_to[l] + rate_a[l]))
-    end
-    for l in 1:m
-        push!(K, vars.sig_p_to_ub[l] * (rate_a[l] - p_to[l]))
-    end
-    for l in 1:m
-        push!(K, vars.sig_q_to_lb[l] * (q_to[l] + rate_a[l]))
-    end
-    for l in 1:m
-        push!(K, vars.sig_q_to_ub[l] * (rate_a[l] - q_to[l]))
-    end
-
-    @assert length(K) == ac_kkt_dims(prob) "KKT vector length mismatch: got $(length(K)), expected $(ac_kkt_dims(prob))"
+    K[idx.sig_p_fr_lb] .= vars.sig_p_fr_lb .* (p_fr .+ rate_a)
+    K[idx.sig_p_fr_ub] .= vars.sig_p_fr_ub .* (rate_a .- p_fr)
+    K[idx.sig_q_fr_lb] .= vars.sig_q_fr_lb .* (q_fr .+ rate_a)
+    K[idx.sig_q_fr_ub] .= vars.sig_q_fr_ub .* (rate_a .- q_fr)
+    K[idx.sig_p_to_lb] .= vars.sig_p_to_lb .* (p_to .+ rate_a)
+    K[idx.sig_p_to_ub] .= vars.sig_p_to_ub .* (rate_a .- p_to)
+    K[idx.sig_q_to_lb] .= vars.sig_q_to_lb .* (q_to .+ rate_a)
+    K[idx.sig_q_to_ub] .= vars.sig_q_to_ub .* (rate_a .- q_to)
 
     return K
 end
@@ -634,51 +614,33 @@ ac_kkt(z::AbstractVector, prob::ACOPFProblem) = ac_kkt(z, prob, prob.network.sw)
 # Parameter Extraction Functions
 # =============================================================================
 
-"""Extract per-bus aggregated active demand from the problem's ref."""
-function _extract_bus_pd(prob::ACOPFProblem)
+"""Extract per-bus aggregated load values for a given key ("pd" or "qd")."""
+function _extract_bus_load(prob::ACOPFProblem, key::String)
     ref = prob.ref
     n = prob.network.n
-    pd = zeros(n)
+    vals = zeros(n)
     for i in 1:n
         for lid in ref[:bus_loads][i]
-            pd[i] += ref[:load][lid]["pd"]
+            vals[i] += ref[:load][lid][key]
         end
     end
-    return pd
+    return vals
 end
 
-"""Extract per-bus aggregated reactive demand from the problem's ref."""
-function _extract_bus_qd(prob::ACOPFProblem)
-    ref = prob.ref
-    n = prob.network.n
-    qd = zeros(n)
-    for i in 1:n
-        for lid in ref[:bus_loads][i]
-            qd[i] += ref[:load][lid]["qd"]
-        end
-    end
-    return qd
-end
-
-"""Extract per-generator quadratic cost coefficients from the problem's ref."""
-function _extract_gen_cq(prob::ACOPFProblem)
+"""Extract per-generator cost coefficient at a given index (1=quadratic, 2=linear)."""
+function _extract_gen_cost(prob::ACOPFProblem, cost_idx::Int)
     k = prob.n_gen
-    cq = zeros(k)
+    vals = zeros(k)
     for i in 1:k
-        cq[i] = prob.ref[:gen][i]["cost"][1]
+        vals[i] = prob.ref[:gen][i]["cost"][cost_idx]
     end
-    return cq
+    return vals
 end
 
-"""Extract per-generator linear cost coefficients from the problem's ref."""
-function _extract_gen_cl(prob::ACOPFProblem)
-    k = prob.n_gen
-    cl = zeros(k)
-    for i in 1:k
-        cl[i] = prob.ref[:gen][i]["cost"][2]
-    end
-    return cl
-end
+_extract_bus_pd(prob::ACOPFProblem) = _extract_bus_load(prob, "pd")
+_extract_bus_qd(prob::ACOPFProblem) = _extract_bus_load(prob, "qd")
+_extract_gen_cq(prob::ACOPFProblem) = _extract_gen_cost(prob, 1)
+_extract_gen_cl(prob::ACOPFProblem) = _extract_gen_cost(prob, 2)
 
 """Extract per-branch flow limits (rate_a) from the problem's ref."""
 function _extract_branch_fmax(prob::ACOPFProblem)
@@ -704,6 +666,10 @@ const _AC_PARAM_EXTRACT = Dict{Symbol, Function}(
     :fmax => _extract_branch_fmax,
 )
 
+const _PARAM_KWARG_MAP = Dict{Symbol, Symbol}(
+    :d => :pd, :qd => :qd, :cq => :cq, :cl => :cl, :fmax => :fmax,
+)
+
 """
     calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol)
 
@@ -716,18 +682,9 @@ function calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, para
     p0 = _AC_PARAM_EXTRACT[param](prob)
     if param === :sw
         return ForwardDiff.jacobian(s -> ac_kkt(z0, prob, s), p0)
-    elseif param === :d
-        return ForwardDiff.jacobian(pd -> ac_kkt(z0, prob, sw; pd=pd), p0)
-    elseif param === :qd
-        return ForwardDiff.jacobian(qd -> ac_kkt(z0, prob, sw; qd=qd), p0)
-    elseif param === :cq
-        return ForwardDiff.jacobian(cq -> ac_kkt(z0, prob, sw; cq=cq), p0)
-    elseif param === :cl
-        return ForwardDiff.jacobian(cl -> ac_kkt(z0, prob, sw; cl=cl), p0)
-    elseif param === :fmax
-        return ForwardDiff.jacobian(fmax -> ac_kkt(z0, prob, sw; fmax=fmax), p0)
     else
-        throw(ArgumentError("Unknown AC OPF parameter: $param"))
+        kw = _PARAM_KWARG_MAP[param]
+        return ForwardDiff.jacobian(x -> ac_kkt(z0, prob, sw; Dict(kw => x)...), p0)
     end
 end
 
@@ -764,7 +721,11 @@ function _ensure_ac_kkt_factor!(prob::ACOPFProblem)
             if e isa LinearAlgebra.SingularException
                 @warn "AC KKT Jacobian is singular; applying Tikhonov perturbation ($TIKHONOV_EPS)"
                 J_reg = J_z + TIKHONOV_EPS * I
-                lu(J_reg)
+                try
+                    lu(J_reg)
+                catch e2
+                    error("AC KKT Jacobian remains singular after Tikhonov perturbation: $(e2)")
+                end
             else
                 rethrow(e)
             end

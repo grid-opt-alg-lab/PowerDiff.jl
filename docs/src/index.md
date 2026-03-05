@@ -8,7 +8,7 @@ A Julia package for differentiable power system analysis. Compute sensitivities 
 - **DC OPF (B-theta formulation)**: Susceptance-weighted Laplacian preserving network topology
 - **DC power flow sensitivities**: Switching and demand sensitivity for non-OPF power flow
 - **AC power flow sensitivities**: Voltage and current sensitivity w.r.t. power injections
-- **AC OPF sensitivities**: Switching sensitivity via implicit differentiation of KKT conditions
+- **AC OPF sensitivities**: Sensitivity w.r.t. switching, demand, costs, and flow limits via implicit differentiation of KKT conditions
 - **LMP computation**: Locational marginal prices with energy/congestion decomposition
 - **Load shedding**: Sensitivity of optimal load curtailment w.r.t. demand, costs, and network constraints
 - **ForwardDiff verification**: All sensitivities verified against automatic differentiation

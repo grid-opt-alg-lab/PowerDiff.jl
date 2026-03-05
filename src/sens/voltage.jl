@@ -112,50 +112,15 @@ function calc_voltage_active_power_sensitivities(
     idx_slack::Int=1,
     full::Bool=true
 )
-    # Build the linearized system matrix
     A = _build_voltage_sensitivity_matrix(v, Y, idx_slack)
-
-    # Remove slack bus from voltage vector
     v_ = v[1:end .!= idx_slack]
     d = length(v_)
-
-    # Solve for each column (unit power perturbation at bus k)
-    ∂v_∂p = Matrix{ComplexF64}(undef, d, d)
-    ∂vm_∂p = Matrix{Float64}(undef, d, d)
-    ∂va_∂p = Matrix{Float64}(undef, d, d)
-
-    for k in 1:d
-        if abs(v_[k]) > 1e-6
-            # Right-hand side: unit perturbation in active power at bus k
-            b = zeros(2d)
-            b[k] = 1.0
-
-            # Solve the linear system
-            x = A \ b
-
-            # Convert to voltage sensitivities
-            # x = [∂v_re; ∂v_im], so ∂v = ∂v_re + j*∂v_im (true complex derivative)
-            ∂v_∂p[:, k] = x[1:d] + im * x[d+1:2d]
-
-            # Magnitude sensitivity: ∂|v|/∂p = Re(∂v/∂p · conj(v)) / |v|
-            ∂vm_∂p[:, k] = real.(∂v_∂p[:, k] .* conj.(v_)) ./ abs.(v_)
-
-            # Angle sensitivity: ∂θ/∂p = Im(∂v/∂p · conj(v)) / |v|²
-            ∂va_∂p[:, k] = imag.(∂v_∂p[:, k] .* conj.(v_)) ./ abs2.(v_)
-        else
-            ∂v_∂p[:, k] .= 0
-            ∂vm_∂p[:, k] .= 0
-            ∂va_∂p[:, k] .= 0
-        end
-    end
-
-    # Optionally expand to include slack bus as zeros
+    ∂v_∂p, ∂vm_∂p, ∂va_∂p = _solve_voltage_sensitivities(A, v_, d, 0)
     if full
         ∂v_∂p = _insert_slack_zeros(∂v_∂p, idx_slack, ComplexF64)
         ∂vm_∂p = _insert_slack_zeros(∂vm_∂p, idx_slack, Float64)
         ∂va_∂p = _insert_slack_zeros(∂va_∂p, idx_slack, Float64)
     end
-
     return ∂v_∂p, ∂vm_∂p, ∂va_∂p
 end
 
@@ -176,56 +141,56 @@ function calc_voltage_reactive_power_sensitivities(
     idx_slack::Int=1,
     full::Bool=true
 )
-    # Build the linearized system matrix
     A = _build_voltage_sensitivity_matrix(v, Y, idx_slack)
-
-    # Remove slack bus from voltage vector
     v_ = v[1:end .!= idx_slack]
     d = length(v_)
-
-    # Solve for each column (unit reactive power perturbation at bus k)
-    ∂v_∂q = Matrix{ComplexF64}(undef, d, d)
-    ∂vm_∂q = Matrix{Float64}(undef, d, d)
-    ∂va_∂q = Matrix{Float64}(undef, d, d)
-
-    for k in 1:d
-        if abs(v_[k]) > 1e-6
-            # Right-hand side: unit perturbation in reactive power at bus k
-            b = zeros(2d)
-            b[d + k] = 1.0
-
-            # Solve the linear system
-            x = A \ b
-
-            # Convert to voltage sensitivities
-            # x = [∂v_re; ∂v_im], so ∂v = ∂v_re + j*∂v_im (true complex derivative)
-            ∂v_∂q[:, k] = x[1:d] + im * x[d+1:2d]
-
-            # Magnitude sensitivity
-            ∂vm_∂q[:, k] = real.(∂v_∂q[:, k] .* conj.(v_)) ./ abs.(v_)
-
-            # Angle sensitivity: ∂θ/∂q = Im(∂v/∂q · conj(v)) / |v|²
-            ∂va_∂q[:, k] = imag.(∂v_∂q[:, k] .* conj.(v_)) ./ abs2.(v_)
-        else
-            ∂v_∂q[:, k] .= 0
-            ∂vm_∂q[:, k] .= 0
-            ∂va_∂q[:, k] .= 0
-        end
-    end
-
-    # Optionally expand to include slack bus as zeros
+    ∂v_∂q, ∂vm_∂q, ∂va_∂q = _solve_voltage_sensitivities(A, v_, d, d)
     if full
         ∂v_∂q = _insert_slack_zeros(∂v_∂q, idx_slack, ComplexF64)
         ∂vm_∂q = _insert_slack_zeros(∂vm_∂q, idx_slack, Float64)
         ∂va_∂q = _insert_slack_zeros(∂va_∂q, idx_slack, Float64)
     end
-
     return ∂v_∂q, ∂vm_∂q, ∂va_∂q
 end
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+"""
+    _solve_voltage_sensitivities(A, v_, d, rhs_offset)
+
+Shared inner loop for voltage sensitivity computation.
+
+Solves the linearized system A \\ b for each bus k, where b has a unit
+perturbation at position `rhs_offset + k`. For active power sensitivities,
+`rhs_offset = 0`; for reactive power, `rhs_offset = d`.
+
+Returns (∂v, ∂vm, ∂va) matrices of size (d × d).
+"""
+function _solve_voltage_sensitivities(A, v_, d, rhs_offset)
+    ∂v = Matrix{ComplexF64}(undef, d, d)
+    ∂vm = Matrix{Float64}(undef, d, d)
+    ∂va = Matrix{Float64}(undef, d, d)
+    for k in 1:d
+        if abs(v_[k]) > 1e-6
+            b = zeros(2d)
+            b[rhs_offset + k] = 1.0
+            x = A \ b
+            if any(!isfinite, x)
+                @error "Voltage sensitivity produced non-finite values at bus $k; the Jacobian may be near-singular"
+                ∂v[:, k] .= 0; ∂vm[:, k] .= 0; ∂va[:, k] .= 0
+                continue
+            end
+            ∂v[:, k] = x[1:d] + im * x[d+1:2d]
+            ∂vm[:, k] = real.(∂v[:, k] .* conj.(v_)) ./ abs.(v_)
+            ∂va[:, k] = imag.(∂v[:, k] .* conj.(v_)) ./ abs2.(v_)
+        else
+            ∂v[:, k] .= 0; ∂vm[:, k] .= 0; ∂va[:, k] .= 0
+        end
+    end
+    return ∂v, ∂vm, ∂va
+end
 
 """
     _build_voltage_sensitivity_matrix(v, Y, idx_slack)

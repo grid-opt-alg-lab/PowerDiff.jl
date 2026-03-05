@@ -50,8 +50,8 @@ Invalid combinations throw ArgumentError.
 - `:d` / `:pd`: Active demand (DC PF, DC OPF, AC OPF; AC PF via transform)
 - `:qd`: Reactive demand (AC OPF; AC PF via transform)
 - `:sw`: Switching states
-- `:cq`, `:cl`: Cost coefficients (DC OPF)
-- `:fmax`: Flow limits (DC OPF)
+- `:cq`, `:cl`: Cost coefficients (DC OPF, AC OPF)
+- `:fmax`: Flow limits (DC OPF, AC OPF)
 - `:b`: Susceptances (DC OPF)
 - `:p`: Active power injection (AC PF)
 - `:q`: Reactive power injection (AC PF)
@@ -81,6 +81,11 @@ J2 = calc_sensitivity(ac_state, :p, :vm)   # ∂P/∂|V|
 
 # AC Power Flow — demand transform (∂/∂d = -∂/∂p since p_net = pg - pd)
 dvm_dd = calc_sensitivity(ac_state, :vm, :d)
+
+# AC OPF — all parameter types supported
+dlmp_dd = calc_sensitivity(ac_prob, :lmp, :d)      # dLMP/dd
+dpg_dcq = calc_sensitivity(ac_prob, :pg, :cq)      # dpg/dcq
+dvm_dfmax = calc_sensitivity(ac_prob, :vm, :fmax)   # d|V|/dfmax
 ```
 """
 function calc_sensitivity end

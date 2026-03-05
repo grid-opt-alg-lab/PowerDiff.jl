@@ -649,8 +649,8 @@ rebuild the JuMP model so that `solve!(prob)` uses the new switching state.
 """
 function update_switching!(prob::DCOPFProblem, s::AbstractVector)
     m = prob.network.m
-    @assert length(s) == m "Switching vector length must match number of branches"
-    @assert all(0 .<= s .<= 1) "Switching values must be in [0,1]"
+    length(s) == m || throw(DimensionMismatch("Switching vector length $(length(s)) must match number of branches $m"))
+    all(0 .<= s .<= 1) || throw(ArgumentError("Switching values must be in [0,1]"))
 
     # Invalidate sensitivity cache since parameters changed
     invalidate!(prob.cache)

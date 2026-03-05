@@ -144,14 +144,21 @@ jac.dq_dvm   # J4
 
 ## AC OPF
 
-AC OPF computes switching sensitivities via implicit differentiation of the full nonlinear KKT system.
+AC OPF computes sensitivities via implicit differentiation of the full nonlinear KKT system,
+supporting 6 parameter types: switching, demand, reactive demand, costs, and flow limits.
 
 ```julia
 ac_prob = ACOPFProblem(net)
 solve!(ac_prob)
 
+# Switching sensitivities
 dvm_dsw = calc_sensitivity(ac_prob, :vm, :sw)   # d|V|/dsw (n x m)
 dva_dsw = calc_sensitivity(ac_prob, :va, :sw)   # dva/dsw (n x m)
 dpg_dsw = calc_sensitivity(ac_prob, :pg, :sw)   # dpg/dsw (k x m)
 dqg_dsw = calc_sensitivity(ac_prob, :qg, :sw)   # dqg/dsw (k x m)
+
+# Demand, cost, and flow limit sensitivities
+dlmp_dd = calc_sensitivity(ac_prob, :lmp, :d)     # dLMP/dd (n x n)
+dpg_dcq = calc_sensitivity(ac_prob, :pg, :cq)     # dpg/dcq (k x k)
+dvm_dfmax = calc_sensitivity(ac_prob, :vm, :fmax)  # d|V|/dfmax (n x m)
 ```
