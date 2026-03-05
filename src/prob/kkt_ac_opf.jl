@@ -684,7 +684,7 @@ function calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, para
         return ForwardDiff.jacobian(s -> ac_kkt(z0, prob, s), p0)
     else
         kw = _PARAM_KWARG_MAP[param]
-        return ForwardDiff.jacobian(x -> ac_kkt(z0, prob, sw; Dict(kw => x)...), p0)
+        return ForwardDiff.jacobian(x -> ac_kkt(z0, prob, sw; NamedTuple{(kw,)}((x,))...), p0)
     end
 end
 
