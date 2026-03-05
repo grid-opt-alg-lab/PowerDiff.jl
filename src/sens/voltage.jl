@@ -192,6 +192,7 @@ function _solve_voltage_sensitivities(A_lu, v_, d, rhs_offset)
     ∂vm = Matrix{Float64}(undef, d, d)
     ∂va = Matrix{Float64}(undef, d, d)
     b = zeros(2d)
+    x = Vector{Float64}(undef, 2d)
     # Hoist v_safe and derived vectors outside the loop — they depend only on v_, not k
     v_safe = ifelse.(abs.(v_) .> eps(Float64), v_, one(ComplexF64))
     abs_v_safe = abs.(v_safe)
@@ -201,7 +202,7 @@ function _solve_voltage_sensitivities(A_lu, v_, d, rhs_offset)
         if abs(v_[k]) > 1e-6
             fill!(b, 0.0)
             b[rhs_offset + k] = 1.0
-            x = A_lu \ b
+            ldiv!(x, A_lu, b)
             if any(!isfinite, x)
                 error("Voltage sensitivity solve produced non-finite values at bus $k. " *
                       "The Jacobian may be near-singular.")

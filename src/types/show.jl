@@ -263,7 +263,7 @@ end
 
 function _show_cache_field(io::IO, name::String, value; last::Bool=false)
     mark = isnothing(value) ? "✗" : "✓"
-    padded = rpad(name * ":", 12)
+    padded = rpad(name * ":", 16)
     if last
         print(io, "  $padded $mark")
     else

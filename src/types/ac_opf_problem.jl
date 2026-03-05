@@ -174,6 +174,7 @@ function invalidate!(cache::ACSensitivityCache)
     cache.dz_dcq = nothing
     cache.dz_dcl = nothing
     cache.dz_dfmax = nothing
+    return nothing
 end
 
 # =============================================================================

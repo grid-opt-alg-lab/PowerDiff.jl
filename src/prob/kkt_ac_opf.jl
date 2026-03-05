@@ -545,7 +545,7 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     rate_a = isnothing(fmax) ? T[ref[:branch][l]["rate_a"] for l in 1:m] : fmax
 
     # Pre-allocate KKT residual vector
-    K = fill(T(NaN), ac_kkt_dims(prob))
+    K = fill(T(NaN), last(idx.sig_q_to_ub))
 
     # =========================================================================
     # 1. Stationarity conditions via ForwardDiff on the Lagrangian
@@ -583,9 +583,9 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     # =========================================================================
     # 3. Complementary slackness conditions (vectorized)
     # =========================================================================
-    # Sign convention: λ * residual = 0 where residual is non-negative at feasibility.
-    # Lower bounds: residual = (x - lb) ≥ 0;  Upper bounds: residual = (ub - x) ≥ 0.
-    # This matches the Lagrangian L = f(x) - Σ λ * residual used in _reduced_lagrangian.
+    # Lower bounds: L -= λ*(x - lb),  CS = λ*(x - lb) = 0  (same residual sign)
+    # Upper bounds: L -= λ*(x - ub),  CS = λ*(ub - x) = 0  (negated residual)
+    # Both are valid; the sign flip cancels in implicit differentiation.
 
     # Use pre-extracted bounds when available to avoid allocations in ForwardDiff
     if isnothing(constants)
