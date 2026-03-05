@@ -154,6 +154,25 @@ end
     end
 end
 
+@testset "AC KKT Residuals" begin
+    net = load_test_case("case5.m")
+    if isnothing(net)
+        @test_skip false
+    else
+        ac_prob = ACOPFProblem(net)
+        ac_sol = solve!(ac_prob)
+        z = ac_flatten_variables(ac_sol, ac_prob)
+        K = ac_kkt(z, ac_prob)
+
+        # No NaN sentinels survived (validates pre-allocated index assignment is complete)
+        @test !any(isnan, K)
+
+        # KKT residuals should be near zero at the solution
+        # (interior-point solvers leave small CS residuals, so use a loose tolerance)
+        @test norm(K) < 1e-2
+    end
+end
+
 @testset "Demand Sensitivity" begin
     net = load_test_case("case5.m")
     if isnothing(net)

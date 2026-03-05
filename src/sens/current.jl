@@ -86,7 +86,10 @@ function calc_current_power_sensitivities(
         f_bus = br["f_bus"]
         t_bus = br["t_bus"]
 
-        # Series admittance of the branch (from admittance matrix)
+        # NOTE: Uses off-diagonal Y-matrix entry as branch admittance.
+        # This is correct for simple pi-model branches (tap=1, no phase shift)
+        # but does NOT account for transformer tap ratios or parallel branches
+        # (where Y[f,t] sums contributions from all branches on the same bus pair).
         Y_ft = Y[f_bus, t_bus]
 
         # Branch current: I_ℓ = Y_ft * (v_f - v_t)
@@ -120,7 +123,7 @@ an ACPowerFlowState internally which handles ID translation.
 """
 function calc_current_power_sensitivities(net::Dict; full::Bool=true)
     state = ACPowerFlowState(net)
-    @assert !isnothing(state.branch_data) "Failed to extract branch data from network"
+    !isnothing(state.branch_data) || throw(ArgumentError("Failed to extract branch data from network"))
     return calc_current_power_sensitivities(state; full=full)
 end
 
@@ -133,7 +136,7 @@ This method provides a unified interface consistent with DC OPF sensitivities.
 Requires that `state.branch_data` is not nothing.
 """
 function calc_current_power_sensitivities(state::ACPowerFlowState; full::Bool=true)
-    @assert !isnothing(state.branch_data) "ACPowerFlowState must have branch_data for current sensitivities"
+    !isnothing(state.branch_data) || throw(ArgumentError("ACPowerFlowState must have branch_data for current sensitivities"))
     return calc_current_power_sensitivities(state.v, state.Y, state.branch_data; idx_slack=state.idx_slack, full=full)
 end
 
@@ -157,7 +160,7 @@ NamedTuple with:
 - `df_dq`: ∂P_flow/∂q (m × n)
 """
 function calc_branch_flow_power_sensitivities(state::ACPowerFlowState)
-    @assert !isnothing(state.branch_data) "ACPowerFlowState must have branch_data for flow sensitivities"
+    !isnothing(state.branch_data) || throw(ArgumentError("ACPowerFlowState must have branch_data for flow sensitivities"))
 
     v = state.v
     Y = state.Y

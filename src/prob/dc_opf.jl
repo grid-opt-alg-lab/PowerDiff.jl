@@ -55,7 +55,7 @@ function solve!(prob::DCOPFProblem)
     optimize!(prob.model)
 
     status = termination_status(prob.model)
-    @assert status ∈ [MOI.OPTIMAL, MOI.LOCALLY_SOLVED] "Optimization failed with status: $status"
+    status in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED) || error("DC OPF failed with status: $status")
 
     # Extract primal variables
     θ_val = value.(prob.va)
@@ -121,7 +121,7 @@ Invalidates the sensitivity cache since parameters have changed.
 """
 function update_demand!(prob::DCOPFProblem, d::AbstractVector)
     n = prob.network.n
-    @assert length(d) == n "Demand vector length must match number of buses"
+    length(d) == n || throw(DimensionMismatch("Demand vector length $(length(d)) must match number of buses $n"))
 
     _warn_negative_demand(d)
 

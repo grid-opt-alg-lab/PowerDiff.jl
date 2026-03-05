@@ -49,6 +49,8 @@ NamedTuple with fields:
 - `dv_dq`: Complex phasor voltage sensitivity to reactive power (n × n)
 - `dvm_dp`: Voltage magnitude sensitivity to active power (n × n)
 - `dvm_dq`: Voltage magnitude sensitivity to reactive power (n × n)
+- `dva_dp`: Voltage angle sensitivity to active power (n × n)
+- `dva_dq`: Voltage angle sensitivity to reactive power (n × n)
 
 # Example
 ```julia
@@ -64,9 +66,21 @@ function calc_voltage_power_sensitivities(
     idx_slack::Int=1,
     full::Bool=true
 )
-    ∂v_∂p, ∂vm_∂p, ∂va_∂p = calc_voltage_active_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
-    ∂v_∂q, ∂vm_∂q, ∂va_∂q = calc_voltage_reactive_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
-
+    A = _build_voltage_sensitivity_matrix(v, Y, idx_slack)
+    ns = _non_slack_indices(length(v), idx_slack)
+    v_ = v[ns]
+    d = length(v_)
+    A_lu = lu(A)
+    ∂v_∂p, ∂vm_∂p, ∂va_∂p = _solve_voltage_sensitivities(A_lu, v_, d, 0)
+    ∂v_∂q, ∂vm_∂q, ∂va_∂q = _solve_voltage_sensitivities(A_lu, v_, d, d)
+    if full
+        ∂v_∂p = _insert_slack_zeros(∂v_∂p, idx_slack, ComplexF64)
+        ∂vm_∂p = _insert_slack_zeros(∂vm_∂p, idx_slack, Float64)
+        ∂va_∂p = _insert_slack_zeros(∂va_∂p, idx_slack, Float64)
+        ∂v_∂q = _insert_slack_zeros(∂v_∂q, idx_slack, ComplexF64)
+        ∂vm_∂q = _insert_slack_zeros(∂vm_∂q, idx_slack, Float64)
+        ∂va_∂q = _insert_slack_zeros(∂va_∂q, idx_slack, Float64)
+    end
     return (dv_dp=∂v_∂p, dv_dq=∂v_∂q, dvm_dp=∂vm_∂p, dvm_dq=∂vm_∂q,
             dva_dp=∂va_∂p, dva_dq=∂va_∂q)
 end
@@ -112,50 +126,17 @@ function calc_voltage_active_power_sensitivities(
     idx_slack::Int=1,
     full::Bool=true
 )
-    # Build the linearized system matrix
     A = _build_voltage_sensitivity_matrix(v, Y, idx_slack)
-
-    # Remove slack bus from voltage vector
-    v_ = v[1:end .!= idx_slack]
+    ns = _non_slack_indices(length(v), idx_slack)
+    v_ = v[ns]
     d = length(v_)
-
-    # Solve for each column (unit power perturbation at bus k)
-    ∂v_∂p = Matrix{ComplexF64}(undef, d, d)
-    ∂vm_∂p = Matrix{Float64}(undef, d, d)
-    ∂va_∂p = Matrix{Float64}(undef, d, d)
-
-    for k in 1:d
-        if abs(v_[k]) > 1e-6
-            # Right-hand side: unit perturbation in active power at bus k
-            b = zeros(2d)
-            b[k] = 1.0
-
-            # Solve the linear system
-            x = A \ b
-
-            # Convert to voltage sensitivities
-            # x = [∂v_re; ∂v_im], so ∂v = ∂v_re + j*∂v_im (true complex derivative)
-            ∂v_∂p[:, k] = x[1:d] + im * x[d+1:2d]
-
-            # Magnitude sensitivity: ∂|v|/∂p = Re(∂v/∂p · conj(v)) / |v|
-            ∂vm_∂p[:, k] = real.(∂v_∂p[:, k] .* conj.(v_)) ./ abs.(v_)
-
-            # Angle sensitivity: ∂θ/∂p = Im(∂v/∂p · conj(v)) / |v|²
-            ∂va_∂p[:, k] = imag.(∂v_∂p[:, k] .* conj.(v_)) ./ abs2.(v_)
-        else
-            ∂v_∂p[:, k] .= 0
-            ∂vm_∂p[:, k] .= 0
-            ∂va_∂p[:, k] .= 0
-        end
-    end
-
-    # Optionally expand to include slack bus as zeros
+    A_lu = lu(A)
+    ∂v_∂p, ∂vm_∂p, ∂va_∂p = _solve_voltage_sensitivities(A_lu, v_, d, 0)
     if full
         ∂v_∂p = _insert_slack_zeros(∂v_∂p, idx_slack, ComplexF64)
         ∂vm_∂p = _insert_slack_zeros(∂vm_∂p, idx_slack, Float64)
         ∂va_∂p = _insert_slack_zeros(∂va_∂p, idx_slack, Float64)
     end
-
     return ∂v_∂p, ∂vm_∂p, ∂va_∂p
 end
 
@@ -176,56 +157,65 @@ function calc_voltage_reactive_power_sensitivities(
     idx_slack::Int=1,
     full::Bool=true
 )
-    # Build the linearized system matrix
     A = _build_voltage_sensitivity_matrix(v, Y, idx_slack)
-
-    # Remove slack bus from voltage vector
-    v_ = v[1:end .!= idx_slack]
+    ns = _non_slack_indices(length(v), idx_slack)
+    v_ = v[ns]
     d = length(v_)
-
-    # Solve for each column (unit reactive power perturbation at bus k)
-    ∂v_∂q = Matrix{ComplexF64}(undef, d, d)
-    ∂vm_∂q = Matrix{Float64}(undef, d, d)
-    ∂va_∂q = Matrix{Float64}(undef, d, d)
-
-    for k in 1:d
-        if abs(v_[k]) > 1e-6
-            # Right-hand side: unit perturbation in reactive power at bus k
-            b = zeros(2d)
-            b[d + k] = 1.0
-
-            # Solve the linear system
-            x = A \ b
-
-            # Convert to voltage sensitivities
-            # x = [∂v_re; ∂v_im], so ∂v = ∂v_re + j*∂v_im (true complex derivative)
-            ∂v_∂q[:, k] = x[1:d] + im * x[d+1:2d]
-
-            # Magnitude sensitivity
-            ∂vm_∂q[:, k] = real.(∂v_∂q[:, k] .* conj.(v_)) ./ abs.(v_)
-
-            # Angle sensitivity: ∂θ/∂q = Im(∂v/∂q · conj(v)) / |v|²
-            ∂va_∂q[:, k] = imag.(∂v_∂q[:, k] .* conj.(v_)) ./ abs2.(v_)
-        else
-            ∂v_∂q[:, k] .= 0
-            ∂vm_∂q[:, k] .= 0
-            ∂va_∂q[:, k] .= 0
-        end
-    end
-
-    # Optionally expand to include slack bus as zeros
+    A_lu = lu(A)
+    ∂v_∂q, ∂vm_∂q, ∂va_∂q = _solve_voltage_sensitivities(A_lu, v_, d, d)
     if full
         ∂v_∂q = _insert_slack_zeros(∂v_∂q, idx_slack, ComplexF64)
         ∂vm_∂q = _insert_slack_zeros(∂vm_∂q, idx_slack, Float64)
         ∂va_∂q = _insert_slack_zeros(∂va_∂q, idx_slack, Float64)
     end
-
     return ∂v_∂q, ∂vm_∂q, ∂va_∂q
 end
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+"""
+    _solve_voltage_sensitivities(A_lu, v_, d, rhs_offset)
+
+Shared inner loop for voltage sensitivity computation.
+
+Solves the pre-factorized system `A_lu \\ b` for each bus k, where b has a unit
+perturbation at position `rhs_offset + k`. For active power sensitivities,
+`rhs_offset = 0`; for reactive power, `rhs_offset = d`.
+
+Accepts a pre-computed LU factorization to avoid re-factorizing for each RHS.
+Returns (∂v, ∂vm, ∂va) matrices of size (d × d).
+"""
+function _solve_voltage_sensitivities(A_lu, v_, d, rhs_offset)
+    ∂v = Matrix{ComplexF64}(undef, d, d)
+    ∂vm = Matrix{Float64}(undef, d, d)
+    ∂va = Matrix{Float64}(undef, d, d)
+    b = zeros(2d)
+    x = Vector{Float64}(undef, 2d)
+    # Hoist v_safe and derived vectors outside the loop — they depend only on v_, not k
+    v_safe = ifelse.(abs.(v_) .> eps(Float64), v_, one(ComplexF64))
+    abs_v_safe = abs.(v_safe)
+    abs2_v_safe = abs2.(v_safe)
+    conj_v_safe = conj.(v_safe)
+    for k in 1:d
+        if abs(v_[k]) > 1e-6
+            fill!(b, 0.0)
+            b[rhs_offset + k] = 1.0
+            ldiv!(x, A_lu, b)
+            if any(!isfinite, x)
+                error("Voltage sensitivity solve produced non-finite values at bus $k. " *
+                      "The Jacobian may be near-singular.")
+            end
+            ∂v[:, k] = x[1:d] + im * x[d+1:2d]
+            ∂vm[:, k] = real.(∂v[:, k] .* conj_v_safe) ./ abs_v_safe
+            ∂va[:, k] = imag.(∂v[:, k] .* conj_v_safe) ./ abs2_v_safe
+        else
+            ∂v[:, k] .= 0; ∂vm[:, k] .= 0; ∂va[:, k] .= 0
+        end
+    end
+    return ∂v, ∂vm, ∂va
+end
 
 """
     _build_voltage_sensitivity_matrix(v, Y, idx_slack)
@@ -252,19 +242,20 @@ function _build_voltage_sensitivity_matrix(
     idx_slack::Int
 )
     # Remove slack bus
-    v_ = v[1:end .!= idx_slack]
-    Y_ = Y[1:end .!= idx_slack, 1:end .!= idx_slack]
+    ns = _non_slack_indices(length(v), idx_slack)
+    v_ = v[ns]
+    Y_ = Y[ns, ns]
 
     # Current injection at non-slack buses: I = Y * v
-    I = (Y * v)[1:end .!= idx_slack]
+    I = (Y * v)[ns]
 
     d = length(v_)
 
     # H = Diag(conj(v)) * Y (used in power flow Jacobian)
     H = Diagonal(conj.(v_)) * Y_
 
-    # Build the 2d × 2d Jacobian matrix
-    A = spzeros(2d, 2d)
+    # Build the 2d × 2d Jacobian matrix (dense: every element is filled below)
+    A = zeros(2d, 2d)
 
     for i in 1:d
         for j in 1:d
@@ -317,3 +308,6 @@ function _insert_slack_zeros(K::Matrix{T}, idx_slack::Int, ::Type{T}) where T
 
     return K_full
 end
+
+"""Return indices 1:n excluding idx, for removing the slack bus from vectors/matrices."""
+_non_slack_indices(n::Int, idx::Int) = [1:idx-1; idx+1:n]

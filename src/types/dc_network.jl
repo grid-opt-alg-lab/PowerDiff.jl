@@ -24,7 +24,7 @@
 
 DC network data for B-theta OPF formulation. Uses susceptance-weighted Laplacian
 `B = A' * Diagonal(-b .* sw) * A` which preserves graphical structure for
-topology sensitivity analysis and integration with RandomizedSwitching tools.
+topology sensitivity analysis.
 
 # Fields
 - `n`, `m`, `k`: Number of buses, branches, and generators
@@ -265,8 +265,8 @@ function DCNetwork(
     ref_bus::Int=1,
     tau::Float64=DEFAULT_TAU
 )
-    @assert length(c_shed) == n "c_shed length ($(length(c_shed))) must match number of buses ($n)"
-    @assert all(c_shed .> 0) "c_shed must be strictly positive at all buses"
+    length(c_shed) == n || throw(DimensionMismatch("c_shed length $(length(c_shed)) must match number of buses $n"))
+    all(c_shed .> 0) || throw(ArgumentError("c_shed must be strictly positive at all buses"))
     return DCNetwork(
         n, m, k,
         sparse(Float64.(A)), sparse(Float64.(G_inc)),
@@ -396,11 +396,11 @@ state = DCPowerFlowState(net, g, d)
 """
 function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::AbstractVector{<:Real})
     n, m = net.n, net.m
-    @assert length(g) == n "Generation vector length must match number of buses"
-    @assert length(d) == n "Demand vector length must match number of buses"
+    length(g) == n || throw(DimensionMismatch("Generation vector length $(length(g)) must match number of buses $n"))
+    length(d) == n || throw(DimensionMismatch("Demand vector length $(length(d)) must match number of buses $n"))
 
     # Net injection
-    p = Float64.(g) - Float64.(d)
+    p = Float64.(g .- d)
 
     # Build reduced susceptance matrix (delete reference bus row/col) and factorize
     B = calc_susceptance_matrix(net)
@@ -411,11 +411,21 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
     θ = zeros(n)
     θ[non_ref] = F \ p[non_ref]
 
+    if any(!isfinite, θ)
+        error("DC power flow produced non-finite angles. " *
+              "The network may be disconnected or have isolated buses.")
+    end
+
     # Compute flows: f = W * A * θ where W = Diag(-b ⊙ sw)
     W = Diagonal(-net.b .* net.sw)
     f = W * net.A * θ
 
-    return DCPowerFlowState(net, θ, p, Float64.(g), Float64.(d), f, F, non_ref)
+    if any(!isfinite, f)
+        error("DC power flow produced non-finite branch flows. " *
+              "Check branch impedances for extreme values.")
+    end
+
+    return DCPowerFlowState(net, θ, p, convert(Vector{Float64}, g), convert(Vector{Float64}, d), f, F, non_ref)
 end
 
 """

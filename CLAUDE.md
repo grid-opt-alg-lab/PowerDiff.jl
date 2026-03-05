@@ -178,8 +178,9 @@ Uses susceptance-weighted Laplacian `B = A' * Diagonal(-b .* sw) * A`:
 
 - `ACOPFProblem`: Full nonlinear AC OPF via Ipopt, with `ACSensitivityCache` for efficient KKT reuse
 - `ACOPFSolution`: Primal (va, vm, pg, qg) and dual variables
-- Switching sensitivity via KKT implicit differentiation with ForwardDiff
-- Multiple operands (`:vm`, `:va`, `:pg`, `:qg`) share a single cached `dz_dsw` computation
+- Parameter sensitivity via KKT implicit differentiation with ForwardDiff
+- Supports 6 parameters: `:sw`, `:d`, `:qd`, `:cq`, `:cl`, `:fmax`
+- All operands (`:vm`, `:va`, `:pg`, `:qg`, `:lmp`) for the same parameter share a single cached `dz_d*` matrix
 
 ### KKT Systems
 
@@ -240,6 +241,9 @@ test/
 ├── test_psh.jl                 # Load shedding sensitivity tests
 ├── test_nonbasic.jl            # Non-basic network support (arbitrary element IDs)
 ├── test_jvp_vjp.jl             # JVP/VJP with ID-aware Dict I/O
+├── test_acpf_jacobian.jl       # AC PF Jacobian block tests
+├── test_acpf_va_flow.jl        # AC PF voltage angle and flow sensitivity tests
+├── test_parameter_transforms.jl # AC PF parameter transform tests (d→p, qd→q)
 ├── test_ac_opf_all_sens.jl     # AC OPF all-parameter FD verification (d, qd, cq, cl, fmax)
 ├── unified/
 │   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
@@ -286,7 +290,7 @@ docs/
 - Override: `DCOPFProblem(net, d; optimizer=Ipopt.Optimizer)`
 
 **Testing**
-- `runtests.jl` contains ~800 lines of inline tests plus `include()` calls for 9 additional test files
+- `runtests.jl` contains ~800 lines of inline tests plus `include()` calls for 13 additional test files
 - Tests call `PowerModels.silence()` at startup to suppress solver output
 - `test/common.jl` provides `load_test_case()`, `create_2bus_network()`, `create_3bus_congested_network()` helpers (used by included test files, not by runtests.jl which defines its own `load_test_case`)
 - `test/test_nonbasic.jl` verifies all features work with non-basic networks (case5.m, bus IDs `[1,2,3,4,10]`)

@@ -17,7 +17,7 @@
 # =============================================================================
 #
 # Unified AC network representation with vectorized admittance for differentiation.
-# Analogous to DCNetwork for DC OPF, incorporating patterns from RandomizedSwitching.
+# Analogous to DCNetwork for DC OPF.
 
 """
     ACNetwork <: AbstractPowerNetwork

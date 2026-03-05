@@ -25,7 +25,7 @@ end
 Given an admittance matrix, construct a VectorizedAdmittanceMatrix.
 """
 function VectorizedAdmittanceMatrix(Y::AbstractMatrix{ComplexF64})
-    @assert Y == transpose(Y) "The admittance matrix must be symmetric."
+    Y == transpose(Y) || throw(ArgumentError("The admittance matrix must be symmetric."))
     
     # Make the vectorized weights
     G_full = real.(Y)
@@ -45,7 +45,8 @@ function VectorizedAdmittanceMatrix(Y::AbstractMatrix{ComplexF64})
     G = vcat(G_edges,G_self)
     B = vcat(B_edges,B_self)
 
-    @assert norm(laplacian(G,B,size(Y,1)) -Y) < 1e-6 "The Laplacian matrix is not close to the admittance matrix. The norm of the difference is $(norm(laplacian(G,B,size(Y,1)) -Y))."
+    residual = norm(laplacian(G, B, size(Y, 1)) - Y)
+    residual < 1e-6 || throw(ArgumentError("Laplacian reconstruction error: $residual"))
 
     return VectorizedAdmittanceMatrix(Y,G,B,G_self,B_self)
 end

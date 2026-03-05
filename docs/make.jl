@@ -39,7 +39,12 @@ makedocs(
         "Home" => "index.md",
         "Getting Started" => "getting-started.md",
         "Sensitivity API" => "sensitivity-api.md",
-        "Mathematical Background" => "math.md",
+        "Mathematical Details" => [
+            "DC Power Flow" => "math/dc-power-flow.md",
+            "DC Optimal Power Flow" => "math/dc-opf.md",
+            "AC Power Flow" => "math/ac-power-flow.md",
+            "AC Optimal Power Flow" => "math/ac-opf.md",
+        ],
         "Advanced Topics" => "advanced.md",
         "API Reference" => "api.md",
     ],
