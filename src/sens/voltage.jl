@@ -64,9 +64,21 @@ function calc_voltage_power_sensitivities(
     idx_slack::Int=1,
     full::Bool=true
 )
-    ∂v_∂p, ∂vm_∂p, ∂va_∂p = calc_voltage_active_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
-    ∂v_∂q, ∂vm_∂q, ∂va_∂q = calc_voltage_reactive_power_sensitivities(v, Y; idx_slack=idx_slack, full=full)
-
+    A = _build_voltage_sensitivity_matrix(v, Y, idx_slack)
+    ns = _non_slack_indices(length(v), idx_slack)
+    v_ = v[ns]
+    d = length(v_)
+    A_lu = lu(A)
+    ∂v_∂p, ∂vm_∂p, ∂va_∂p = _solve_voltage_sensitivities(A_lu, v_, d, 0)
+    ∂v_∂q, ∂vm_∂q, ∂va_∂q = _solve_voltage_sensitivities(A_lu, v_, d, d)
+    if full
+        ∂v_∂p = _insert_slack_zeros(∂v_∂p, idx_slack, ComplexF64)
+        ∂vm_∂p = _insert_slack_zeros(∂vm_∂p, idx_slack, Float64)
+        ∂va_∂p = _insert_slack_zeros(∂va_∂p, idx_slack, Float64)
+        ∂v_∂q = _insert_slack_zeros(∂v_∂q, idx_slack, ComplexF64)
+        ∂vm_∂q = _insert_slack_zeros(∂vm_∂q, idx_slack, Float64)
+        ∂va_∂q = _insert_slack_zeros(∂va_∂q, idx_slack, Float64)
+    end
     return (dv_dp=∂v_∂p, dv_dq=∂v_∂q, dvm_dp=∂vm_∂p, dvm_dq=∂vm_∂q,
             dva_dp=∂va_∂p, dva_dq=∂va_∂q)
 end
@@ -113,9 +125,11 @@ function calc_voltage_active_power_sensitivities(
     full::Bool=true
 )
     A = _build_voltage_sensitivity_matrix(v, Y, idx_slack)
-    v_ = v[1:end .!= idx_slack]
+    ns = _non_slack_indices(length(v), idx_slack)
+    v_ = v[ns]
     d = length(v_)
-    ∂v_∂p, ∂vm_∂p, ∂va_∂p = _solve_voltage_sensitivities(A, v_, d, 0)
+    A_lu = lu(A)
+    ∂v_∂p, ∂vm_∂p, ∂va_∂p = _solve_voltage_sensitivities(A_lu, v_, d, 0)
     if full
         ∂v_∂p = _insert_slack_zeros(∂v_∂p, idx_slack, ComplexF64)
         ∂vm_∂p = _insert_slack_zeros(∂vm_∂p, idx_slack, Float64)
@@ -142,9 +156,11 @@ function calc_voltage_reactive_power_sensitivities(
     full::Bool=true
 )
     A = _build_voltage_sensitivity_matrix(v, Y, idx_slack)
-    v_ = v[1:end .!= idx_slack]
+    ns = _non_slack_indices(length(v), idx_slack)
+    v_ = v[ns]
     d = length(v_)
-    ∂v_∂q, ∂vm_∂q, ∂va_∂q = _solve_voltage_sensitivities(A, v_, d, d)
+    A_lu = lu(A)
+    ∂v_∂q, ∂vm_∂q, ∂va_∂q = _solve_voltage_sensitivities(A_lu, v_, d, d)
     if full
         ∂v_∂q = _insert_slack_zeros(∂v_∂q, idx_slack, ComplexF64)
         ∂vm_∂q = _insert_slack_zeros(∂vm_∂q, idx_slack, Float64)
@@ -158,25 +174,27 @@ end
 # =============================================================================
 
 """
-    _solve_voltage_sensitivities(A, v_, d, rhs_offset)
+    _solve_voltage_sensitivities(A_lu, v_, d, rhs_offset)
 
 Shared inner loop for voltage sensitivity computation.
 
-Solves the linearized system A \\ b for each bus k, where b has a unit
+Solves the pre-factorized system `A_lu \\ b` for each bus k, where b has a unit
 perturbation at position `rhs_offset + k`. For active power sensitivities,
 `rhs_offset = 0`; for reactive power, `rhs_offset = d`.
 
+Accepts a pre-computed LU factorization to avoid re-factorizing for each RHS.
 Returns (∂v, ∂vm, ∂va) matrices of size (d × d).
 """
-function _solve_voltage_sensitivities(A, v_, d, rhs_offset)
+function _solve_voltage_sensitivities(A_lu, v_, d, rhs_offset)
     ∂v = Matrix{ComplexF64}(undef, d, d)
     ∂vm = Matrix{Float64}(undef, d, d)
     ∂va = Matrix{Float64}(undef, d, d)
+    b = zeros(2d)
     for k in 1:d
         if abs(v_[k]) > 1e-6
-            b = zeros(2d)
+            fill!(b, 0.0)
             b[rhs_offset + k] = 1.0
-            x = A \ b
+            x = A_lu \ b
             if any(!isfinite, x)
                 error("Voltage sensitivity solve produced non-finite values at bus $k. " *
                       "The Jacobian may be near-singular.")
@@ -216,19 +234,20 @@ function _build_voltage_sensitivity_matrix(
     idx_slack::Int
 )
     # Remove slack bus
-    v_ = v[1:end .!= idx_slack]
-    Y_ = Y[1:end .!= idx_slack, 1:end .!= idx_slack]
+    ns = _non_slack_indices(length(v), idx_slack)
+    v_ = v[ns]
+    Y_ = Y[ns, ns]
 
     # Current injection at non-slack buses: I = Y * v
-    I = (Y * v)[1:end .!= idx_slack]
+    I = (Y * v)[ns]
 
     d = length(v_)
 
     # H = Diag(conj(v)) * Y (used in power flow Jacobian)
     H = Diagonal(conj.(v_)) * Y_
 
-    # Build the 2d × 2d Jacobian matrix
-    A = spzeros(2d, 2d)
+    # Build the 2d × 2d Jacobian matrix (dense: every element is filled below)
+    A = zeros(2d, 2d)
 
     for i in 1:d
         for j in 1:d
@@ -281,3 +300,6 @@ function _insert_slack_zeros(K::Matrix{T}, idx_slack::Int, ::Type{T}) where T
 
     return K_full
 end
+
+"""Return indices 1:n excluding idx, for removing the slack bus from vectors/matrices."""
+_non_slack_indices(n::Int, idx::Int) = [1:idx-1; idx+1:n]
