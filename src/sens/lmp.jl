@@ -25,7 +25,7 @@
 # LMP Decomposition (for analysis):
 #     LMP = ν_bal = energy_component + congestion_component
 # where:
-#     congestion_component = B_r⁻¹ A_r' Diag(-b .* sw) (λ_ub_std - λ_lb_std)  (non-ref block)
+#     congestion_component = B_r⁻¹ [A_r' Diag(-b .* sw) (λ_ub - λ_lb) + A_r'(γ_ub - γ_lb)]  (non-ref block)
 #     energy_component = ν_bal - congestion_component  (uniform for connected network)
 #
 # Sign conventions:
@@ -70,13 +70,14 @@ end
 
 Extract the congestion component of LMPs for analysis.
 
-From KKT conditions: B * ν_bal = A' * W * (λ_ub_std - λ_lb_std)
-Solving the reduced system (ref bus deleted):
-    congestion[non_ref] = B_r \\ (A' W (λ_ub_std - λ_lb_std))[non_ref]
+From the θ-stationarity KKT condition:
+    B' * ν_bal + (WA)' * ν_flow + e_ref * η_ref + A'*(γ_ub - γ_lb) = 0
 
-The congestion component captures price differentiation due to binding flow constraints,
-with the reference bus congestion component equal to zero.
-This represents price differentiation due to binding flow constraints.
+The congestion RHS includes both flow limit duals and angle difference duals:
+    congestion[non_ref] = B_r \\ (A' W (λ_ub - λ_lb) + A'(γ_ub - γ_lb))[non_ref]
+
+The congestion component captures price differentiation due to binding flow and angle
+constraints, with the reference bus congestion component equal to zero.
 
 # Returns
 Vector (length n) of congestion contributions to each bus's LMP.
@@ -87,7 +88,8 @@ function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork)
     non_ref = setdiff(1:net.n, net.ref_bus)
     B_r = B[non_ref, non_ref]
 
-    rhs_full = net.A' * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb)
+    At = net.A'
+    rhs_full = At * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb) + At * (sol.gamma_ub - sol.gamma_lb)
 
     result = zeros(net.n)
     result[non_ref] = B_r \ rhs_full[non_ref]

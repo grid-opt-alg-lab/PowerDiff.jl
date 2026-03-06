@@ -18,9 +18,9 @@
 #
 # Functions for solving DC OPF problems and updating parameters.
 
-# Threshold for snapping near-boundary psh/dual values to strict complementarity.
-# Interior-point solvers leave psh ≈ ε > 0 even when a bound is active; snapping
-# below this tolerance forces clean KKT structure.
+# Threshold for snapping near-boundary primal/dual values to strict complementarity.
+# Interior-point solvers leave psh ≈ ε > 0 and gamma ≈ ε > 0 when a bound is active;
+# snapping below this tolerance forces clean KKT structure.
 const COMPLEMENTARITY_SNAP_TOL = 1e-6
 
 """
@@ -85,9 +85,13 @@ function solve!(prob::DCOPFProblem)
     for e in 1:net.m
         if net.angmax[e] - Atheta[e] > TOL  # upper angle not binding
             γ_ub[e] = 0.0
+        else
+            γ_ub[e] = max(γ_ub[e], 0.0)  # clamp solver noise on binding side
         end
         if Atheta[e] - net.angmin[e] > TOL  # lower angle not binding
             γ_lb[e] = 0.0
+        else
+            γ_lb[e] = max(γ_lb[e], 0.0)  # clamp solver noise on binding side
         end
     end
 

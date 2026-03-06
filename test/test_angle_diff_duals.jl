@@ -91,6 +91,43 @@ using Test
         @test norm(K[idx.gamma_ub]) < 1e-3
         @test norm(K[idx.nu_bal]) < 1e-4
         @test norm(K) < 1e-3  # full KKT residual
+
+        # All inequality duals should be non-negative (standard KKT convention)
+        @test all(sol.lam_ub .>= -1e-6)
+        @test all(sol.lam_lb .>= -1e-6)
+        @test all(sol.rho_ub .>= -1e-6)
+        @test all(sol.rho_lb .>= -1e-6)
+        @test all(sol.mu_lb .>= -1e-6)
+        @test all(sol.mu_ub .>= -1e-6)
+
+        # FD verification for switching sensitivity with binding angle limits
+        dpg_dsw = calc_sensitivity(prob, :pg, :sw)
+        df_dsw = calc_sensitivity(prob, :f, :sw)
+        @test all(isfinite, Matrix(dpg_dsw))
+        @test all(isfinite, Matrix(df_dsw))
+
+        ε = 1e-5
+        for e in 1:m
+            sw_pert = copy(net.sw)
+            sw_pert[e] -= ε
+
+            net.sw .= sw_pert
+            prob_pert = DCOPFProblem(net, d)
+            sol_pert = solve!(prob_pert)
+            net.sw .= ones(m)  # restore
+
+            fd_pg = (sol.pg - sol_pert.pg) / ε
+            fd_f  = (sol.f  - sol_pert.f)  / ε
+
+            if norm(fd_pg) > 1e-10
+                rel_err = norm(Matrix(dpg_dsw)[:, e] - fd_pg) / norm(fd_pg)
+                @test rel_err < 0.05
+            end
+            if norm(fd_f) > 1e-10
+                rel_err = norm(Matrix(df_dsw)[:, e] - fd_f) / norm(fd_f)
+                @test rel_err < 0.05
+            end
+        end
     end
 
     @testset "Tight lower angle limits — binding angmin" begin
@@ -228,6 +265,57 @@ using Test
             total = sum(Matrix(dg_dd)[:, j]) + sum(Matrix(dpsh_dd)[:, j])
             @test abs(total - 1.0) < 1e-4
         end
+    end
+
+    @testset "LMP decomposition with binding angle limits" begin
+        angmax_tight = [π, 0.025, π]
+        net = DCNetwork(n, m, k, A, G_inc, b;
+            fmax=fill(100.0, m), gmax=[5.0, 5.0], gmin=[0.0, 0.0],
+            angmax=angmax_tight, angmin=fill(-π, m),
+            cl=[10.0, 50.0], cq=[1.0, 1.0], ref_bus=1, tau=0.01)
+
+        prob = DCOPFProblem(net, d)
+        sol = solve!(prob)
+
+        # Verify energy + congestion ≈ lmp
+        lmps = calc_lmp(sol, net)
+        energy = calc_energy_component(sol, net)
+        congestion = calc_congestion_component(sol, net)
+        @test isapprox(lmps, energy .+ congestion, atol=1e-6)
+
+        # With binding angle limit, congestion component should be nonzero
+        @test norm(congestion) > 1e-4
+    end
+
+    @testset "Simultaneous binding angle and flow limits" begin
+        net = DCNetwork(n, m, k, A, G_inc, b;
+            fmax=[100.0, 100.0, 0.1],  # tight on branch 3
+            gmax=[5.0, 5.0], gmin=[0.0, 0.0],
+            angmax=[π, 0.025, π],       # tight on branch 2
+            angmin=fill(-π, m),
+            cl=[10.0, 50.0], cq=[1.0, 1.0], ref_bus=1, tau=0.01)
+
+        prob = DCOPFProblem(net, d)
+        sol = solve!(prob)
+
+        # KKT residual should be near zero
+        z = flatten_variables(sol, prob)
+        K = kkt(z, prob, d)
+        @test norm(K) < 1e-3
+
+        # Both gamma and lambda duals should have nonzero entries
+        @test any(abs.(sol.gamma_ub) .> 1e-4)
+        @test any(abs.(sol.lam_ub) .> 1e-4) || any(abs.(sol.lam_lb) .> 1e-4)
+
+        # LMP decomposition identity
+        lmps = calc_lmp(sol, net)
+        energy = calc_energy_component(sol, net)
+        congestion = calc_congestion_component(sol, net)
+        @test isapprox(lmps, energy .+ congestion, atol=1e-6)
+
+        # Sensitivities should be finite
+        dpg_dd = calc_sensitivity(prob, :pg, :d)
+        @test all(isfinite, Matrix(dpg_dd))
     end
 
     @testset "case5 with tight angle limits" begin
