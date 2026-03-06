@@ -212,7 +212,8 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     ref_con = @constraint(model, va[network.ref_bus] == 0.0)
 
     # Phase angle difference limits
-    phase_diff = @constraint(model, network.angmin .<= network.A * va .<= network.angmax)
+    phase_diff_lb = @constraint(model, network.A * va .>= network.angmin)
+    phase_diff_ub = @constraint(model, network.A * va .<= network.angmax)
 
     prob.model = model
     prob.va = va
@@ -229,7 +230,8 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
         shed_lb = shed_lb,
         shed_ub = shed_ub,
         ref = ref_con,
-        phase_diff = phase_diff
+        phase_diff_lb = phase_diff_lb,
+        phase_diff_ub = phase_diff_ub,
     )
 
     return nothing

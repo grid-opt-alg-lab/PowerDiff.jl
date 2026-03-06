@@ -39,6 +39,7 @@ const _DC_OPF_SOLUTION_ALIASES = Dict{Symbol,Symbol}(
     :λ_ub => :lam_ub, :λ_lb => :lam_lb,
     :ρ_ub => :rho_ub, :ρ_lb => :rho_lb,
     :μ_lb => :mu_lb, :μ_ub => :mu_ub,
+    :γ_lb => :gamma_lb, :γ_ub => :gamma_ub,
 )
 
 const _DC_OPF_PROBLEM_ALIASES = Dict{Symbol,Symbol}(

@@ -18,9 +18,9 @@
 #
 # Functions for solving DC OPF problems and updating parameters.
 
-# Threshold for snapping near-boundary psh/dual values to strict complementarity.
-# Interior-point solvers leave psh ≈ ε > 0 even when a bound is active; snapping
-# below this tolerance forces clean KKT structure.
+# Threshold for snapping near-boundary primal/dual values to strict complementarity.
+# Interior-point solvers leave psh ≈ ε > 0 and gamma ≈ ε > 0 when a bound is active;
+# snapping below this tolerance forces clean KKT structure.
 const COMPLEMENTARITY_SNAP_TOL = 1e-6
 
 """
@@ -64,20 +64,41 @@ function solve!(prob::DCOPFProblem)
     psh_val = value.(prob.psh)
 
     # Extract dual variables
+    # JuMP returns non-positive duals for <= constraints; negate to get standard
+    # KKT duals (non-negative for inequality constraints).
     ν_bal = dual.(prob.cons.power_bal)
     ν_flow = dual.(prob.cons.flow_def)
-    λ_ub = dual.(prob.cons.line_ub)
+    λ_ub = -dual.(prob.cons.line_ub)
     λ_lb = dual.(prob.cons.line_lb)
-    ρ_ub = dual.(prob.cons.gen_ub)
+    ρ_ub = -dual.(prob.cons.gen_ub)
     ρ_lb = dual.(prob.cons.gen_lb)
     μ_lb = dual.(prob.cons.shed_lb)
-    μ_ub = dual.(prob.cons.shed_ub)
+    μ_ub = -dual.(prob.cons.shed_ub)
+    γ_lb = dual.(prob.cons.phase_diff_lb)
+    γ_ub = -dual.(prob.cons.phase_diff_ub)
+
+    # Post-process phase angle difference duals for strict complementarity.
+    # Interior-point solvers leave gamma ≈ 1e-8 for non-binding constraints.
+    net = prob.network
+    Atheta = net.A * θ_val
+    TOL = COMPLEMENTARITY_SNAP_TOL
+    for e in 1:net.m
+        if net.angmax[e] - Atheta[e] > TOL  # upper angle not binding
+            γ_ub[e] = 0.0
+        else
+            γ_ub[e] = max(γ_ub[e], 0.0)  # clamp solver noise on binding side
+        end
+        if Atheta[e] - net.angmin[e] > TOL  # lower angle not binding
+            γ_lb[e] = 0.0
+        else
+            γ_lb[e] = max(γ_lb[e], 0.0)  # clamp solver noise on binding side
+        end
+    end
 
     # Post-process load shedding for strict complementarity.
     # Interior-point solvers give psh ≈ ε > 0 even when shedding is inactive.
     # Snap to strict complementarity for clean KKT sensitivity computation.
     d = prob.d
-    TOL = COMPLEMENTARITY_SNAP_TOL
     for i in eachindex(psh_val)
         if d[i] < -TOL
             @warn "Negative demand at bus $i (d=$(d[i])); psh snap may be unreliable"
@@ -103,7 +124,7 @@ function solve!(prob::DCOPFProblem)
 
     obj = objective_value(prob.model)
 
-    sol = DCOPFSolution(θ_val, g_val, f_val, psh_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, μ_lb, μ_ub, obj)
+    sol = DCOPFSolution(θ_val, g_val, f_val, psh_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, μ_lb, μ_ub, γ_lb, γ_ub, obj)
 
     # Cache the solution for sensitivity computations
     prob.cache.solution = sol

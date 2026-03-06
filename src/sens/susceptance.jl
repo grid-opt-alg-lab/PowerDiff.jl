@@ -38,7 +38,8 @@ Susceptance b affects:
 - Flow definition: f = W * A * theta
 
 The affected KKT conditions are:
-- K_theta = B' * nu_bal + (WA)' * nu_flow + e_ref * eta_ref
+- K_theta = B' * nu_bal + (WA)' * nu_flow + e_ref * eta_ref + A'*(gamma_ub - gamma_lb)
+  (gamma term has no b-dependence, so ∂K_theta/∂b only comes from B and WA terms)
 - K_power_bal = G_inc * g + psh - d - B * theta
 - K_flow_def = f - W * A * theta
 
