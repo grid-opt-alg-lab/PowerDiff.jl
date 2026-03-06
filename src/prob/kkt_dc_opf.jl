@@ -320,7 +320,7 @@ end
 Unflatten KKT variable vector into named components.
 
 # Returns
-NamedTuple with fields: va, pg, f, psh, lam_lb, lam_ub, rho_lb, rho_ub, mu_lb, mu_ub, nu_bal, nu_flow, eta
+NamedTuple with fields: va, pg, f, psh, lam_lb, lam_ub, gamma_lb, gamma_ub, rho_lb, rho_ub, mu_lb, mu_ub, nu_bal, nu_flow, eta
 """
 function unflatten_variables(z::AbstractVector, prob::DCOPFProblem)
     return unflatten_variables(z, prob.network)
@@ -355,6 +355,8 @@ s.t. G_inc * g + psh - d = B * θ   (ν_bal)
      f = W * A * θ                  (ν_flow)
      f ≥ -fmax                      (λ_lb)
      f ≤ fmax                       (λ_ub)
+     A * θ ≥ angmin                 (γ_lb)
+     A * θ ≤ angmax                 (γ_ub)
      g ≥ gmin                       (ρ_lb)
      g ≤ gmax                       (ρ_ub)
      0 ≤ psh                        (μ_lb)
@@ -364,16 +366,17 @@ s.t. G_inc * g + psh - d = B * θ   (ν_bal)
 
 # Returns
 Vector of KKT residuals (should be zero at optimum):
-1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + e_ref * η_ref = 0
+1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + e_ref * η_ref + A'*(γ_ub - γ_lb) = 0
 2. Stationarity w.r.t. g: 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub = 0
 3. Stationarity w.r.t. f: τ² * f - ν_flow - λ_lb + λ_ub = 0
 4. Stationarity w.r.t. psh: c_shed - ν_bal - μ_lb + μ_ub = 0
 5. Complementary slackness for flow bounds
-6. Complementary slackness for gen bounds
-7. Complementary slackness for shedding bounds
-8. Primal feasibility: power balance
-9. Primal feasibility: flow definition
-10. Reference bus constraint
+6. Complementary slackness for phase angle difference bounds
+7. Complementary slackness for gen bounds
+8. Complementary slackness for shedding bounds
+9. Primal feasibility: power balance
+10. Primal feasibility: flow definition
+11. Reference bus constraint
 """
 function kkt(z::AbstractVector, prob::DCOPFProblem, d::AbstractVector)
     return kkt(z, prob.network, d)
@@ -505,9 +508,8 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     J[idx.va, idx.nu_bal] = B_mat'
     J[idx.va, idx.nu_flow] = WA'
     J[idx.va, idx.η] = e_ref
-    At = sparse(net.A')
-    J[idx.va, idx.gamma_lb] = -At
-    J[idx.va, idx.gamma_ub] = At
+    J[idx.va, idx.gamma_lb] = -net.A'
+    J[idx.va, idx.gamma_ub] = net.A'
 
     # ∂K_g/∂...
     # K_g = 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub
