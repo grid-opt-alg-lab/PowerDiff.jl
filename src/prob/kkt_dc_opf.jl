@@ -220,18 +220,18 @@ Compute the dimension of the flattened KKT variable vector.
 
 The KKT system includes:
 - Primal: va (n), pg (k), f (m), psh (n)
-- Dual (inequality): lam_lb (m), lam_ub (m), rho_lb (k), rho_ub (k), mu_lb (n), mu_ub (n)
+- Dual (inequality): lam_lb (m), lam_ub (m), gamma_lb (m), gamma_ub (m), rho_lb (k), rho_ub (k), mu_lb (n), mu_ub (n)
 - Dual (equality): nu_bal (n), nu_flow (m)
 - Reference bus constraint: 1
 
-Total: 5n + 4m + 3k + 1
+Total: 5n + 6m + 3k + 1
 """
 kkt_dims(prob::DCOPFProblem) = kkt_dims(prob.network)
 
 function kkt_dims(net::DCNetwork)
     n, m, k = net.n, net.m, net.k
-    # va(n) + pg(k) + f(m) + psh(n) + lam_lb(m) + lam_ub(m) + rho_lb(k) + rho_ub(k) + mu_lb(n) + mu_ub(n) + nu_bal(n) + nu_flow(m) + ref(1)
-    return 5n + 4m + 3k + 1
+    # va(n) + pg(k) + f(m) + psh(n) + lam_lb(m) + lam_ub(m) + gamma_lb(m) + gamma_ub(m) + rho_lb(k) + rho_ub(k) + mu_lb(n) + mu_ub(n) + nu_bal(n) + nu_flow(m) + ref(1)
+    return 5n + 6m + 3k + 1
 end
 
 """
@@ -241,7 +241,7 @@ Compute all KKT variable indices from network dimensions.
 Single source of truth for index calculations.
 
 # Variable ordering
-[va(n), pg(k), f(m), psh(n), lam_lb(m), lam_ub(m), rho_lb(k), rho_ub(k), mu_lb(n), mu_ub(n), nu_bal(n), nu_flow(m), eta(1)]
+[va(n), pg(k), f(m), psh(n), lam_lb(m), lam_ub(m), gamma_lb(m), gamma_ub(m), rho_lb(k), rho_ub(k), mu_lb(n), mu_ub(n), nu_bal(n), nu_flow(m), eta(1)]
 
 # Returns
 NamedTuple with index ranges for each variable block.
@@ -254,6 +254,8 @@ function kkt_indices(n::Int, m::Int, k::Int)
     idx_psh = (i+1):(i+n); i += n
     idx_λ_lb = (i+1):(i+m); i += m
     idx_λ_ub = (i+1):(i+m); i += m
+    idx_γ_lb = (i+1):(i+m); i += m
+    idx_γ_ub = (i+1):(i+m); i += m
     idx_ρ_lb = (i+1):(i+k); i += k
     idx_ρ_ub = (i+1):(i+k); i += k
     idx_μ_lb = (i+1):(i+n); i += n
@@ -265,6 +267,7 @@ function kkt_indices(n::Int, m::Int, k::Int)
     return (
         va = idx_θ, pg = idx_g, f = idx_f, psh = idx_psh,
         lam_lb = idx_λ_lb, lam_ub = idx_λ_ub,
+        gamma_lb = idx_γ_lb, gamma_ub = idx_γ_ub,
         rho_lb = idx_ρ_lb, rho_ub = idx_ρ_ub,
         mu_lb = idx_μ_lb, mu_ub = idx_μ_ub,
         nu_bal = idx_ν_bal, nu_flow = idx_ν_flow, η = idx_η
@@ -284,7 +287,7 @@ kkt_indices(prob::DCOPFProblem) = kkt_indices(prob.network)
 Flatten solution primal and dual variables into a single vector for KKT evaluation.
 
 # Variable ordering
-[va; pg; f; psh; lam_lb; lam_ub; rho_lb; rho_ub; mu_lb; mu_ub; nu_bal; nu_flow; eta]
+[va; pg; f; psh; lam_lb; lam_ub; gamma_lb; gamma_ub; rho_lb; rho_ub; mu_lb; mu_ub; nu_bal; nu_flow; eta]
 
 where eta is the dual for the reference bus constraint (set to 0).
 """
@@ -299,6 +302,8 @@ function flatten_variables(sol::DCOPFSolution, prob::DCOPFProblem)
         sol.psh,
         sol.lam_lb,
         sol.lam_ub,
+        sol.gamma_lb,
+        sol.gamma_ub,
         sol.rho_lb,
         sol.rho_ub,
         sol.mu_lb,
@@ -326,6 +331,7 @@ function unflatten_variables(z::AbstractVector, net::DCNetwork)
     return (
         va = z[idx.va], pg = z[idx.pg], f = z[idx.f], psh = z[idx.psh],
         lam_lb = z[idx.lam_lb], lam_ub = z[idx.lam_ub],
+        gamma_lb = z[idx.gamma_lb], gamma_ub = z[idx.gamma_ub],
         rho_lb = z[idx.rho_lb], rho_ub = z[idx.rho_ub],
         mu_lb = z[idx.mu_lb], mu_ub = z[idx.mu_ub],
         nu_bal = z[idx.nu_bal], nu_flow = z[idx.nu_flow],
@@ -380,6 +386,7 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     # Extract variables
     θ, g, f, psh = vars.va, vars.pg, vars.f, vars.psh
     λ_lb, λ_ub = vars.lam_lb, vars.lam_ub
+    γ_lb, γ_ub = vars.gamma_lb, vars.gamma_ub
     ρ_lb, ρ_ub = vars.rho_lb, vars.rho_ub
     μ_lb, μ_ub = vars.mu_lb, vars.mu_ub
     ν_bal, ν_flow = vars.nu_bal, vars.nu_flow
@@ -396,7 +403,7 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
 
     # KKT conditions
     # 1. Stationarity w.r.t. θ
-    K_θ = B_mat' * ν_bal + WA' * ν_flow + e_ref * η_ref
+    K_θ = B_mat' * ν_bal + WA' * ν_flow + e_ref * η_ref + net.A' * (γ_ub - γ_lb)
 
     # 2. Stationarity w.r.t. g
     K_g = 2 * Diagonal(net.cq) * g + net.cl - net.G_inc' * ν_bal - ρ_lb + ρ_ub
@@ -411,24 +418,29 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     K_λ_lb = λ_lb .* (f + net.fmax)
     K_λ_ub = λ_ub .* (net.fmax - f)
 
-    # 6. Complementary slackness: generation bounds
+    # 6. Complementary slackness: phase angle difference bounds
+    Aθ = net.A * θ
+    K_γ_lb = γ_lb .* (Aθ - net.angmin)
+    K_γ_ub = γ_ub .* (net.angmax - Aθ)
+
+    # 7. Complementary slackness: generation bounds
     K_ρ_lb = ρ_lb .* (g - net.gmin)
     K_ρ_ub = ρ_ub .* (net.gmax - g)
 
-    # 7. Complementary slackness: load shedding bounds
+    # 8. Complementary slackness: load shedding bounds
     K_μ_lb = μ_lb .* psh
     K_μ_ub = μ_ub .* (d - psh)
 
-    # 8. Primal feasibility: power balance (G_inc * g + psh - d = B * θ)
+    # 9. Primal feasibility: power balance (G_inc * g + psh - d = B * θ)
     K_power_bal = net.G_inc * g + psh - d - B_mat * θ
 
-    # 9. Primal feasibility: flow definition
+    # 10. Primal feasibility: flow definition
     K_flow_def = f - WA * θ
 
-    # 10. Reference bus
+    # 11. Reference bus
     K_ref = θ[net.ref_bus]
 
-    return vcat(K_θ, K_g, K_f, K_psh, K_λ_lb, K_λ_ub, K_ρ_lb, K_ρ_ub, K_μ_lb, K_μ_ub, K_power_bal, K_flow_def, [K_ref])
+    return vcat(K_θ, K_g, K_f, K_psh, K_λ_lb, K_λ_ub, K_γ_lb, K_γ_ub, K_ρ_lb, K_ρ_ub, K_μ_lb, K_μ_ub, K_power_bal, K_flow_def, [K_ref])
 end
 
 # =============================================================================
@@ -463,6 +475,7 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     vars = (
         va = sol.va, pg = sol.pg, f = sol.f, psh = sol.psh,
         lam_lb = sol.lam_lb, lam_ub = sol.lam_ub,
+        gamma_lb = sol.gamma_lb, gamma_ub = sol.gamma_ub,
         rho_lb = sol.rho_lb, rho_ub = sol.rho_ub,
         mu_lb = sol.mu_lb, mu_ub = sol.mu_ub,
         nu_bal = sol.nu_bal
@@ -488,10 +501,13 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     J = spzeros(dim, dim)
 
     # ∂K_θ/∂...
-    # K_θ = B' * ν_bal + WA' * ν_flow + e_ref * η_ref
+    # K_θ = B' * ν_bal + WA' * ν_flow + e_ref * η_ref + A'*(γ_ub - γ_lb)
     J[idx.va, idx.nu_bal] = B_mat'
     J[idx.va, idx.nu_flow] = WA'
     J[idx.va, idx.η] = e_ref
+    At = sparse(net.A')
+    J[idx.va, idx.gamma_lb] = -At
+    J[idx.va, idx.gamma_ub] = At
 
     # ∂K_g/∂...
     # K_g = 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub
@@ -522,6 +538,17 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     # K_λ_ub = λ_ub .* (fmax - f)
     J[idx.lam_ub, idx.f] = -sparse(Diagonal(vars.lam_ub))
     J[idx.lam_ub, idx.lam_ub] = sparse(Diagonal(net.fmax .- vars.f))
+
+    # ∂K_γ_lb/∂... (complementary slackness for lower angle bound)
+    # K_γ_lb = γ_lb .* (A*θ - angmin)
+    Aθ = net.A * sol.va
+    J[idx.gamma_lb, idx.va] = Diagonal(vars.gamma_lb) * net.A
+    J[idx.gamma_lb, idx.gamma_lb] = sparse(Diagonal(Aθ .- net.angmin))
+
+    # ∂K_γ_ub/∂... (complementary slackness for upper angle bound)
+    # K_γ_ub = γ_ub .* (angmax - A*θ)
+    J[idx.gamma_ub, idx.va] = -Diagonal(vars.gamma_ub) * net.A
+    J[idx.gamma_ub, idx.gamma_ub] = sparse(Diagonal(net.angmax .- Aθ))
 
     # ∂K_ρ_lb/∂... (complementary slackness for lower gen bound)
     # K_ρ_lb = ρ_lb .* (g - gmin)

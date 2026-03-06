@@ -64,14 +64,18 @@ function solve!(prob::DCOPFProblem)
     psh_val = value.(prob.psh)
 
     # Extract dual variables
+    # JuMP returns non-positive duals for <= constraints; negate to get standard
+    # KKT duals (non-negative for inequality constraints).
     ν_bal = dual.(prob.cons.power_bal)
     ν_flow = dual.(prob.cons.flow_def)
-    λ_ub = dual.(prob.cons.line_ub)
+    λ_ub = -dual.(prob.cons.line_ub)
     λ_lb = dual.(prob.cons.line_lb)
-    ρ_ub = dual.(prob.cons.gen_ub)
+    ρ_ub = -dual.(prob.cons.gen_ub)
     ρ_lb = dual.(prob.cons.gen_lb)
     μ_lb = dual.(prob.cons.shed_lb)
-    μ_ub = dual.(prob.cons.shed_ub)
+    μ_ub = -dual.(prob.cons.shed_ub)
+    γ_lb = dual.(prob.cons.phase_diff_lb)
+    γ_ub = -dual.(prob.cons.phase_diff_ub)
 
     # Post-process load shedding for strict complementarity.
     # Interior-point solvers give psh ≈ ε > 0 even when shedding is inactive.
@@ -103,7 +107,7 @@ function solve!(prob::DCOPFProblem)
 
     obj = objective_value(prob.model)
 
-    sol = DCOPFSolution(θ_val, g_val, f_val, psh_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, μ_lb, μ_ub, obj)
+    sol = DCOPFSolution(θ_val, g_val, f_val, psh_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, μ_lb, μ_ub, γ_lb, γ_ub, obj)
 
     # Cache the solution for sensitivity computations
     prob.cache.solution = sol

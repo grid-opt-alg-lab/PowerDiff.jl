@@ -31,8 +31,8 @@
 # Sign conventions:
 #     - Our LMPs are positive (cost increases when demand increases)
 #     - PowerModels uses negative LMPs: our_lmp = -pm_lmp
-#     - JuMP returns λ_ub < 0 for binding f ≤ fmax constraints
-#     - Standard convention has λ_ub_std ≥ 0, so λ_ub_std = -λ_ub_jmp
+#     - DCOPFSolution stores standard KKT duals (non-negative for inequality constraints)
+#       JuMP's sign convention for <= constraints is handled at extraction in solve!
 
 """
     calc_lmp(sol::DCOPFSolution, net::DCNetwork)
@@ -87,10 +87,7 @@ function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork)
     non_ref = setdiff(1:net.n, net.ref_bus)
     B_r = B[non_ref, non_ref]
 
-    # Convert JuMP duals to standard convention: λ_ub_std = -λ_ub_jmp
-    λ_ub_std = -sol.lam_ub
-    λ_lb_std = sol.lam_lb
-    rhs_full = net.A' * Diagonal(w .* net.sw) * (λ_ub_std - λ_lb_std)
+    rhs_full = net.A' * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb)
 
     result = zeros(net.n)
     result[non_ref] = B_r \ rhs_full[non_ref]

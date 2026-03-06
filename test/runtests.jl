@@ -133,7 +133,7 @@ end
 
         # Test dimensions
         dim = kkt_dims(dc_net)
-        @test dim == 5*dc_net.n + 4*dc_net.m + 3*dc_net.k + 1
+        @test dim == 5*dc_net.n + 6*dc_net.m + 3*dc_net.k + 1
 
         # Test flatten/unflatten round-trip
         z = flatten_variables(sol, prob)
@@ -836,3 +836,4 @@ include("test_acpf_jacobian.jl")
 include("test_acpf_va_flow.jl")
 include("test_parameter_transforms.jl")
 include("test_ac_opf_all_sens.jl")
+include("test_angle_diff_duals.jl")

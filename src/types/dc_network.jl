@@ -82,6 +82,7 @@ Solution container for DC OPF problem, storing both primal and dual variables.
 - `lam_ub`, `lam_lb`: Line flow upper/lower bound duals
 - `rho_ub`, `rho_lb`: Generator upper/lower bound duals
 - `mu_lb`, `mu_ub`: Load shedding lower/upper bound duals
+- `gamma_lb`, `gamma_ub`: Phase angle difference lower/upper bound duals
 - `objective`: Optimal objective value
 """
 struct DCOPFSolution <: AbstractOPFSolution
@@ -97,6 +98,8 @@ struct DCOPFSolution <: AbstractOPFSolution
     rho_lb::Vector{Float64}
     mu_lb::Vector{Float64}
     mu_ub::Vector{Float64}
+    gamma_lb::Vector{Float64}
+    gamma_ub::Vector{Float64}
     objective::Float64
 end
 
