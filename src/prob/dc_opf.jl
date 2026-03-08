@@ -124,7 +124,10 @@ function solve!(prob::DCOPFProblem)
 
     obj = objective_value(prob.model)
 
-    sol = DCOPFSolution(θ_val, g_val, f_val, psh_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, μ_lb, μ_ub, γ_lb, γ_ub, obj)
+    # Cache reduced susceptance factorization for LMP decomposition
+    B_r_factor, _ = _factorize_B_r(net)
+
+    sol = DCOPFSolution(θ_val, g_val, f_val, psh_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, μ_lb, μ_ub, γ_lb, γ_ub, obj, B_r_factor)
 
     # Cache the solution for sensitivity computations
     prob.cache.solution = sol

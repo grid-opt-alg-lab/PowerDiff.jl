@@ -23,7 +23,7 @@ PowerModels = "0.21"
 julia = "1.11"
 
 [sources]
-AcceleratedDCPowerFlows = {url = "https://github.com/samtalki/AcceleratedDCPowerFlows.jl.git"}
+AcceleratedDCPowerFlows = {url = "https://github.com/mtanneau/AcceleratedDCPowerFlows.jl.git"}
 
 [extras]
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"

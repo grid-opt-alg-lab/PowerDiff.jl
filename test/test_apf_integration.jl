@@ -161,10 +161,9 @@ end
             # PMD PTDF
             pmd_ptdf = ptdf_matrix(state)
 
-            # APF PTDF
+            # APF PTDF (materialize via helper)
             apf_Φ = apf_ptdf(dc_net)
-            A_sparse = sparse(APF.branch_incidence_matrix(to_apf_network(dc_net)))
-            apf_ptdf_mat = Diagonal(apf_Φ.b) * A_sparse * apf_Φ.Yinv
+            apf_ptdf_mat = materialize_apf_ptdf(apf_Φ)
 
             @test isapprox(pmd_ptdf, apf_ptdf_mat, atol=1e-8)
 

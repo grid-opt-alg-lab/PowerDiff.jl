@@ -82,17 +82,16 @@ constraints, with the reference bus congestion component equal to zero.
 # Returns
 Vector (length n) of congestion contributions to each bus's LMP.
 """
-function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork)
+function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork;
+                                   B_r_factor=sol.B_r_factor)
     w = -net.b  # positive weights (b < 0 for inductive lines)
-    B = calc_susceptance_matrix(net)
     non_ref = setdiff(1:net.n, net.ref_bus)
-    B_r = B[non_ref, non_ref]
 
     At = net.A'
     rhs_full = At * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb) + At * (sol.gamma_ub - sol.gamma_lb)
 
     result = zeros(net.n)
-    result[non_ref] = B_r \ rhs_full[non_ref]
+    result[non_ref] = B_r_factor \ rhs_full[non_ref]
     return result
 end
 

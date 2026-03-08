@@ -150,6 +150,6 @@ export branch_flow, p_flow, q_flow
 include("apf/interop.jl")
 
 # APF interop exports
-export to_apf_network, apf_ptdf, apf_lodf, compare_ptdf, ptdf_matrix
+export to_apf_network, apf_ptdf, apf_lodf, compare_ptdf, ptdf_matrix, materialize_apf_ptdf
 
 end # module PowerModelsDiff
