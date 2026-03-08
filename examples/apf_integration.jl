@@ -102,6 +102,10 @@ pf_state = DCPowerFlowState(dc_net, d)
 result = compare_ptdf(pf_state)
 println("  PMD ↔ APF PTDF match: $(result.match) (max error: $(round(result.maxerr, sigdigits=3)))")
 
+# Note: LMP and generation sensitivities on case14 are small (~1e-5 to 1e-9)
+# because 4/5 generators sit at their upper bounds, creating KKT degeneracy.
+# A network with more interior generators would show larger, more meaningful values.
+
 # --- Step 4: Generation sensitivity for topology optimization ---
 println("\nStep 4: Generation sensitivity for topology optimization")
 dpg_dsw = calc_sensitivity(prob, :pg, :sw)

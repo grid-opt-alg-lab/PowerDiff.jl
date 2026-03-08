@@ -115,7 +115,8 @@ function compare_ptdf(state::DCPowerFlowState; atol::Float64=1e-8)
     apf_net = to_apf_network(net)
     apf_Φ = APF.full_ptdf(apf_net)
 
-    # Reconstruct dense PTDF: PTDF = Diag(b_negated) * A * Y⁻¹
+    # Reconstruct dense PTDF: PTDF = Diag(apf_Φ.b) * A * apf_Φ.Yinv
+    # (apf_Φ.b stores negated susceptances, i.e., -Im(1/z) > 0 for inductive branches)
     A_sparse = sparse(APF.branch_incidence_matrix(apf_net))
     apf_ptdf_mat = Diagonal(apf_Φ.b) * A_sparse * apf_Φ.Yinv
 

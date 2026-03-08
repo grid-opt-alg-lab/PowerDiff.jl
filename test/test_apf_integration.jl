@@ -45,6 +45,38 @@ const APF = PowerModelsDiff.APF
 end
 
 # =========================================================================
+# Cholesky → LU fallback for capacitive branches
+# =========================================================================
+@testset "Cholesky → LU fallback for capacitive branch" begin
+    net = load_test_case("case5.m")
+    if isnothing(net)
+        @test_skip false
+    else
+        dc_net = DCNetwork(net)
+
+        # Make one branch capacitive (positive b) so B_r is not positive definite
+        dc_net.b[1] = abs(dc_net.b[1])
+
+        d = calc_demand_vector(net)
+        state = DCPowerFlowState(dc_net, d)
+
+        # Verify LU fallback was used (sparse lu → UmfpackLU, not LinearAlgebra.LU)
+        @test state.B_r_factor isa SparseArrays.UMFPACK.UmfpackLU
+
+        # Verify angles match a manual dense solve
+        B = PowerModelsDiff.calc_susceptance_matrix(dc_net)
+        non_ref = setdiff(1:dc_net.n, dc_net.ref_bus)
+        p = state.pg .- state.d
+        θ_ref = zeros(dc_net.n)
+        θ_ref[non_ref] = Matrix(B[non_ref, non_ref]) \ p[non_ref]
+        @test isapprox(state.va, θ_ref, atol=1e-10)
+
+        # Restore original susceptance
+        dc_net.b[1] = -abs(dc_net.b[1])
+    end
+end
+
+# =========================================================================
 # Network conversion
 # =========================================================================
 @testset "to_apf_network" begin

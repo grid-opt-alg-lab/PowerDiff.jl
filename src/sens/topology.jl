@@ -199,7 +199,7 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
 
         # ∂B_r/∂swₑ * θ_r = -bₑ * a_{e,r} * (a_{e,r}' * θ_r)
         coeff = -net.b[e] * dot(a_e_r, θ_r)
-        rhs = Vector(coeff * a_e_r)   # dense RHS for UmfpackLU backsolve
+        rhs = Vector(coeff * a_e_r)   # dense RHS for factorization backsolve
         dva_dsw[nr, e] = -(state.B_r_factor \ rhs)
         # dva_dsw[ref, e] = 0 by construction
     end
