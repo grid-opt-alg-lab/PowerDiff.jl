@@ -121,7 +121,7 @@ constraint handling.
 - `pg`: Generation vector
 - `d`: Demand vector
 - `f`: Branch flows (computed from va)
-- `B_r_factor`: LU factorization of `B[non_ref, non_ref]`
+- `B_r_factor`: Factorization of `B[non_ref, non_ref]` (Cholesky for inductive networks, LU fallback)
 - `non_ref`: Indices of non-reference buses
 """
 struct DCPowerFlowState{F<:Factorization{Float64}} <: AbstractPowerFlowState
@@ -405,10 +405,20 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
     # Net injection
     p = Float64.(g .- d)
 
-    # Build reduced susceptance matrix (delete reference bus row/col) and factorize
+    # Build reduced susceptance matrix (delete reference bus row/col) and factorize.
+    # B_r is symmetric positive definite for connected inductive networks (-b > 0),
+    # so Cholesky is preferred (~2x faster). Following the approach of
+    # AcceleratedDCPowerFlows.jl, we fall back to LU for edge cases (capacitive
+    # branches or disconnected networks) where B_r is not SPD.
     B = calc_susceptance_matrix(net)
     non_ref = setdiff(1:n, net.ref_bus)
-    F = lu(B[non_ref, non_ref])   # sparse LU (UmfpackLU)
+    B_r = B[non_ref, non_ref]
+    F = try
+        cholesky(Symmetric(B_r))
+    catch e
+        e isa PosDefException || rethrow()
+        lu(B_r)
+    end
 
     # Solve reduced system: θ[non_ref] = B_r \ p[non_ref], θ[ref] = 0
     θ = zeros(n)

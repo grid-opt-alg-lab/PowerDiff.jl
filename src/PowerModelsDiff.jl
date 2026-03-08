@@ -22,6 +22,7 @@ using Ipopt
 using ForwardDiff
 import PowerModels
 const PM = PowerModels
+import AcceleratedDCPowerFlows as APF
 
 const MOI = JuMP.MOI
 
@@ -142,5 +143,13 @@ export laplacian, complete_incidence_matrix, calc_incidence_matrix
 export p, q, vm, vm2, pf_eqns
 export p_polar, q_polar
 export branch_flow, p_flow, q_flow
+
+# =============================================================================
+# AcceleratedDCPowerFlows integration
+# =============================================================================
+include("apf/interop.jl")
+
+# APF interop exports
+export to_apf_network, apf_ptdf, apf_lodf, compare_ptdf, ptdf_matrix
 
 end # module PowerModelsDiff
