@@ -19,7 +19,7 @@
 # Demonstrates the new symbol-based sensitivity API:
 #   calc_sensitivity(state, :operand, :parameter) → Matrix
 
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 
 # Load a test network

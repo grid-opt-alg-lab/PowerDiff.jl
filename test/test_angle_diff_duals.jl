@@ -3,7 +3,7 @@
 # Verifies that gamma_lb/gamma_ub duals are correctly extracted and that
 # the KKT system produces correct sensitivities when angle limits bind.
 
-using PowerModelsDiff
+using PowerDiff
 using LinearAlgebra
 using SparseArrays
 using Test

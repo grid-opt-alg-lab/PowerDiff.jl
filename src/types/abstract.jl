@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # =============================================================================
-# Abstract Type Hierarchy for PowerModelsDiff
+# Abstract Type Hierarchy for PowerDiff
 # =============================================================================
 #
 # Provides a unified type structure for multiple dispatch across:

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 using Documenter
-using PowerModelsDiff
+using PowerDiff
 
 site_build = get(ENV, "SITE_BUILD", "false") == "true"
 
@@ -21,7 +21,7 @@ format_opts = if site_build
     # Build for personal website: pretty URLs, canonical link, no edit links
     Documenter.HTML(
         prettyurls = true,
-        canonical = "https://samueltalkington.com/research/pmdiff/",
+        canonical = "https://samueltalkington.com/research/powerdiff/",
         edit_link = nothing,
     )
 else
@@ -32,8 +32,8 @@ else
 end
 
 makedocs(
-    sitename = "PowerModelsDiff.jl",
-    modules = [PowerModelsDiff],
+    sitename = "PowerDiff.jl",
+    modules = [PowerDiff],
     format = format_opts,
     pages = [
         "Home" => "index.md",
@@ -58,7 +58,7 @@ if site_build
         """var DOCUMENTER_CURRENT_VERSION = "dev";""")
 else
     deploydocs(
-        repo = "github.com/grid-opt-alg-lab/PowerModelsDiff.jl.git",
+        repo = "github.com/grid-opt-alg-lab/PowerDiff.jl.git",
         devbranch = "main",
     )
 end

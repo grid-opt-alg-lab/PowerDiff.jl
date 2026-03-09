@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-using PowerModelsDiff, PowerModels
+using PowerDiff, PowerModels
 const PM = PowerModels
 
 case_path = joinpath(dirname(pathof(PM)), "..", "test", "data", "matpower", "case14.m")
@@ -20,12 +20,12 @@ pm_data = PM.parse_file(case_path)
 PM.make_basic_network!(pm_data)
 
 net = DCNetwork(pm_data)
-d = PowerModelsDiff.calc_demand_vector(pm_data)
+d = PowerDiff.calc_demand_vector(pm_data)
 
 pf = DCPowerFlowState(net, d)
 
 prob = DCOPFProblem(net, d)
-PowerModelsDiff.solve!(prob)
+PowerDiff.solve!(prob)
 
 n_bus = size(net.A, 2)
 n_branch = size(net.A, 1)

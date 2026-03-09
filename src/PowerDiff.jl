@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-module PowerModelsDiff
+module PowerDiff
 
 using LinearAlgebra
 using SparseArrays
@@ -152,4 +152,4 @@ include("apf/interop.jl")
 # APF interop exports
 export to_apf_network, apf_ptdf, apf_lodf, compare_ptdf, ptdf_matrix, materialize_apf_ptdf
 
-end # module PowerModelsDiff
+end # module PowerDiff

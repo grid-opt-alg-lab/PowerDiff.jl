@@ -17,7 +17,7 @@
 # Verifies the 4 Jacobian blocks (∂P/∂θ, ∂P/∂|V|, ∂Q/∂θ, ∂Q/∂|V|) against
 # finite differences and cross-checks with PowerModels' calc_basic_jacobian_matrix.
 
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 using ForwardDiff
 using LinearAlgebra

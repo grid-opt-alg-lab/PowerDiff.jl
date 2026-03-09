@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-const APF = PowerModelsDiff.APF
+const APF = PowerDiff.APF
 
 @testset "APF Integration" begin
 
@@ -33,7 +33,7 @@ const APF = PowerModelsDiff.APF
         @test !(state.B_r_factor isa LU)
 
         # Verify angles match a manual LU solve
-        B = PowerModelsDiff.calc_susceptance_matrix(dc_net)
+        B = PowerDiff.calc_susceptance_matrix(dc_net)
         non_ref = setdiff(1:dc_net.n, dc_net.ref_bus)
 
         # Compare against the state's own injection
@@ -69,7 +69,7 @@ end
         @test state.B_r_factor isa SparseArrays.UMFPACK.UmfpackLU
 
         # Verify angles match a manual dense solve
-        B = PowerModelsDiff.calc_susceptance_matrix(dc_net_cap)
+        B = PowerDiff.calc_susceptance_matrix(dc_net_cap)
         non_ref = setdiff(1:dc_net_cap.n, dc_net_cap.ref_bus)
         p = state.pg .- state.d
         θ_ref = zeros(dc_net_cap.n)
@@ -130,7 +130,7 @@ end
 # =========================================================================
 # Index alignment
 # =========================================================================
-@testset "Index alignment PMD ↔ APF" begin
+@testset "Index alignment PD ↔ APF" begin
     net = load_test_case("case5.m")
     if isnothing(net)
         @test_skip false
@@ -148,7 +148,7 @@ end
 # =========================================================================
 # PTDF consistency
 # =========================================================================
-@testset "PTDF consistency PMD ↔ APF" begin
+@testset "PTDF consistency PD ↔ APF" begin
     for case in ["case5.m", "case14.m"]
         @testset "$case" begin
             net = load_test_case(case)
@@ -160,14 +160,14 @@ end
             d = calc_demand_vector(net)
             state = DCPowerFlowState(dc_net, d)
 
-            # PMD PTDF
-            pmd_ptdf = ptdf_matrix(state)
+            # PD PTDF
+            pd_ptdf = ptdf_matrix(state)
 
             # APF PTDF (materialize via helper)
             apf_Φ = apf_ptdf(dc_net)
             apf_ptdf_mat = materialize_apf_ptdf(apf_Φ)
 
-            @test isapprox(pmd_ptdf, apf_ptdf_mat, atol=1e-8)
+            @test isapprox(pd_ptdf, apf_ptdf_mat, atol=1e-8)
 
             # Also test the convenience function
             result = compare_ptdf(state)
@@ -214,7 +214,7 @@ end
             d = calc_demand_vector(net)
             state = DCPowerFlowState(dc_net, d)
 
-            # PMD switching sensitivity: ∂f/∂sw
+            # PD switching sensitivity: ∂f/∂sw
             df_dsw = Matrix(calc_sensitivity(state, :f, :sw))
 
             # APF LODF
@@ -312,12 +312,12 @@ end
         # Build power flow state with the open branch
         d = calc_demand_vector(net)
         state_open = DCPowerFlowState(dc_net, d)
-        pmd_ptdf = ptdf_matrix(state_open)
+        pd_ptdf = ptdf_matrix(state_open)
 
         # Open branch should have zero PTDF row
-        @test isapprox(pmd_ptdf[e_open, :], zeros(dc_net.n), atol=1e-12)
+        @test isapprox(pd_ptdf[e_open, :], zeros(dc_net.n), atol=1e-12)
 
-        # Cross-validate PMD ↔ APF on the modified topology
+        # Cross-validate PD ↔ APF on the modified topology
         result = compare_ptdf(state_open)
         @test result.match
         @test result.maxerr < 1e-8

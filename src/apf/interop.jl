@@ -16,7 +16,7 @@
 # AcceleratedDCPowerFlows Interop
 # =============================================================================
 #
-# Direct integration between PowerModelsDiff (PMD) and AcceleratedDCPowerFlows
+# Direct integration between PowerDiff (PD) and AcceleratedDCPowerFlows
 # (APF). Both packages use the B-theta formulation with identical susceptance
 # sign conventions and sort elements by original PowerModels key before
 # re-indexing, so matrix rows/columns align directly.
@@ -30,7 +30,7 @@
 
 Return the standard PTDF matrix (`∂f/∂p`) from a DC power flow state.
 
-PMD's `calc_sensitivity(state, :f, :d)` computes `∂f/∂d = -PTDF` because
+PD's `calc_sensitivity(state, :f, :d)` computes `∂f/∂d = -PTDF` because
 `p = g - d ⟹ ∂p/∂d = -I`. This function negates to recover the standard
 PTDF sign convention: `PTDF = ∂f/∂p`.
 """
@@ -63,10 +63,10 @@ end
 Convert a `DCNetwork` to an `APF.Network`.
 
 APF networks lack generators, costs, and limits, so this is one-way.
-Bus demand is set to zero (PMD separates demand from network topology).
+Bus demand is set to zero (PD separates demand from network topology).
 Branch `status` is derived from switching state: `sw[e] > 0.5`.
 
-Note: `to_apf_network` sets bus demand to zero because PMD separates demand
+Note: `to_apf_network` sets bus demand to zero because PD separates demand
 from topology. For APF workflows that need demand data (e.g., `compute_flow!`),
 use `APF.from_power_models(pm_data)` directly instead.
 """
@@ -94,7 +94,7 @@ function to_apf_network(net::DCNetwork)
         branches[e] = APF.Branch(e, net.sw[e] > 0.5, net.b[e], net.fmax[e], from_bus[e], to_bus[e])
     end
 
-    return APF.Network("PowerModelsDiff", buses, net.ref_bus, branches)
+    return APF.Network("PowerDiff", buses, net.ref_bus, branches)
 end
 
 # -----------------------------------------------------------------------------
@@ -128,15 +128,15 @@ end
 """
     compare_ptdf(state::DCPowerFlowState; atol=1e-8) → (match::Bool, maxerr::Float64)
 
-Cross-validate PMD's PTDF against APF's FullPTDF.
+Cross-validate PD's PTDF against APF's FullPTDF.
 Returns a named tuple where `match` is true if all entries agree within `atol`.
 
-Note: This is not cheap — it computes two full PTDF matrices (one via PMD's
+Note: This is not cheap — it computes two full PTDF matrices (one via PD's
 sensitivity API, one via APF). Intended for validation, not hot-path use.
 """
 function compare_ptdf(state::DCPowerFlowState; atol::Float64=1e-8)
-    pmd_ptdf = ptdf_matrix(state)
+    pd_ptdf = ptdf_matrix(state)
     apf_ptdf_mat = materialize_apf_ptdf(apf_ptdf(state.net))
-    maxerr = maximum(abs, pmd_ptdf - apf_ptdf_mat)
+    maxerr = maximum(abs, pd_ptdf - apf_ptdf_mat)
     return (match = maxerr < atol, maxerr = maxerr)
 end

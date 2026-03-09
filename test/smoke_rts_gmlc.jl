@@ -30,7 +30,7 @@
 
 using Test
 using LinearAlgebra
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 
 PowerModels.silence()

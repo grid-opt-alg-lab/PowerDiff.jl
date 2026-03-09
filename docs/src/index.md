@@ -1,4 +1,4 @@
-# PowerModelsDiff.jl
+# PowerDiff.jl
 
 A Julia package for differentiable power system analysis. Compute sensitivities of power flow solutions, optimal power flow dispatch, and locational marginal prices with respect to network parameters.
 
@@ -17,13 +17,13 @@ A Julia package for differentiable power system analysis. Compute sensitivities 
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerModelsDiff.jl.git")
+Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerDiff.jl.git")
 ```
 
 ## Quick Example
 
 ```julia
-using PowerModelsDiff, PowerModels
+using PowerDiff, PowerModels
 
 # Load network (make_basic_network is optional)
 net = parse_file("case14.m")

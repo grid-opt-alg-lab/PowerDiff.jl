@@ -16,7 +16,7 @@
 # Parameters: :d, :qd, :cq, :cl, :fmax (+ existing :sw)
 # Operands: :va, :vm, :pg, :qg, :lmp
 
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 using LinearAlgebra
 using Test
@@ -296,7 +296,7 @@ end
         calc_sensitivity(prob, :vm, :d)
         calc_sensitivity(prob, :pg, :sw)
 
-        PowerModelsDiff.invalidate!(prob.cache)
+        PowerDiff.invalidate!(prob.cache)
 
         @test isnothing(prob.cache.solution)
         @test isnothing(prob.cache.kkt_factor)

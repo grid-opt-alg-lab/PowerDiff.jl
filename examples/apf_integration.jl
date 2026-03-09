@@ -13,17 +13,17 @@
 # limitations under the License.
 
 # =============================================================================
-# Joint APF + PMD Workflow: N-1 Screening + Sensitivity Analysis
+# Joint APF + PD Workflow: N-1 Screening + Sensitivity Analysis
 # =============================================================================
 #
 # This example demonstrates using AcceleratedDCPowerFlows (APF) for fast
-# contingency screening and PowerModelsDiff (PMD) for gradient-based
+# contingency screening and PowerDiff (PD) for gradient-based
 # economic sensitivity analysis. APF handles the speed-critical forward
-# computation; PMD provides the differentiable optimization layer.
+# computation; PD provides the differentiable optimization layer.
 
 using PowerModels
 using AcceleratedDCPowerFlows
-using PowerModelsDiff
+using PowerDiff
 
 const PM = PowerModels
 const APF = AcceleratedDCPowerFlows
@@ -42,12 +42,12 @@ for (_, br) in pm_data["branch"]
     br["rate_a"] *= 0.2
 end
 
-println("=== Joint APF + PMD Workflow on case14 ===\n")
+println("=== Joint APF + PD Workflow on case14 ===\n")
 
 # --- Step 1: APF for fast N-1 contingency screening ---
-# Use APF.from_power_models (not PMD's to_apf_network) because APF's converter
+# Use APF.from_power_models (not PD's to_apf_network) because APF's converter
 # preserves load/gen data in bus.pd, which is needed for compute_flow!.
-# PMD's to_apf_network zeros demand since PMD separates demand from topology.
+# PD's to_apf_network zeros demand since PD separates demand from topology.
 apf_net = APF.from_power_models(pm_data)
 N = APF.num_buses(apf_net)
 E = APF.num_branches(apf_net)
@@ -79,12 +79,12 @@ for e in critical
     println("    Branch $e: $(apf_net.branches[e].bus_fr) → $(apf_net.branches[e].bus_to)")
 end
 
-# --- Step 2: PMD for economic sensitivity ---
-println("\nStep 2: DC OPF + sensitivity analysis via PMD")
+# --- Step 2: PD for economic sensitivity ---
+println("\nStep 2: DC OPF + sensitivity analysis via PD")
 dc_net = DCNetwork(pm_data)
 d = calc_demand_vector(pm_data)
 prob = DCOPFProblem(dc_net, d)
-PowerModelsDiff.solve!(prob)
+PowerDiff.solve!(prob)
 
 # LMP sensitivity w.r.t. switching
 dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)
@@ -100,7 +100,7 @@ end
 println("\nStep 3: PTDF cross-validation")
 pf_state = DCPowerFlowState(dc_net, d)
 result = compare_ptdf(pf_state)
-println("  PMD ↔ APF PTDF match: $(result.match) (max error: $(round(result.maxerr, sigdigits=3)))")
+println("  PD ↔ APF PTDF match: $(result.match) (max error: $(round(result.maxerr, sigdigits=3)))")
 
 # Note: LMP and generation sensitivities on case14 are small (~1e-5 to 1e-9)
 # because 4/5 generators sit at their upper bounds, creating KKT degeneracy.

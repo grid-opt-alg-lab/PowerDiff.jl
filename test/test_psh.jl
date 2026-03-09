@@ -60,7 +60,7 @@ end
             @test all(abs.(sol.psh) .< 1e-4)
 
             # Power balance still holds: G_inc * g + psh - d ≈ B * θ
-            B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
+            B_mat = PowerDiff.calc_susceptance_matrix(dc_net)
             residual = dc_net.G_inc * sol.pg + sol.psh - d - B_mat * sol.va
             @test norm(residual) < 1e-4
         end
@@ -78,7 +78,7 @@ end
         @test sum(sol.psh) ≈ 0.5 atol=1e-4
 
         # Power balance: G_inc * g + psh - d ≈ B * θ
-        B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
+        B_mat = PowerDiff.calc_susceptance_matrix(dc_net)
         residual = dc_net.G_inc * sol.pg + sol.psh - d - B_mat * sol.va
         @test norm(residual) < 1e-4
     end
@@ -108,7 +108,7 @@ end
         @test sum(sol.psh) > 0.1
 
         # Power balance still holds
-        B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
+        B_mat = PowerDiff.calc_susceptance_matrix(dc_net)
         residual = dc_net.G_inc * sol.pg + sol.psh - d - B_mat * sol.va
         @test norm(residual) < 1e-4
     end
@@ -122,7 +122,7 @@ end
         prob = DCOPFProblem(dc_net, d)
         sol = solve!(prob)
 
-        B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
+        B_mat = PowerDiff.calc_susceptance_matrix(dc_net)
         psh_formula = d + B_mat * sol.va - dc_net.G_inc * sol.pg
         @test isapprox(sol.psh, psh_formula, atol=1e-4)
     end

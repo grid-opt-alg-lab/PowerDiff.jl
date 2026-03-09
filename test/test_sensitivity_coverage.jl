@@ -15,7 +15,7 @@
 # Exhaustive sensitivity coverage test
 # Verifies that ALL valid (operand, parameter) combinations work for each formulation.
 
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 using LinearAlgebra
 using Test

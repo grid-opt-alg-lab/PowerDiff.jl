@@ -17,7 +17,7 @@
 # Verifies :va and :f operands against finite-difference re-solve,
 # using the same PQ-only Newton approach as test_ac_pf_verification.jl.
 
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 using ForwardDiff
 using LinearAlgebra

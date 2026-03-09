@@ -20,7 +20,7 @@
 # Primal FD checks (θ, g, f) use a 2-bus network at 5% tolerance.
 # LMP FD checks use case5 where the solver gives precise duals (10% tolerance).
 
-using PowerModelsDiff
+using PowerDiff
 using LinearAlgebra
 using SparseArrays
 using Test

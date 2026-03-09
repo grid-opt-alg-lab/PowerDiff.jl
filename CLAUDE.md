@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-PowerModelsDiff is a Julia package for differentiable power system analysis. It provides sensitivity analysis for power flow equations, optimal power flow (OPF) problems, and power networks. Built on PowerModels.jl.
+PowerDiff is a Julia package for differentiable power system analysis. It provides sensitivity analysis for power flow equations, optimal power flow (OPF) problems, and power networks. Built on PowerModels.jl.
 
 ## Development Commands
 
@@ -201,7 +201,7 @@ calc_ac_kkt_jacobian(prob)     # Dense Jacobian via ForwardDiff
 
 ```
 src/
-├── PowerModelsDiff.jl          # Main module with exports
+├── PowerDiff.jl          # Main module with exports
 ├── types/
 │   ├── abstract.jl             # Abstract type hierarchy
 │   ├── id_mapping.jl           # IDMapping (original ↔ sequential ID translation)
@@ -256,7 +256,7 @@ test/
 
 examples/
 ├── interactive_repl.jl         # Interactive REPL walkthrough (case14)
-└── apf_integration.jl          # Joint APF + PMD workflow (N-1 screening + sensitivity)
+└── apf_integration.jl          # Joint APF + PD workflow (N-1 screening + sensitivity)
 
 docs/
 ├── Project.toml                # Documenter.jl dependencies
@@ -291,11 +291,11 @@ docs/
 
 **AcceleratedDCPowerFlows (APF) Integration**
 - APF is a direct dependency (sibling package from same lab)
-- Module alias: `const APF = AcceleratedDCPowerFlows` (in PowerModelsDiff module)
+- Module alias: `const APF = AcceleratedDCPowerFlows` (in PowerDiff module)
 - `to_apf_network(::DCNetwork) → APF.Network`: one-way conversion (APF lacks generators/costs)
 - `apf_ptdf(::DCNetwork)` and `apf_lodf(::DCNetwork)`: convenience PTDF/LODF via APF
 - `ptdf_matrix(::DCPowerFlowState)`: standard PTDF = `-calc_sensitivity(state, :f, :d)`
-- `compare_ptdf(::DCPowerFlowState)`: cross-validates PMD vs APF PTDF
+- `compare_ptdf(::DCPowerFlowState)`: cross-validates PD vs APF PTDF
 - Both packages use identical susceptance sign conventions and sort by PM key
 - LODF ↔ switching sensitivity: `LODF[k,e] = -∂f_k/∂sw_e / ∂f_e/∂sw_e` (exact, via Sherman-Morrison)
 - `DCPowerFlowState` uses Cholesky factorization for B_r (inspired by APF), with LU fallback
