@@ -227,6 +227,8 @@ src/
 │   ├── voltage.jl              # AC voltage-power sensitivity
 │   ├── current.jl              # AC current sensitivity
 │   └── lmp.jl                  # LMP computation
+├── apf/
+│   └── interop.jl              # AcceleratedDCPowerFlows integration (conversion, PTDF/LODF)
 ├── pf/                         # Power flow equations
 └── graphs/                     # Incidence matrices, Laplacian utilities
 
@@ -248,11 +250,13 @@ test/
 ├── unified/
 │   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
 │   └── test_sensitivity_verification.jl  # ForwardDiff verification
+├── test_apf_integration.jl     # APF interop tests (conversion, PTDF, LODF ↔ switching)
 ├── mwe_unified.jl              # Minimum working example (symbol API)
 └── smoke_rts_gmlc.jl           # RTS-GMLC smoke test (manual, not in Pkg.test)
 
 examples/
-└── interactive_repl.jl         # Interactive REPL walkthrough (case14)
+├── interactive_repl.jl         # Interactive REPL walkthrough (case14)
+└── apf_integration.jl          # Joint APF + PMD workflow (N-1 screening + sensitivity)
 
 docs/
 ├── Project.toml                # Documenter.jl dependencies
@@ -284,6 +288,19 @@ docs/
 **Switching Variables**
 - `sw` stores switching states in [0,1]; sw=1 means branch closed, sw=0 means open
 - Derivatives are continuous (not discrete on/off)
+
+**AcceleratedDCPowerFlows (APF) Integration**
+- APF is a direct dependency (sibling package from same lab)
+- Module alias: `const APF = AcceleratedDCPowerFlows` (in PowerModelsDiff module)
+- `to_apf_network(::DCNetwork) → APF.Network`: one-way conversion (APF lacks generators/costs)
+- `apf_ptdf(::DCNetwork)` and `apf_lodf(::DCNetwork)`: convenience PTDF/LODF via APF
+- `ptdf_matrix(::DCPowerFlowState)`: standard PTDF = `-calc_sensitivity(state, :f, :d)`
+- `compare_ptdf(::DCPowerFlowState)`: cross-validates PMD vs APF PTDF
+- Both packages use identical susceptance sign conventions and sort by PM key
+- LODF ↔ switching sensitivity: `LODF[k,e] = -∂f_k/∂sw_e / ∂f_e/∂sw_e` (exact, via Sherman-Morrison)
+- `DCPowerFlowState` uses Cholesky factorization for B_r (inspired by APF), with LU fallback
+- APF is DC-only; no bridge from AC PF to DC PTDF/LODF (future work)
+- Julia ≥ 1.11 required for `[sources]` TOML syntax in Project.toml (used by APF dependency)
 
 **Default Solver**
 - Clarabel for DC OPF, Ipopt for AC OPF

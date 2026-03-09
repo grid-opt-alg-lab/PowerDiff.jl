@@ -694,8 +694,8 @@ function update_switching!(prob::DCOPFProblem, s::AbstractVector)
     length(s) == m || throw(DimensionMismatch("Switching vector length $(length(s)) must match number of branches $m"))
     all(0 .<= s .<= 1) || throw(ArgumentError("Switching values must be in [0,1]"))
 
-    # Invalidate sensitivity cache since parameters changed
-    invalidate!(prob.cache)
+    # Invalidate all cached data including topology-dependent b_r_factor
+    invalidate_topology!(prob.cache)
 
     # Update network switching state
     prob.network.sw .= s

@@ -84,8 +84,9 @@ Solution container for DC OPF problem, storing both primal and dual variables.
 - `mu_lb`, `mu_ub`: Load shedding lower/upper bound duals
 - `gamma_lb`, `gamma_ub`: Phase angle difference lower/upper bound duals
 - `objective`: Optimal objective value
+- `B_r_factor`: Cached factorization of reduced susceptance matrix `B[non_ref, non_ref]`
 """
-struct DCOPFSolution <: AbstractOPFSolution
+struct DCOPFSolution{F<:Factorization{Float64}} <: AbstractOPFSolution
     va::Vector{Float64}
     pg::Vector{Float64}
     f::Vector{Float64}
@@ -101,6 +102,7 @@ struct DCOPFSolution <: AbstractOPFSolution
     gamma_lb::Vector{Float64}
     gamma_ub::Vector{Float64}
     objective::Float64
+    B_r_factor::F
 end
 
 """
@@ -121,7 +123,7 @@ constraint handling.
 - `pg`: Generation vector
 - `d`: Demand vector
 - `f`: Branch flows (computed from va)
-- `B_r_factor`: LU factorization of `B[non_ref, non_ref]`
+- `B_r_factor`: Factorization of `B[non_ref, non_ref]` (Cholesky for inductive networks, LU fallback)
 - `non_ref`: Indices of non-reference buses
 """
 struct DCPowerFlowState{F<:Factorization{Float64}} <: AbstractPowerFlowState
@@ -350,6 +352,28 @@ function calc_susceptance_matrix(network::DCNetwork)
 end
 
 """
+    _factorize_B_r(net::DCNetwork) → (factor, non_ref)
+
+Factorize the reduced susceptance matrix `B[non_ref, non_ref]`.
+
+Uses Cholesky for standard inductive networks (~2x faster), with LU fallback
+for edge cases (capacitive branches or disconnected networks) where B_r is not
+positive definite. Follows the approach of AcceleratedDCPowerFlows.jl.
+"""
+function _factorize_B_r(net::DCNetwork)
+    B = calc_susceptance_matrix(net)
+    non_ref = setdiff(1:net.n, net.ref_bus)
+    B_r = B[non_ref, non_ref]
+    factor = try
+        cholesky(Symmetric(B_r))
+    catch e
+        e isa PosDefException || rethrow()
+        lu(B_r)
+    end
+    return factor, non_ref
+end
+
+"""
 Aggregate generation to bus-level vector (uses ref + id_map).
 """
 function _calc_generation_vector(ref::Dict, id_map::IDMapping)
@@ -405,10 +429,8 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
     # Net injection
     p = Float64.(g .- d)
 
-    # Build reduced susceptance matrix (delete reference bus row/col) and factorize
-    B = calc_susceptance_matrix(net)
-    non_ref = setdiff(1:n, net.ref_bus)
-    F = lu(B[non_ref, non_ref])   # sparse LU (UmfpackLU)
+    # Factorize reduced susceptance matrix (Cholesky with LU fallback)
+    F, non_ref = _factorize_B_r(net)
 
     # Solve reduced system: θ[non_ref] = B_r \ p[non_ref], θ[ref] = 0
     θ = zeros(n)
