@@ -299,6 +299,8 @@ docs/
 - Both packages use identical susceptance sign conventions and sort by PM key
 - LODF ↔ switching sensitivity: `LODF[k,e] = -∂f_k/∂sw_e / ∂f_e/∂sw_e` (exact, via Sherman-Morrison)
 - `DCPowerFlowState` uses Cholesky factorization for B_r (inspired by APF), with LU fallback
+- APF is DC-only; no bridge from AC PF to DC PTDF/LODF (future work)
+- Julia ≥ 1.11 required for `[sources]` TOML syntax in Project.toml (used by APF dependency)
 
 **Default Solver**
 - Clarabel for DC OPF, Ipopt for AC OPF

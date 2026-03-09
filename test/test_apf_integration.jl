@@ -52,27 +52,29 @@ end
     if isnothing(net)
         @test_skip false
     else
+        # Build a fresh DCNetwork with one capacitive branch (positive b)
+        # so B_r is not positive definite and Cholesky falls back to LU.
         dc_net = DCNetwork(net)
-
-        # Make one branch capacitive (positive b) so B_r is not positive definite
-        dc_net.b[1] = abs(dc_net.b[1])
+        b_cap = copy(dc_net.b)
+        b_cap[1] = abs(b_cap[1])
+        dc_net_cap = DCNetwork(dc_net.n, dc_net.m, dc_net.k, dc_net.A, dc_net.G_inc, b_cap;
+            sw=dc_net.sw, fmax=dc_net.fmax, gmax=dc_net.gmax, gmin=dc_net.gmin,
+            angmax=dc_net.angmax, angmin=dc_net.angmin, cq=dc_net.cq, cl=dc_net.cl,
+            c_shed=dc_net.c_shed, ref_bus=dc_net.ref_bus, tau=dc_net.tau)
 
         d = calc_demand_vector(net)
-        state = DCPowerFlowState(dc_net, d)
+        state = DCPowerFlowState(dc_net_cap, d)
 
         # Verify LU fallback was used (sparse lu → UmfpackLU, not LinearAlgebra.LU)
         @test state.B_r_factor isa SparseArrays.UMFPACK.UmfpackLU
 
         # Verify angles match a manual dense solve
-        B = PowerModelsDiff.calc_susceptance_matrix(dc_net)
-        non_ref = setdiff(1:dc_net.n, dc_net.ref_bus)
+        B = PowerModelsDiff.calc_susceptance_matrix(dc_net_cap)
+        non_ref = setdiff(1:dc_net_cap.n, dc_net_cap.ref_bus)
         p = state.pg .- state.d
-        θ_ref = zeros(dc_net.n)
+        θ_ref = zeros(dc_net_cap.n)
         θ_ref[non_ref] = Matrix(B[non_ref, non_ref]) \ p[non_ref]
         @test isapprox(state.va, θ_ref, atol=1e-10)
-
-        # Restore original susceptance
-        dc_net.b[1] = -abs(dc_net.b[1])
     end
 end
 
@@ -230,6 +232,7 @@ end
                     continue  # skip branches with zero self-sensitivity
                 end
 
+                # FullLODF stores the dense LODF matrix in the .matrix field (public API)
                 lodf_col = L.matrix[:, e]
 
                 mask = trues(dc_net.m)
@@ -285,14 +288,22 @@ end
     if isnothing(net)
         @test_skip false
     else
-        dc_net = DCNetwork(net)
+        dc_net_orig = DCNetwork(net)
         e_open = 3
 
         # APF ignores Branch.status in PTDF/LODF — it uses br.b directly.
-        # Zero both sw and b so both packages see the same open-branch topology.
-        b_orig = dc_net.b[e_open]
-        dc_net.sw[e_open] = 0.0
-        dc_net.b[e_open] = 0.0
+        # Build a fresh DCNetwork with sw=0 and b=0 for the open branch so
+        # both packages see the same open-branch topology.
+        sw_open = copy(dc_net_orig.sw)
+        b_open = copy(dc_net_orig.b)
+        sw_open[e_open] = 0.0
+        b_open[e_open] = 0.0
+        dc_net = DCNetwork(dc_net_orig.n, dc_net_orig.m, dc_net_orig.k,
+            dc_net_orig.A, dc_net_orig.G_inc, b_open;
+            sw=sw_open, fmax=dc_net_orig.fmax, gmax=dc_net_orig.gmax,
+            gmin=dc_net_orig.gmin, angmax=dc_net_orig.angmax, angmin=dc_net_orig.angmin,
+            cq=dc_net_orig.cq, cl=dc_net_orig.cl, c_shed=dc_net_orig.c_shed,
+            ref_bus=dc_net_orig.ref_bus, tau=dc_net_orig.tau)
 
         apf_net = to_apf_network(dc_net)
         @test !apf_net.branches[e_open].status
@@ -310,10 +321,6 @@ end
         result = compare_ptdf(state_open)
         @test result.match
         @test result.maxerr < 1e-8
-
-        # Restore originals
-        dc_net.sw[e_open] = 1.0
-        dc_net.b[e_open] = b_orig
     end
 end
 

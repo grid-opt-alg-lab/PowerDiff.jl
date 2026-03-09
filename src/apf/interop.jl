@@ -44,7 +44,12 @@ identity columns through `compute_flow!`.
 """
 function materialize_apf_ptdf(Φ::APF.FullPTDF)
     ptdf = zeros(Φ.E, Φ.N)
-    APF.compute_flow!(ptdf, Matrix(1.0I, Φ.N, Φ.N), Φ)
+    ei = zeros(Φ.N)
+    for i in 1:Φ.N
+        ei[i] = 1.0
+        APF.compute_flow!(@view(ptdf[:, i]), ei, Φ)
+        ei[i] = 0.0
+    end
     return ptdf
 end
 
@@ -60,10 +65,16 @@ Convert a `DCNetwork` to an `APF.Network`.
 APF networks lack generators, costs, and limits, so this is one-way.
 Bus demand is set to zero (PMD separates demand from network topology).
 Branch `status` is derived from switching state: `sw[e] > 0.5`.
+
+Note: `to_apf_network` sets bus demand to zero because PMD separates demand
+from topology. For APF workflows that need demand data (e.g., `compute_flow!`),
+use `APF.from_power_models(pm_data)` directly instead.
 """
 function to_apf_network(net::DCNetwork)
     n, m = net.n, net.m
 
+    # All buses are active: DCNetwork is built from PM.build_ref() which filters
+    # out inactive buses, so every bus in net.n is active by construction.
     buses = [APF.Bus(i, true, 0.0) for i in 1:n]
 
     from_bus = zeros(Int, m)
@@ -119,6 +130,9 @@ end
 
 Cross-validate PMD's PTDF against APF's FullPTDF.
 Returns a named tuple where `match` is true if all entries agree within `atol`.
+
+Note: This is not cheap — it computes two full PTDF matrices (one via PMD's
+sensitivity API, one via APF). Intended for validation, not hot-path use.
 """
 function compare_ptdf(state::DCPowerFlowState; atol::Float64=1e-8)
     pmd_ptdf = ptdf_matrix(state)

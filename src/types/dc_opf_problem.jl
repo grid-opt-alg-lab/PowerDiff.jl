@@ -50,6 +50,7 @@ precomputed at construction time).
 - `dz_dsw`: Full KKT derivative w.r.t. switching (or nothing)
 - `dz_dfmax`: Full KKT derivative w.r.t. flow limits (or nothing)
 - `dz_db`: Full KKT derivative w.r.t. susceptances (or nothing)
+- `b_r_factor`: Cached reduced susceptance factorization (topology-dependent, survives demand changes)
 """
 mutable struct DCSensitivityCache
     solution::Union{Nothing,DCOPFSolution}
@@ -60,6 +61,7 @@ mutable struct DCSensitivityCache
     dz_dsw::Union{Nothing,Matrix{Float64}}
     dz_dfmax::Union{Nothing,Matrix{Float64}}
     dz_db::Union{Nothing,Matrix{Float64}}
+    b_r_factor::Union{Nothing,Factorization{Float64}}
 end
 
 """
@@ -68,13 +70,15 @@ end
 Create an empty sensitivity cache with all fields set to nothing.
 """
 function DCSensitivityCache()
-    return DCSensitivityCache(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
+    return DCSensitivityCache(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
 """
     invalidate!(cache::DCSensitivityCache)
 
-Clear all cached sensitivity data. Called when problem parameters change.
+Clear cached sensitivity data that depends on the current solution.
+The `b_r_factor` field is preserved because it depends only on network topology
+(susceptances and switching), not on demand or the optimization solution.
 """
 function invalidate!(cache::DCSensitivityCache)
     cache.solution = nothing
@@ -85,6 +89,18 @@ function invalidate!(cache::DCSensitivityCache)
     cache.dz_dsw = nothing
     cache.dz_dfmax = nothing
     cache.dz_db = nothing
+    return nothing
+end
+
+"""
+    invalidate_topology!(cache::DCSensitivityCache)
+
+Clear all cached data including topology-dependent `b_r_factor`.
+Called when network topology changes (switching, susceptances).
+"""
+function invalidate_topology!(cache::DCSensitivityCache)
+    invalidate!(cache)
+    cache.b_r_factor = nothing
     return nothing
 end
 
