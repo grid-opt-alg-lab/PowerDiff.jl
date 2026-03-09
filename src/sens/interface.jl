@@ -472,7 +472,7 @@ function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, param::Symbol)
     elseif op === :qg
         return dz_dp[idx.qg, :]
     elseif op === :lmp
-        return dz_dp[idx.nu_p_bal, :]
+        return -dz_dp[idx.nu_p_bal, :]  # LMP = -nu_p_bal, so d(LMP)/dparam = -d(nu_p_bal)/dparam
     else
         throw(ArgumentError("Unknown AC OPF operand: $op"))
     end

@@ -14,7 +14,9 @@
 
 # Locational Marginal Price (LMP) Computation
 #
-# In the B-θ DC OPF formulation, the power balance constraint is:
+# DC OPF (B-θ formulation)
+# -------------------------
+# The power balance constraint is:
 #     G_inc * g + psh - d = B * θ
 # where B = A' * Diag(-b .* sw) * A is the susceptance-weighted Laplacian.
 #
@@ -28,11 +30,26 @@
 #     congestion_component = B_r⁻¹ [A_r' Diag(-b .* sw) (λ_ub - λ_lb) + A_r'(γ_ub - γ_lb)]  (non-ref block)
 #     energy_component = ν_bal - congestion_component  (uniform for connected network)
 #
+# AC OPF (polar formulation)
+# ---------------------------
+# The active power balance constraint at bus i is (JuMP form):
+#     Σ p_arcs == Pg - Pd - Psh
+# where the normalized residual h_P = Σ p_arcs - Pg + Pd + Psh.
+#
+# The Lagrangian uses: L = f - ν_p_bal * h_P  (JuMP/MOI dual sign convention)
+# KKT stationarity for Pg at bus i: cost' + ν_p_bal = 0 → ν_p_bal = -cost' < 0
+#
+# The MATPOWER-convention LMP is the marginal cost of demand (∂f*/∂Pd > 0):
+#     LMP = ∂f*/∂Pd = -ν_p_bal > 0
+#
+# Therefore, for ACOPFSolution:  calc_lmp = -nu_p_bal
+# For the sensitivity:           ∂LMP/∂param = -∂(ν_p_bal)/∂param
+#
 # Sign conventions:
 #     - Our LMPs are positive (cost increases when demand increases)
-#     - PowerModels uses negative LMPs: our_lmp = -pm_lmp
-#     - DCOPFSolution stores standard KKT duals (non-negative for inequality constraints)
-#       JuMP's sign convention for <= constraints is handled at extraction in solve!
+#     - PowerModels/MATPOWER uses negative Lagrange multipliers: our_lmp = -pm_lambda
+#     - DCOPFSolution: LMP = ν_bal > 0 (demand with negative sign in KKT residual)
+#     - ACOPFSolution: LMP = -ν_p_bal > 0 (demand with positive sign in KKT residual)
 
 """
     calc_lmp(sol::DCOPFSolution, net::DCNetwork)
@@ -63,6 +80,49 @@ Solve the problem (if needed) and compute LMPs.
 function calc_lmp(prob::DCOPFProblem)
     sol = solve!(prob)
     return calc_lmp(sol, prob.network)
+end
+
+"""
+    calc_lmp(sol::ACOPFSolution, prob::ACOPFProblem)
+
+Compute Locational Marginal Prices from AC OPF solution.
+
+Following the MATPOWER convention, the LMP at bus i is the marginal cost of serving
+an additional unit of active power demand at that bus:
+    LMP[i] = ∂f*/∂Pd[i]
+
+In the polar AC OPF formulation, the active power balance constraint is:
+    Σ p_arcs == Pg - Pd - Psh  (JuMP form, normalized residual h_P = Σp - Pg + Pd + Psh)
+
+The Lagrangian uses L = f - ν_p_bal * h_P, giving KKT stationarity:
+    cost' + ν_p_bal = 0  →  ν_p_bal = -cost' < 0
+
+Applying the envelope theorem: LMP = ∂f*/∂Pd = -ν_p_bal > 0.
+Hence `LMP = -sol.nu_p_bal` (negation of the JuMP power-balance dual).
+
+# Returns
+Vector of LMPs (length n), one per bus, in the same units as the generation cost.
+
+# Example
+```julia
+prob = ACOPFProblem(pm_data)
+sol = solve!(prob)
+lmps = calc_lmp(sol, prob)
+```
+"""
+function calc_lmp(sol::ACOPFSolution, prob::ACOPFProblem)
+    return -sol.nu_p_bal
+end
+
+"""
+    calc_lmp(prob::ACOPFProblem)
+
+Ensure the AC OPF is solved and compute LMPs.
+Reuses the cached solution when available.
+"""
+function calc_lmp(prob::ACOPFProblem)
+    sol = _ensure_ac_solved!(prob)
+    return calc_lmp(sol, prob)
 end
 
 """
