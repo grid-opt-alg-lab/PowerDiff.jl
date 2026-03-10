@@ -16,7 +16,7 @@ using Test
 using LinearAlgebra
 using SparseArrays
 using Statistics
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 using ForwardDiff
 using Ipopt
@@ -92,7 +92,7 @@ end
         @test all(sol.f .<= dc_net.fmax .+ 1e-6)      # Flow upper bounds
 
         # Test power balance (approximately)
-        B_mat = PowerModelsDiff.calc_susceptance_matrix(dc_net)
+        B_mat = PowerDiff.calc_susceptance_matrix(dc_net)
         power_imbalance = dc_net.G_inc * sol.pg + sol.psh - d - B_mat * sol.va
         @test norm(power_imbalance) < 1e-4
     end

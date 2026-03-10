@@ -19,7 +19,7 @@
 # - DCPowerFlowState/DCOPFProblem: :d is native (no transform needed)
 # - Introspection includes transform-derived symbols
 
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 using LinearAlgebra
 using Test

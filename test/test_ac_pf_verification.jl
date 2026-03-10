@@ -24,7 +24,7 @@
 # Important: we construct ACPowerFlowState using PowerModels' admittance matrix
 # (Y_pm) to ensure consistency with the solved voltage operating point.
 
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 using ForwardDiff
 using LinearAlgebra

@@ -33,22 +33,22 @@ jobs:
 
       - name: Copy docs to website
         run: |
-          rm -rf _website/_documenter/pmdiff
+          rm -rf _website/_documenter/powerdiff
           mkdir -p _website/_documenter
-          cp -r docs/build _website/_documenter/pmdiff
-          rm -rf _website/__site/research/pmdiff
+          cp -r docs/build _website/_documenter/powerdiff
+          rm -rf _website/__site/research/powerdiff
           mkdir -p _website/__site/research
-          cp -r docs/build _website/__site/research/pmdiff
+          cp -r docs/build _website/__site/research/powerdiff
 
       - name: Commit and push
         run: |
           cd _website
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add _documenter/pmdiff __site/research/pmdiff
+          git add _documenter/powerdiff __site/research/powerdiff
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Update pmdiff docs (auto-deploy)"
+            git commit -m "Update powerdiff docs (auto-deploy)"
             git push
           fi

@@ -14,7 +14,7 @@
 
 # Test AC OPF switching sensitivity
 
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 using LinearAlgebra
 using Test

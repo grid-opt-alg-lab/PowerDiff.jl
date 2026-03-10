@@ -16,7 +16,7 @@
 # Non-Basic Network Tests
 # =============================================================================
 #
-# Verifies that PowerModelsDiff works correctly with non-basic networks
+# Verifies that PowerDiff works correctly with non-basic networks
 # (arbitrary bus/branch/gen IDs, not sequentially renumbered).
 #
 # case5.m has bus IDs [1,2,3,4,10] — bus 10 maps to sequential index 5.
@@ -490,7 +490,7 @@
         ref = PowerModels.build_ref(pm_data)[:it][:pm][:nw][0]
         id_map = IDMapping(ref)
 
-        seq_ref = PowerModelsDiff._remap_ref_to_sequential(ref, id_map)
+        seq_ref = PowerDiff._remap_ref_to_sequential(ref, id_map)
 
         # Sequential ref should have keys 1:n for buses
         n = length(id_map.bus_ids)

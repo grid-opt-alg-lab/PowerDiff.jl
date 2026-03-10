@@ -5,7 +5,7 @@ This guide walks through the main workflows: DC power flow, DC OPF with LMP anal
 ## Setup
 
 ```julia
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 
 # Load a MATPOWER case (make_basic_network is optional)

@@ -20,7 +20,7 @@ using Test
 using LinearAlgebra
 using SparseArrays
 using Statistics
-using PowerModelsDiff
+using PowerDiff
 using PowerModels
 using ForwardDiff
 using Ipopt
