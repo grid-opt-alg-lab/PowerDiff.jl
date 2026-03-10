@@ -304,8 +304,8 @@ docs/
 - Julia ≥ 1.9 required (package extensions introduced in 1.9)
 
 **Default Solver**
-- Clarabel for DC OPF, Ipopt for AC OPF
-- Override: `DCOPFProblem(net, d; optimizer=Ipopt.Optimizer)`
+- Ipopt for both DC OPF and AC OPF
+- Override: `DCOPFProblem(net, d; optimizer=HiGHS.Optimizer)`
 
 **Testing**
 - `runtests.jl` contains ~800 lines of inline tests plus `include()` calls for 13 additional test files

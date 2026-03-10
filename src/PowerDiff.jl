@@ -17,7 +17,6 @@ module PowerDiff
 using LinearAlgebra
 using SparseArrays
 using JuMP
-using Clarabel
 using Ipopt
 using ForwardDiff
 import PowerModels

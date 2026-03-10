@@ -169,4 +169,4 @@ lmps = calc_sensitivity(ac_prob, :lmp, :d)   # dLMP/dd
 
 ## Solver
 
-The AC OPF uses [Ipopt](https://github.com/coin-or/Ipopt) as the default nonlinear programming solver, accessed via JuMP. Clarabel (a convex solver) is explicitly rejected since AC OPF is nonconvex.
+The AC OPF uses [Ipopt](https://github.com/coin-or/Ipopt) as the default nonlinear programming solver, accessed via JuMP.

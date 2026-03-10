@@ -91,11 +91,11 @@ All AC OPF operands (`:vm`, `:va`, `:pg`, `:qg`, `:lmp`) for the same parameter 
 
 ### DC OPF
 
-Default solver is Clarabel (interior-point conic). Override with:
+Default solver is Ipopt. Override with any JuMP-compatible QP solver:
 
 ```julia
-using Ipopt
-prob = DCOPFProblem(dc_net, d; optimizer=Ipopt.Optimizer)
+using HiGHS
+prob = DCOPFProblem(dc_net, d; optimizer=HiGHS.Optimizer)
 ```
 
 ### AC OPF

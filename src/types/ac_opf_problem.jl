@@ -247,13 +247,6 @@ function ACOPFProblem(
     optimizer=Ipopt.Optimizer,
     silent::Bool=true
 )
-    if optimizer === Clarabel.Optimizer
-        throw(ArgumentError(
-            "Clarabel is a convex solver and cannot solve nonconvex AC OPF. " *
-            "Use Ipopt.Optimizer (default) or another NLP solver."
-        ))
-    end
-
     isnothing(network.ref) && error(
         "ACOPFProblem requires an ACNetwork constructed from a PowerModels dict " *
         "(network.ref must not be nothing). Use ACOPFProblem(pm_data::Dict) instead.")

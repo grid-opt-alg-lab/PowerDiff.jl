@@ -61,8 +61,7 @@ See the [Getting Started guide](https://samueltalkington.com/research/powerdiff/
 
 - [PowerModels.jl](https://github.com/lanl-ansi/PowerModels.jl) — Power system modeling
 - [JuMP.jl](https://github.com/jump-dev/JuMP.jl) — Optimization modeling
-- [Clarabel.jl](https://github.com/oxfordcontrol/Clarabel.jl) — Default DC OPF solver
-- [Ipopt.jl](https://github.com/jump-dev/Ipopt.jl) — AC OPF solver
+- [Ipopt.jl](https://github.com/jump-dev/Ipopt.jl) — Default solver for DC and AC OPF
 - [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) — Automatic differentiation
 
 ## License
