@@ -52,7 +52,7 @@ Invalid combinations throw ArgumentError.
 - `:sw`: Switching states
 - `:cq`, `:cl`: Cost coefficients (DC OPF, AC OPF)
 - `:fmax`: Flow limits (DC OPF, AC OPF)
-- `:b`: Susceptances (DC OPF)
+- `:b`: Susceptances (DC PF, DC OPF)
 - `:p`: Active power injection (AC PF)
 - `:q`: Reactive power injection (AC PF)
 - `:va`: Voltage phase angle (AC PF, as parameter for Jacobian blocks)
@@ -155,7 +155,7 @@ _formulation_symbol(state) = throw(ArgumentError(
 # =============================================================================
 
 _valid_combinations(::Type{<:DCPowerFlowState}) = [
-    (:va, :d), (:f, :d), (:va, :sw), (:f, :sw),
+    (:va, :d), (:f, :d), (:va, :sw), (:f, :sw), (:va, :b), (:f, :b),
 ]
 
 _valid_combinations(::Type{<:DCOPFProblem}) = [
@@ -312,13 +312,12 @@ function _calc_sensitivity_matrix(state::DCPowerFlowState, op::Symbol, param::Sy
     if param === :d
         sens = calc_sensitivity_demand(state)
         return op === :va ? sens.dva_dd : sens.df_dd
-    else  # :sw
+    elseif param === :sw
         sens = calc_sensitivity_switching(state)
-        if op === :va
-            return sens.dva_dsw
-        else  # :f
-            return sens.df_dsw
-        end
+        return op === :va ? sens.dva_dsw : sens.df_dsw
+    else  # :b
+        sens = calc_sensitivity_susceptance(state)
+        return op === :va ? sens.dva_db : sens.df_db
     end
 end
 
@@ -462,7 +461,7 @@ end
 
 function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, param::Symbol)
     dz_dp = _get_ac_dz_dparam!(prob, param)
-    idx = ac_kkt_indices(prob)
+    idx = kkt_indices(prob)
     if op === :va
         return dz_dp[idx.va, :]
     elseif op === :vm

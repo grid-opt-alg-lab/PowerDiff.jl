@@ -77,3 +77,50 @@ Concrete subtypes:
 - `ACOPFProblem`: AC OPF problem (polar formulation)
 """
 abstract type AbstractOPFProblem end
+
+# =============================================================================
+# KKT Interface (abstract declarations for multiple dispatch)
+# =============================================================================
+
+"""
+    calc_kkt_jacobian(prob::AbstractOPFProblem; sol=nothing)
+
+Compute the KKT Jacobian ∂K/∂z for an OPF problem. Dispatches to the
+appropriate formulation (DC or AC).
+"""
+function calc_kkt_jacobian end
+
+"""
+    kkt_dims(prob::AbstractOPFProblem) → Int
+
+Total dimension of the KKT system for the given OPF problem.
+"""
+function kkt_dims end
+
+"""
+    kkt_indices(prob::AbstractOPFProblem) → NamedTuple
+
+Index ranges for primal and dual variables in the flattened KKT vector.
+"""
+function kkt_indices end
+
+"""
+    flatten_variables(sol::AbstractOPFSolution, prob::AbstractOPFProblem) → Vector
+
+Flatten primal and dual variables into a single KKT vector.
+"""
+function flatten_variables end
+
+"""
+    unflatten_variables(z::AbstractVector, prob::AbstractOPFProblem) → NamedTuple
+
+Extract primal and dual variables from a flattened KKT vector.
+"""
+function unflatten_variables end
+
+"""
+    kkt(z::AbstractVector, prob::AbstractOPFProblem, args...) → Vector
+
+Evaluate KKT residual at point z for the given OPF problem.
+"""
+function kkt end

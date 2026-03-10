@@ -20,7 +20,7 @@
 #   J1 = ∂P/∂θ, J2 = ∂P/∂|V|, J3 = ∂Q/∂θ, J4 = ∂Q/∂|V|
 #
 # Uses ForwardDiff on polar power flow equations with full Y matrix
-# (includes shunts, unlike Laplacian-based versions in pf_eqns.jl).
+# (includes shunts and transformer models).
 
 """
     calc_power_flow_jacobian(state::ACPowerFlowState; bus_types=nothing)

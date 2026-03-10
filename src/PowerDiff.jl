@@ -41,13 +41,6 @@ include("types/sensitivities.jl")   # Sensitivity{T} (public API wrapper)
 include("types/show.jl")           # Pretty-printing (Base.show methods)
 
 # =============================================================================
-# Power flow and graph utilities
-# =============================================================================
-include("pf/admittance_matrix.jl")
-include("graphs/laplacian.jl")
-include("pf/pf_eqns.jl")
-
-# =============================================================================
 # DC OPF (B-theta formulation) - solving and KKT conditions
 # =============================================================================
 include("prob/dc_opf.jl")

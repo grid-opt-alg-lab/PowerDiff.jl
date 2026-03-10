@@ -37,7 +37,7 @@ _ref_bus_indices(prob::ACOPFProblem) = sort(collect(keys(prob.ref[:ref_buses])))
 # =============================================================================
 
 """
-    ac_kkt_dims(prob::ACOPFProblem)
+    kkt_dims(prob::ACOPFProblem)
 
 Compute the dimension of the flattened KKT variable vector for AC OPF.
 
@@ -53,14 +53,14 @@ The KKT system includes:
 
 Total: 6n + 12m + 6k + n_ref
 """
-function ac_kkt_dims(prob::ACOPFProblem)
+function kkt_dims(prob::ACOPFProblem)
     n, m, k = prob.network.n, prob.network.m, prob.n_gen
     n_ref = length(prob.ref[:ref_buses])
     return 6n + 12m + 6k + n_ref
 end
 
 """
-    ac_kkt_indices(n, m, k, n_ref) → NamedTuple
+    kkt_indices(n, m, k, n_ref) → NamedTuple
 
 Compute all KKT variable indices from problem dimensions.
 Single source of truth for index calculations.
@@ -77,7 +77,7 @@ Single source of truth for index calculations.
 # Returns
 NamedTuple with index ranges for each variable block.
 """
-function ac_kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
+function kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
     i = 0
     # Primal
     idx_va = (i+1):(i+n); i += n
@@ -131,9 +131,9 @@ function ac_kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
     )
 end
 
-function ac_kkt_indices(prob::ACOPFProblem)
+function kkt_indices(prob::ACOPFProblem)
     n_ref = length(prob.ref[:ref_buses])
-    ac_kkt_indices(prob.network.n, prob.network.m, prob.n_gen, n_ref)
+    kkt_indices(prob.network.n, prob.network.m, prob.n_gen, n_ref)
 end
 
 # =============================================================================
@@ -141,12 +141,12 @@ end
 # =============================================================================
 
 """
-    ac_flatten_variables(sol::ACOPFSolution, prob::ACOPFProblem)
+    flatten_variables(sol::ACOPFSolution, prob::ACOPFProblem)
 
 Flatten solution primal and dual variables into a single vector for KKT evaluation.
-Ordering matches `ac_kkt_indices`.
+Ordering matches `kkt_indices`.
 """
-function ac_flatten_variables(sol::ACOPFSolution, prob::ACOPFProblem)
+function flatten_variables(sol::ACOPFSolution, prob::ACOPFProblem)
     return vcat(
         sol.va, sol.vm, sol.pg, sol.qg,
         sol.nu_p_bal, sol.nu_q_bal, sol.nu_ref_bus,
@@ -160,18 +160,18 @@ function ac_flatten_variables(sol::ACOPFSolution, prob::ACOPFProblem)
 end
 
 """
-    ac_unflatten_variables(z::AbstractVector, prob::ACOPFProblem)
+    unflatten_variables(z::AbstractVector, prob::ACOPFProblem)
 
 Unflatten KKT variable vector into named components.
 
 # Returns
 NamedTuple with fields for all primal and dual variables.
 """
-function ac_unflatten_variables(z::AbstractVector, prob::ACOPFProblem)
-    ac_unflatten_variables(z, ac_kkt_indices(prob))
+function unflatten_variables(z::AbstractVector, prob::ACOPFProblem)
+    unflatten_variables(z, kkt_indices(prob))
 end
 
-function ac_unflatten_variables(z::AbstractVector, idx::NamedTuple)
+function unflatten_variables(z::AbstractVector, idx::NamedTuple)
     return (
         va = z[idx.va], vm = z[idx.vm], pg = z[idx.pg], qg = z[idx.qg],
         nu_p_bal = z[idx.nu_p_bal], nu_q_bal = z[idx.nu_q_bal], nu_ref_bus = z[idx.nu_ref_bus],
@@ -192,7 +192,7 @@ end
 # =============================================================================
 
 """
-    calc_ac_kkt_jacobian(prob::ACOPFProblem; sol=nothing)
+    calc_kkt_jacobian(prob::ACOPFProblem; sol=nothing)
 
 Compute the Jacobian of the KKT operator using ForwardDiff.
 
@@ -203,12 +203,12 @@ Compute the Jacobian of the KKT operator using ForwardDiff.
 # Returns
 Matrix ∂K/∂z where z is the flattened variable vector.
 """
-function calc_ac_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothing}=nothing)
+function calc_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothing}=nothing)
     if isnothing(sol)
         sol = _ensure_ac_solved!(prob)
     end
 
-    z0 = ac_flatten_variables(sol, prob)
+    z0 = flatten_variables(sol, prob)
     sw = prob.network.sw
 
     # Pre-extract all parameters so ForwardDiff closure avoids Dict lookups
@@ -219,14 +219,14 @@ function calc_ac_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothi
     cl0 = _extract_gen_cl(prob)
     fmax0 = _extract_branch_fmax(prob)
 
-    # Pre-compute indices and constants so ac_kkt doesn't recompute them
+    # Pre-compute indices and constants so kkt() doesn't recompute them
     # on every ForwardDiff evaluation
-    idx = ac_kkt_indices(prob)
+    idx = kkt_indices(prob)
     constants = _extract_kkt_constants(prob)
     prob.cache.kkt_constants = constants
 
     J = ForwardDiff.jacobian(
-        z -> ac_kkt(z, prob, sw; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0,
+        z -> kkt(z, prob, sw; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0,
                     idx=idx, constants=constants),
         z0
     )
@@ -507,7 +507,7 @@ end
 # =============================================================================
 
 """
-    ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
+    kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector)
 
 Evaluate the KKT conditions for AC OPF at the given variable vector.
 
@@ -521,13 +521,13 @@ Returns a vector of KKT residuals (should be zero at optimum).
 2. Primal feasibility: power balance, reference bus
 3. Complementary slackness for all inequality constraints
 """
-function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
+function kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
                 pd=nothing, qd=nothing, cq=nothing, cl=nothing, fmax=nothing,
                 idx=nothing, constants=nothing)
     if isnothing(idx)
-        idx = ac_kkt_indices(prob)
+        idx = kkt_indices(prob)
     end
-    vars = ac_unflatten_variables(z, idx)
+    vars = unflatten_variables(z, idx)
     net = prob.network
     ref = prob.ref
     n, m, k = net.n, net.m, prob.n_gen
@@ -644,7 +644,7 @@ function ac_kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
 end
 
 # Convenience method using prob's switching state
-ac_kkt(z::AbstractVector, prob::ACOPFProblem) = ac_kkt(z, prob, prob.network.sw)
+kkt(z::AbstractVector, prob::ACOPFProblem) = kkt(z, prob, prob.network.sw)
 
 # =============================================================================
 # Parameter Extraction Functions
@@ -763,25 +763,25 @@ const _AC_PARAM_EXTRACT = Dict{Symbol, Function}(
     :fmax => _extract_branch_fmax,
 )
 
-# Maps external parameter symbols to ac_kkt keyword argument names
+# Maps external parameter symbols to kkt() keyword argument names
 # (e.g., user-facing :d becomes the internal :pd kwarg for active demand)
 const _PARAM_KWARG_MAP = Dict{Symbol, Symbol}(
     :d => :pd, :qd => :qd, :cq => :cq, :cl => :cl, :fmax => :fmax,
 )
 
 """
-    calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol)
+    calc_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol)
 
 Compute ∂K/∂param via ForwardDiff for any supported parameter symbol.
 Returns matrix of size (kkt_dims × param_dims).
 """
-function calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol)
+function calc_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol)
     haskey(_AC_PARAM_EXTRACT, param) || throw(ArgumentError(
         "Unknown AC OPF parameter: $param. Valid: $(keys(_AC_PARAM_EXTRACT))"))
-    z0 = ac_flatten_variables(sol, prob)
+    z0 = flatten_variables(sol, prob)
     sw = prob.network.sw
     p0 = _AC_PARAM_EXTRACT[param](prob)
-    idx = ac_kkt_indices(prob)
+    idx = kkt_indices(prob)
     constants = prob.cache.kkt_constants
     if isnothing(constants)
         constants = _extract_kkt_constants(prob)
@@ -799,7 +799,7 @@ function calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, para
 
     if param === :sw
         return ForwardDiff.jacobian(
-            s -> ac_kkt(z0, prob, s; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0,
+            s -> kkt(z0, prob, s; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0,
                         idx=idx, constants=constants), p0)
     else
         kw = _PARAM_KWARG_MAP[param]
@@ -808,7 +808,7 @@ function calc_ac_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, para
         delete!(all_params, kw)
         fixed_nt = (; (k => v for (k, v) in all_params)...)
         return ForwardDiff.jacobian(
-            x -> ac_kkt(z0, prob, sw; NamedTuple{(kw,)}((x,))..., fixed_nt...,
+            x -> kkt(z0, prob, sw; NamedTuple{(kw,)}((x,))..., fixed_nt...,
                         idx=idx, constants=constants), p0)
     end
 end
@@ -839,7 +839,7 @@ Returns the LU factorization for efficient repeated solves.
 function _ensure_ac_kkt_factor!(prob::ACOPFProblem)
     if isnothing(prob.cache.kkt_factor)
         sol = _ensure_ac_solved!(prob)
-        J_z = calc_ac_kkt_jacobian(prob; sol=sol)
+        J_z = calc_kkt_jacobian(prob; sol=sol)
         prob.cache.kkt_factor = try
             lu(J_z)
         catch e
@@ -882,7 +882,7 @@ function _get_ac_dz_dparam!(prob::ACOPFProblem, param::Symbol)::Matrix{Float64}
     if isnothing(cached)
         kkt_lu = _ensure_ac_kkt_factor!(prob)
         sol = _ensure_ac_solved!(prob)
-        J_p = calc_ac_kkt_jacobian_param(prob, sol, param)
+        J_p = calc_kkt_jacobian_param(prob, sol, param)
         ldiv!(kkt_lu, J_p)
         lmul!(-1, J_p)
         setfield!(prob.cache, field, J_p)

@@ -22,6 +22,9 @@
 # of Node Voltages and Line Currents in Unbalanced Radial Electrical
 # Distribution Networks", IEEE Trans. Smart Grid, vol. 4, no. 2, pp. 741-750, 2013.
 
+# Zero-voltage threshold: buses with |v| below this are treated as de-energized
+const VOLTAGE_ZERO_TOL = 1e-6
+
 # =============================================================================
 # Voltage-Power Sensitivity
 # =============================================================================
@@ -199,7 +202,7 @@ function _solve_voltage_sensitivities(A_lu, v_, d, rhs_offset)
     abs2_v_safe = abs2.(v_safe)
     conj_v_safe = conj.(v_safe)
     for k in 1:d
-        if abs(v_[k]) > 1e-6
+        if abs(v_[k]) > VOLTAGE_ZERO_TOL
             fill!(b, 0.0)
             b[rhs_offset + k] = 1.0
             ldiv!(x, A_lu, b)

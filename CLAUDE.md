@@ -84,7 +84,7 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 - `:sw` - Switching states
 - `:cq`, `:cl` - Cost coefficients (DC OPF, AC OPF)
 - `:fmax` - Flow limits (DC OPF, AC OPF)
-- `:b` - Susceptances (DC OPF)
+- `:b` - Susceptances (DC PF, DC OPF)
 - `:p`, `:q` - Power injections (AC PF)
 - `:va` - Voltage phase angle (AC PF, Jacobian block parameter)
 - `:vm` - Voltage magnitude (AC PF, Jacobian block parameter)
@@ -95,6 +95,7 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 pf_state = DCPowerFlowState(net, d)
 dva_dd = calc_sensitivity(pf_state, :va, :d)    # Sensitivity{Float64}, .formulation == :dcpf
 df_dsw = calc_sensitivity(pf_state, :f, :sw)     # Sensitivity{Float64}, .formulation == :dcpf
+dva_db = calc_sensitivity(pf_state, :va, :b)     # Sensitivity{Float64}, .formulation == :dcpf
 
 # DC OPF (has LMP because it has duals)
 prob = DCOPFProblem(net, d)
@@ -192,9 +193,9 @@ kkt_dims(net)                  # Total KKT dimension
 flatten_variables(sol, prob)   # Solution -> vector
 calc_kkt_jacobian(prob)        # Sparse Jacobian d(KKT)/dz
 
-# AC OPF (ForwardDiff Jacobian)
-ac_kkt_dims(prob)              # Total KKT dimension
-calc_ac_kkt_jacobian(prob)     # Dense Jacobian via ForwardDiff
+# AC OPF (ForwardDiff Jacobian — same unified API)
+kkt_dims(ac_prob)              # Total KKT dimension
+calc_kkt_jacobian(ac_prob)     # Dense Jacobian via ForwardDiff
 ```
 
 ## File Organization

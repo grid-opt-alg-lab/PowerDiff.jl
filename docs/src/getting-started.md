@@ -41,6 +41,8 @@ dva_dd = calc_sensitivity(pf_state, :va, :d)   # dtheta/dd (n x n)
 df_dsw  = calc_sensitivity(pf_state, :f, :sw)   # df/dsw (m x m)
 dva_dsw = calc_sensitivity(pf_state, :va, :sw)  # dtheta/dsw (n x m)
 df_dd  = calc_sensitivity(pf_state, :f, :d)    # df/dd (m x n)
+dva_db = calc_sensitivity(pf_state, :va, :b)   # dtheta/db (n x m)
+df_db  = calc_sensitivity(pf_state, :f, :b)    # df/db (m x m)
 ```
 
 Each result is a [`Sensitivity{T}`](@ref) that acts like a matrix but carries metadata:

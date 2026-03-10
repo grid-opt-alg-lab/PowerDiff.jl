@@ -204,7 +204,7 @@ using Test
 
         pf_state = DCPowerFlowState(net, demand)
         @test operand_symbols(pf_state) == [:va, :f]
-        @test parameter_symbols(pf_state) == [:d, :sw]
+        @test parameter_symbols(pf_state) == [:d, :sw, :b]
 
         prob = DCOPFProblem(net, demand)
         @test operand_symbols(prob) == [:va, :pg, :f, :psh, :lmp]

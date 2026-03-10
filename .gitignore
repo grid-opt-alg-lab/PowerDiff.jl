@@ -8,6 +8,9 @@ Manifest.toml
 docs/build/
 docs/Manifest.toml
 
+# Claude Code
+.claude/
+
 # Playwright MCP
 .playwright-mcp/
 

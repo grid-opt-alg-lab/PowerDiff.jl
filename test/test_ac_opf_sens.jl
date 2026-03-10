@@ -90,15 +90,15 @@ using Test
     @testset "KKT residual at optimum" begin
         prob = ACOPFProblem(pm_data; silent=true)
         sol = solve!(prob)
-        z0 = ac_flatten_variables(sol, prob)
-        K = ac_kkt(z0, prob)
-        @test length(K) == ac_kkt_dims(prob)
+        z0 = flatten_variables(sol, prob)
+        K = kkt(z0, prob)
+        @test length(K) == kkt_dims(prob)
 
         # Full KKT residual should be small (bounded by solver tolerance)
         @test norm(K) < 1e-2
 
         # Individual components
-        idx = ac_kkt_indices(prob)
+        idx = kkt_indices(prob)
         @test norm(K[idx.va]) < 1e-2          # va stationarity
         @test norm(K[idx.vm]) < 1e-2          # vm stationarity
         @test norm(K[idx.pg]) < 1e-6          # pg stationarity (exact: linear)

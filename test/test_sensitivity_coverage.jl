@@ -27,7 +27,7 @@ using Test
     pm_data = PowerModels.parse_file(file)
     net_data = PowerModels.make_basic_network(pm_data)
 
-    @testset "DC Power Flow — all 4 combinations" begin
+    @testset "DC Power Flow — all 6 combinations" begin
         net = DCNetwork(net_data)
         d = calc_demand_vector(net_data)
         pf = DCPowerFlowState(net, d)
@@ -37,6 +37,8 @@ using Test
             (:f,  :d, (net.m, net.n)),
             (:va, :sw, (net.n, net.m)),
             (:f,  :sw, (net.m, net.m)),
+            (:va, :b, (net.n, net.m)),
+            (:f,  :b, (net.m, net.m)),
         ]
 
         for (op, param, expected_size) in combos

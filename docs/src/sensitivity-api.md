@@ -35,19 +35,19 @@ Parameter symbols specify what we differentiate with respect to.
 | `:sw` | Switching states | DCPowerFlowState, DCOPFProblem, ACOPFProblem |
 | `:cq`, `:cl` | Cost coefficients (quadratic, linear) | DCOPFProblem, ACOPFProblem |
 | `:fmax` | Flow limits | DCOPFProblem, ACOPFProblem |
-| `:b` | Susceptances | DCOPFProblem |
+| `:b` | Susceptances | DCPowerFlowState, DCOPFProblem |
 | `:p`, `:q` | Power injections (active, reactive) | ACPowerFlowState |
 | `:va` | Voltage phase angle | ACPowerFlowState (Jacobian block parameter) |
 | `:vm` | Voltage magnitude | ACPowerFlowState (Jacobian block parameter) |
 
 ## Valid Combinations
 
-### DC Power Flow (4 combinations)
+### DC Power Flow (6 combinations)
 
-| | `:d` | `:sw` |
-|---|---|---|
-| `:va` | ✓ | ✓ |
-| `:f` | ✓ | ✓ |
+| | `:d` | `:sw` | `:b` |
+|---|---|---|---|
+| `:va` | ✓ | ✓ | ✓ |
+| `:f` | ✓ | ✓ | ✓ |
 
 ### DC OPF (30 combinations)
 

@@ -122,28 +122,9 @@ J = PD.calc_kkt_jacobian(prob)          # Sparse Jacobian dK/dz
 dim = PD.kkt_dims(dc_net)              # KKT dimension
 idx = PD.kkt_indices(dc_net)           # Named index ranges
 
-# AC OPF
-z = PD.ac_flatten_variables(sol, prob)
-J = PD.calc_ac_kkt_jacobian(prob)       # Dense Jacobian via ForwardDiff
-dim = PD.ac_kkt_dims(prob)             # KKT dimension
-idx = PD.ac_kkt_indices(prob)          # Named index ranges
-```
-
-## Graph Utilities (Qualified)
-
-Internal graph and power flow equation utilities are available via qualified access:
-
-```julia
-# Admittance representation
-PD.VectorizedAdmittanceMatrix(Y)
-PD.vectorize_laplacian_weights(Y)
-PD.laplacian(G, B, n)
-PD.complete_incidence_matrix(n)
-PD.calc_incidence_matrix(net)
-
-# Power flow equations (vectorized)
-PD.p(v, G, B)      # Real power injection
-PD.q(v, G, B)      # Reactive power injection
-PD.p_polar(vm, δ, G, B)
-PD.q_polar(vm, δ, G, B)
+# AC OPF — same unified API
+z = PD.flatten_variables(sol, ac_prob)
+J = PD.calc_kkt_jacobian(ac_prob)       # Dense Jacobian via ForwardDiff
+dim = PD.kkt_dims(ac_prob)             # KKT dimension
+idx = PD.kkt_indices(ac_prob)          # Named index ranges
 ```
