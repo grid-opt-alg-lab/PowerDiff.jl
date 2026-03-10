@@ -48,7 +48,7 @@ makedocs(
         "Advanced Topics" => "advanced.md",
         "API Reference" => "api.md",
     ],
-    warnonly = [:missing_docs],
+    warnonly = [],
 )
 
 if site_build

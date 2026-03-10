@@ -7,14 +7,23 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        julia-version: ['1.11', '1']
-        os: [ubuntu-latest]
+        julia-version: ['1.9', '1.11', '1']
+        os: [ubuntu-latest, macos-latest]
+        exclude:
+          # Only test 1.9 on Ubuntu (compat floor check)
+          - os: macos-latest
+            julia-version: '1.9'
+        include:
+          - julia-version: 'nightly'
+            os: ubuntu-latest
+    continue-on-error: ${{ matrix.julia-version == 'nightly' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.julia-version }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1

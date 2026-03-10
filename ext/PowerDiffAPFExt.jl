@@ -12,6 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+module PowerDiffAPFExt
+
+using PowerDiff
+import AcceleratedDCPowerFlows as APF
+using SparseArrays
+
 # =============================================================================
 # AcceleratedDCPowerFlows Interop
 # =============================================================================
@@ -26,23 +32,12 @@
 # -----------------------------------------------------------------------------
 
 """
-    ptdf_matrix(state::DCPowerFlowState) → Matrix{Float64}
-
-Return the standard PTDF matrix (`∂f/∂p`) from a DC power flow state.
-
-PD's `calc_sensitivity(state, :f, :d)` computes `∂f/∂d = -PTDF` because
-`p = g - d ⟹ ∂p/∂d = -I`. This function negates to recover the standard
-PTDF sign convention: `PTDF = ∂f/∂p`.
-"""
-ptdf_matrix(state::DCPowerFlowState) = -Matrix(calc_sensitivity(state, :f, :d))
-
-"""
     materialize_apf_ptdf(Φ::APF.FullPTDF) → Matrix{Float64}
 
 Materialize a dense PTDF matrix from an APF `FullPTDF` object by injecting
 identity columns through `compute_flow!`.
 """
-function materialize_apf_ptdf(Φ::APF.FullPTDF)
+function PowerDiff.materialize_apf_ptdf(Φ::APF.FullPTDF)
     ptdf = zeros(Φ.E, Φ.N)
     ei = zeros(Φ.N)
     for i in 1:Φ.N
@@ -70,7 +65,7 @@ Note: `to_apf_network` sets bus demand to zero because PD separates demand
 from topology. For APF workflows that need demand data (e.g., `compute_flow!`),
 use `APF.from_power_models(pm_data)` directly instead.
 """
-function to_apf_network(net::DCNetwork)
+function PowerDiff.to_apf_network(net::PowerDiff.DCNetwork)
     n, m = net.n, net.m
 
     # All buses are active: DCNetwork is built from PM.build_ref() which filters
@@ -107,8 +102,8 @@ end
 Build an APF `FullPTDF` from a `DCNetwork`.
 Keyword arguments are forwarded to `APF.full_ptdf`.
 """
-function apf_ptdf(net::DCNetwork; kwargs...)
-    return APF.full_ptdf(to_apf_network(net); kwargs...)
+function PowerDiff.apf_ptdf(net::PowerDiff.DCNetwork; kwargs...)
+    return APF.full_ptdf(PowerDiff.to_apf_network(net); kwargs...)
 end
 
 """
@@ -117,8 +112,8 @@ end
 Build an APF `FullLODF` from a `DCNetwork`.
 Keyword arguments are forwarded to `APF.full_lodf`.
 """
-function apf_lodf(net::DCNetwork; kwargs...)
-    return APF.full_lodf(to_apf_network(net); kwargs...)
+function PowerDiff.apf_lodf(net::PowerDiff.DCNetwork; kwargs...)
+    return APF.full_lodf(PowerDiff.to_apf_network(net); kwargs...)
 end
 
 # -----------------------------------------------------------------------------
@@ -134,9 +129,11 @@ Returns a named tuple where `match` is true if all entries agree within `atol`.
 Note: This is not cheap — it computes two full PTDF matrices (one via PD's
 sensitivity API, one via APF). Intended for validation, not hot-path use.
 """
-function compare_ptdf(state::DCPowerFlowState; atol::Float64=1e-8)
-    pd_ptdf = ptdf_matrix(state)
-    apf_ptdf_mat = materialize_apf_ptdf(apf_ptdf(state.net))
+function PowerDiff.compare_ptdf(state::PowerDiff.DCPowerFlowState; atol::Float64=1e-8)
+    pd_ptdf = PowerDiff.ptdf_matrix(state)
+    apf_ptdf_mat = PowerDiff.materialize_apf_ptdf(PowerDiff.apf_ptdf(state.net))
     maxerr = maximum(abs, pd_ptdf - apf_ptdf_mat)
     return (match = maxerr < atol, maxerr = maxerr)
 end
+
+end # module PowerDiffAPFExt

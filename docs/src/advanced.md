@@ -106,18 +106,44 @@ Default solver is Ipopt. The `silent` keyword suppresses solver output:
 prob = ACOPFProblem(net; silent=true)
 ```
 
-## KKT System Access
+## KKT System Access (Qualified)
 
-For advanced users, the KKT system is directly accessible:
+KKT internals are available via qualified access (`PowerDiff.function_name`), not exported:
 
 ```julia
+using PowerDiff
+const PD = PowerDiff
+
 # DC OPF
-z = flatten_variables(sol, prob)     # Solution → vector
-vars = unflatten_variables(z, prob)  # Vector → named tuple
-K = kkt(z, prob, d)                  # KKT residuals
-J = calc_kkt_jacobian(prob)          # Sparse Jacobian dK/dz
+z = PD.flatten_variables(sol, prob)     # Solution → vector
+vars = PD.unflatten_variables(z, prob)  # Vector → named tuple
+K = PD.kkt(z, prob, d)                  # KKT residuals
+J = PD.calc_kkt_jacobian(prob)          # Sparse Jacobian dK/dz
+dim = PD.kkt_dims(dc_net)              # KKT dimension
+idx = PD.kkt_indices(dc_net)           # Named index ranges
 
 # AC OPF
-z = ac_flatten_variables(sol, prob)
-J = calc_ac_kkt_jacobian(prob)       # Dense Jacobian via ForwardDiff
+z = PD.ac_flatten_variables(sol, prob)
+J = PD.calc_ac_kkt_jacobian(prob)       # Dense Jacobian via ForwardDiff
+dim = PD.ac_kkt_dims(prob)             # KKT dimension
+idx = PD.ac_kkt_indices(prob)          # Named index ranges
+```
+
+## Graph Utilities (Qualified)
+
+Internal graph and power flow equation utilities are available via qualified access:
+
+```julia
+# Admittance representation
+PD.VectorizedAdmittanceMatrix(Y)
+PD.vectorize_laplacian_weights(Y)
+PD.laplacian(G, B, n)
+PD.complete_incidence_matrix(n)
+PD.calc_incidence_matrix(net)
+
+# Power flow equations (vectorized)
+PD.p(v, G, B)      # Real power injection
+PD.q(v, G, B)      # Reactive power injection
+PD.p_polar(vm, δ, G, B)
+PD.q_polar(vm, δ, G, B)
 ```

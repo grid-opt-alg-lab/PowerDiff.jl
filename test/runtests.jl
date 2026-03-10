@@ -22,6 +22,12 @@ using ForwardDiff
 using Ipopt
 using JuMP: MOI, optimizer_with_attributes
 
+# Import non-exported KKT functions used by tests
+import PowerDiff: kkt, kkt_dims, kkt_indices, calc_kkt_jacobian,
+                  flatten_variables, unflatten_variables,
+                  ac_kkt_dims, ac_kkt_indices, ac_flatten_variables,
+                  ac_unflatten_variables, calc_ac_kkt_jacobian, ac_kkt
+
 PowerModels.silence()
 
 # Use PowerModels' built-in test cases

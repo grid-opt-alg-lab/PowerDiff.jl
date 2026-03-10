@@ -23,7 +23,8 @@ using Test
 
 """Check FD agreement for LMP (dual) sensitivities."""
 function _check_fd_lmp(sol_base, sol_pert, sens, col_idx, ε)
-    fd_lmp = (sol_pert.nu_p_bal - sol_base.nu_p_bal) / ε
+    # LMP = -nu_p_bal (see lmp.jl sign derivation)
+    fd_lmp = -(sol_pert.nu_p_bal - sol_base.nu_p_bal) / ε
     analytical_lmp = Matrix(sens[:lmp])[:, col_idx]
     # Dual variables (LMPs) can have smaller magnitudes than primal
     # operands, so use a looser skip threshold (1e-4 vs 1e-6)

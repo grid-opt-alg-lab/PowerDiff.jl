@@ -227,10 +227,11 @@ src/
 │   ├── voltage.jl              # AC voltage-power sensitivity
 │   ├── current.jl              # AC current sensitivity
 │   └── lmp.jl                  # LMP computation
-├── apf/
-│   └── interop.jl              # AcceleratedDCPowerFlows integration (conversion, PTDF/LODF)
 ├── pf/                         # Power flow equations
 └── graphs/                     # Incidence matrices, Laplacian utilities
+
+ext/
+└── PowerDiffAPFExt.jl          # AcceleratedDCPowerFlows extension (PTDF/LODF, conversion)
 
 test/
 ├── runtests.jl                 # Main test runner (~810 lines inline + includes below)
@@ -290,17 +291,17 @@ docs/
 - Derivatives are continuous (not discrete on/off)
 
 **AcceleratedDCPowerFlows (APF) Integration**
-- APF is a direct dependency (sibling package from same lab)
-- Module alias: `const APF = AcceleratedDCPowerFlows` (in PowerDiff module)
+- APF is a **weak dependency** (package extension in `ext/PowerDiffAPFExt.jl`)
+- Extension loads automatically when `using AcceleratedDCPowerFlows` is called before/after `using PowerDiff`
 - `to_apf_network(::DCNetwork) → APF.Network`: one-way conversion (APF lacks generators/costs)
 - `apf_ptdf(::DCNetwork)` and `apf_lodf(::DCNetwork)`: convenience PTDF/LODF via APF
-- `ptdf_matrix(::DCPowerFlowState)`: standard PTDF = `-calc_sensitivity(state, :f, :d)`
-- `compare_ptdf(::DCPowerFlowState)`: cross-validates PD vs APF PTDF
+- `ptdf_matrix(::DCPowerFlowState)`: standard PTDF = `-calc_sensitivity(state, :f, :d)` (core, no APF needed)
+- `compare_ptdf(::DCPowerFlowState)`: cross-validates PD vs APF PTDF (requires APF extension)
 - Both packages use identical susceptance sign conventions and sort by PM key
 - LODF ↔ switching sensitivity: `LODF[k,e] = -∂f_k/∂sw_e / ∂f_e/∂sw_e` (exact, via Sherman-Morrison)
 - `DCPowerFlowState` uses Cholesky factorization for B_r (inspired by APF), with LU fallback
 - APF is DC-only; no bridge from AC PF to DC PTDF/LODF (future work)
-- Julia ≥ 1.11 required for `[sources]` TOML syntax in Project.toml (used by APF dependency)
+- Julia ≥ 1.9 required (package extensions introduced in 1.9)
 
 **Default Solver**
 - Clarabel for DC OPF, Ipopt for AC OPF

@@ -12,7 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-const APF = PowerDiff.APF
+# Try to load APF — skip extension tests if unavailable
+_apf_available = try
+    @eval using AcceleratedDCPowerFlows
+    true
+catch
+    false
+end
 
 @testset "APF Integration" begin
 
@@ -77,6 +83,39 @@ end
         @test isapprox(state.va, θ_ref, atol=1e-10)
     end
 end
+
+# =========================================================================
+# Standalone ptdf_matrix test (independent of APF)
+# =========================================================================
+@testset "ptdf_matrix == -calc_sensitivity(:f, :d)" begin
+    for case in ["case5.m", "case14.m"]
+        @testset "$case" begin
+            net = load_test_case(case)
+            if isnothing(net)
+                @test_skip false
+                continue
+            end
+            dc_net = DCNetwork(net)
+            d = calc_demand_vector(net)
+            state = DCPowerFlowState(dc_net, d)
+
+            ptdf = ptdf_matrix(state)
+            df_dd = -Matrix(calc_sensitivity(state, :f, :d))
+            @test isapprox(ptdf, df_dd, atol=1e-12)
+        end
+    end
+end
+
+if !_apf_available
+    @info "AcceleratedDCPowerFlows not available — skipping APF extension tests"
+end
+
+# =========================================================================
+# APF-dependent tests (skipped if APF not available)
+# =========================================================================
+if _apf_available
+
+APF = AcceleratedDCPowerFlows
 
 # =========================================================================
 # Network conversion
@@ -173,28 +212,6 @@ end
             result = compare_ptdf(state)
             @test result.match
             @test result.maxerr < 1e-8
-        end
-    end
-end
-
-# =========================================================================
-# Standalone ptdf_matrix test (independent of APF)
-# =========================================================================
-@testset "ptdf_matrix == -calc_sensitivity(:f, :d)" begin
-    for case in ["case5.m", "case14.m"]
-        @testset "$case" begin
-            net = load_test_case(case)
-            if isnothing(net)
-                @test_skip false
-                continue
-            end
-            dc_net = DCNetwork(net)
-            d = calc_demand_vector(net)
-            state = DCPowerFlowState(dc_net, d)
-
-            ptdf = ptdf_matrix(state)
-            df_dd = -Matrix(calc_sensitivity(state, :f, :d))
-            @test isapprox(ptdf, df_dd, atol=1e-12)
         end
     end
 end
@@ -323,5 +340,7 @@ end
         @test result.maxerr < 1e-8
     end
 end
+
+end # if _apf_available
 
 end # @testset "APF Integration"
