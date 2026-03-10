@@ -44,20 +44,19 @@ function calc_sensitivity_switching(state::DCPowerFlowState)
 
     θ_r = state.va[nr]
 
-    # Preallocate
-    dva_dsw = zeros(n, m)
-
-    # For each edge e, compute ∂va/∂swₑ via reduced-Laplacian backsolve
+    # Build all RHS columns at once, then batch-solve
+    n_r = length(nr)
+    RHS = zeros(n_r, m)
     for e in 1:m
-        # Incidence row restricted to non-reference buses (sparse for efficient dot)
         a_e_r = net.A[e, nr]
-
-        # ∂B_r/∂swₑ * θ_r = -bₑ * a_{e,r} * (a_{e,r}' * θ_r)
         coeff = -net.b[e] * dot(a_e_r, θ_r)
-        rhs = Vector(coeff * a_e_r)   # dense RHS for factorization backsolve
-        dva_dsw[nr, e] = -(state.B_r_factor \ rhs)
-        # dva_dsw[ref, e] = 0 by construction
+        RHS[:, e] = Vector(coeff * a_e_r)
     end
+    X = -(state.B_r_factor \ RHS)
+
+    # Embed into full n×m matrix (reference bus rows stay zero)
+    dva_dsw = zeros(n, m)
+    dva_dsw[nr, :] = X
 
     # Flow sensitivity: f = W · A · va where W = Diag(-b ⊙ sw)
     # ∂f/∂swₑ' = W * A * ∂va/∂swₑ' + direct effect on edge e'
@@ -103,20 +102,19 @@ function calc_sensitivity_susceptance(state::DCPowerFlowState)
 
     θ_r = state.va[nr]
 
-    # Preallocate
-    dva_db = zeros(n, m)
-
-    # For each edge e, compute ∂va/∂bₑ via reduced-Laplacian backsolve
+    # Build all RHS columns at once, then batch-solve
+    n_r = length(nr)
+    RHS = zeros(n_r, m)
     for e in 1:m
-        # Incidence row restricted to non-reference buses (sparse for efficient dot)
         a_e_r = net.A[e, nr]
-
-        # ∂B_r/∂bₑ * θ_r = -swₑ * a_{e,r} * (a_{e,r}' * θ_r)
         coeff = -net.sw[e] * dot(a_e_r, θ_r)
-        rhs = Vector(coeff * a_e_r)   # dense RHS for factorization backsolve
-        dva_db[nr, e] = -(state.B_r_factor \ rhs)
-        # dva_db[ref, e] = 0 by construction
+        RHS[:, e] = Vector(coeff * a_e_r)
     end
+    X = -(state.B_r_factor \ RHS)
+
+    # Embed into full n×m matrix (reference bus rows stay zero)
+    dva_db = zeros(n, m)
+    dva_db[nr, :] = X
 
     # Flow sensitivity: f = W · A · va where W = Diag(-b ⊙ sw)
     # ∂f/∂bₑ = W * A * ∂va/∂bₑ + direct effect on edge e

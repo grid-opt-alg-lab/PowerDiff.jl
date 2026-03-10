@@ -127,10 +127,19 @@ export ptdf_matrix
 # APF extension stubs — implemented in ext/PowerDiffAPFExt.jl
 # =============================================================================
 
+const _APF_HINT = "Load AcceleratedDCPowerFlows first: `using AcceleratedDCPowerFlows`"
+
 function to_apf_network end
 function apf_ptdf end
 function apf_lodf end
 function compare_ptdf end
 function materialize_apf_ptdf end
+
+# Fallback methods with informative error when APF is not loaded
+for fn in (:to_apf_network, :apf_ptdf, :apf_lodf, :compare_ptdf, :materialize_apf_ptdf)
+    @eval $fn(args...; kwargs...) = error("$($fn) requires AcceleratedDCPowerFlows. " * _APF_HINT)
+end
+
+export to_apf_network, apf_ptdf, apf_lodf, compare_ptdf, materialize_apf_ptdf
 
 end # module PowerDiff

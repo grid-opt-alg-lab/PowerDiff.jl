@@ -16,8 +16,13 @@
 _apf_available = try
     @eval using AcceleratedDCPowerFlows
     true
-catch
-    false
+catch e
+    # Only skip if the package is genuinely not installed; re-throw real errors
+    if isa(e, ArgumentError) && contains(string(e), "not found")
+        false
+    else
+        rethrow()
+    end
 end
 
 @testset "APF Integration" begin

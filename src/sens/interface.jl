@@ -423,7 +423,7 @@ function _current_magnitude_from_dv(∂v, state::ACPowerFlowState)
         for i in 1:n
             if i != state.idx_slack
                 ∂I = Y_ft * (∂v[f_bus, i] - ∂v[t_bus, i])
-                if abs(I_ℓ) > 1e-6
+                if abs(I_ℓ) > VOLTAGE_ZERO_TOL
                     ∂Im[ℓ, i] = real(∂I * conj(I_ℓ)) / abs(I_ℓ)
                 end
             end
@@ -503,7 +503,7 @@ Includes symbols available via parameter transforms.
 
 # Examples
 ```julia
-parameter_symbols(pf_state)  # [:d, :sw]
+parameter_symbols(pf_state)  # [:d, :sw, :b]
 parameter_symbols(prob)       # [:d, :sw, :cq, :cl, :fmax, :b]  (DCOPFProblem)
 ```
 """

@@ -8,6 +8,8 @@ using LinearAlgebra
 using SparseArrays
 using Test
 
+import PowerDiff: kkt, kkt_indices, flatten_variables
+
 @testset "Phase Angle Difference Duals" begin
 
     # 3-bus network: 1→2, 1→3, 2→3

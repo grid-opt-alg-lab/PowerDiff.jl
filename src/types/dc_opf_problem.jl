@@ -173,6 +173,10 @@ function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Ipopt.Opt
     return prob
 end
 
+"""Check if the optimizer is Ipopt, including when wrapped by optimizer_with_attributes."""
+_is_ipopt_optimizer(opt) = opt === Ipopt.Optimizer
+_is_ipopt_optimizer(opt::MOI.OptimizerWithAttributes) = opt.optimizer_constructor === Ipopt.Optimizer
+
 """
     _rebuild_jump_model!(prob::DCOPFProblem)
 
@@ -191,8 +195,8 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     # Create model
     model = JuMP.Model(prob._optimizer)
     prob._silent && set_silent(model)
-    # Tighten Ipopt tolerances for accurate dual recovery on small QPs
-    if prob._optimizer === Ipopt.Optimizer
+    # Tighten Ipopt tolerances for accurate dual recovery (needed by sensitivity analysis)
+    if _is_ipopt_optimizer(prob._optimizer)
         set_optimizer_attribute(model, "tol", 1e-10)
         set_optimizer_attribute(model, "acceptable_tol", 1e-8)
     end

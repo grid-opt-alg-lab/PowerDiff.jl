@@ -35,8 +35,8 @@
 #       JuMP's sign convention for <= constraints is handled at extraction in solve!
 #
 # Sign conventions (AC OPF):
-#     The power balance constraint is g_P = P_bus + P_d - C_g P_g = 0
-#     (demand positive). JuMP's Lagrangian L = f - ν · g gives ν_p_bal < 0
+#     The power balance constraint is h_P = P_flow + G_s|V|² + P_d - P_g = 0
+#     (demand positive). JuMP's Lagrangian L = f - ν · h gives ν_p_bal < 0
 #     at optimum (since marginal cost is positive). The LMP is the marginal
 #     cost of serving demand: LMP = ∂f*/∂P_d = -ν_p_bal > 0.
 

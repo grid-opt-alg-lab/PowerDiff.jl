@@ -49,6 +49,23 @@ using Test
 
     end
 
+    @testset "AC OPF LMPs are positive" begin
+        prob = ACOPFProblem(pm_data; silent=true)
+        sol = solve!(prob)
+        lmps = calc_lmp(sol, prob)
+        @test all(isfinite, lmps)
+        @test all(lmps .> 0)
+
+        # calc_lmp(prob) convenience: uses cached solution
+        lmps2 = calc_lmp(prob)
+        @test lmps2 == lmps
+
+        # calc_lmp(prob) convenience: auto-solves if no cache
+        prob2 = ACOPFProblem(pm_data; silent=true)
+        lmps3 = calc_lmp(prob2)
+        @test all(lmps3 .> 0)
+    end
+
     @testset "Switching sensitivity computation" begin
         prob = ACOPFProblem(pm_data; silent=true)
 
