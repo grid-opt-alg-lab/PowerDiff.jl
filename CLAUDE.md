@@ -85,7 +85,8 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 - `:sw` - Switching states
 - `:cq`, `:cl` - Cost coefficients (DC OPF, AC OPF)
 - `:fmax` - Flow limits (DC OPF, AC OPF)
-- `:b` - Susceptances (DC PF, DC OPF)
+- `:b` - Branch susceptances (DC PF, DC OPF, AC PF)
+- `:g` - Branch conductances (AC PF)
 - `:p`, `:q` - Power injections (AC PF)
 - `:va` - Voltage phase angle (AC PF, Jacobian block parameter)
 - `:vm` - Voltage magnitude (AC PF, Jacobian block parameter)
@@ -108,6 +109,8 @@ dpg_dcq = calc_sensitivity(prob, :pg, :cq)      # .formulation == :dcopf, .opera
 dvm_dp = calc_sensitivity(ac_state, :vm, :p)    # .formulation == :acpf, .operand == :vm
 dva_dp = calc_sensitivity(ac_state, :va, :p)    # .formulation == :acpf, .operand == :va
 df_dp  = calc_sensitivity(ac_state, :f, :p)     # .formulation == :acpf, .operand == :f
+dvm_dg = calc_sensitivity(ac_state, :vm, :g)    # ∂|V|/∂g (n × m)
+dim_db = calc_sensitivity(ac_state, :im, :b)    # ∂|I|/∂b (m × m)
 J1     = calc_sensitivity(ac_state, :p, :va)    # ∂P/∂θ Jacobian block
 dvm_dd = calc_sensitivity(ac_state, :vm, :d)    # via transform: -∂|V|/∂p
 
@@ -131,7 +134,7 @@ Fields:
 - `matrix`: The sensitivity data (Matrix{T})
 - `formulation`: Symbol (:dcpf, :dcopf, :acpf, :acopf)
 - `operand`: Symbol (:va, :vm, :pg, :qg, :f, :psh, :lmp, :im, :v)
-- `parameter`: Symbol (:d, :sw, :cq, :cl, :fmax, :b, :p, :q)
+- `parameter`: Symbol (:d, :sw, :cq, :cl, :fmax, :b, :g, :p, :q, :va, :vm, :qd)
 - `row_to_id`, `id_to_row`: Row index ↔ element ID
 - `col_to_id`, `id_to_col`: Column index ↔ element ID
 
@@ -227,6 +230,7 @@ src/
 │   ├── flowlimit.jl            # DC OPF flow limit sensitivity (cached)
 │   ├── susceptance.jl          # DC OPF susceptance sensitivity (cached)
 │   ├── voltage.jl              # AC voltage-power sensitivity
+│   ├── topology_ac.jl          # AC PF topology sensitivity (:g, :b)
 │   ├── current.jl              # AC current sensitivity
 │   └── lmp.jl                  # LMP computation
 ├── pf/                         # Power flow equations
@@ -240,6 +244,7 @@ test/
 ├── common.jl                   # Shared helpers: load_test_case, create_2bus_network, etc.
 ├── test_ac_opf_sens.jl         # AC OPF sensitivity tests
 ├── test_ac_pf_verification.jl  # AC PF finite-difference verification
+├── test_ac_topology_sens.jl    # AC PF topology finite-difference verification
 ├── test_sensitivity_coverage.jl # Exhaustive (operand, parameter) coverage tests
 ├── test_dc_opf_verification.jl # DC OPF finite-difference verification
 ├── test_update_switching.jl    # update_switching! correctness tests

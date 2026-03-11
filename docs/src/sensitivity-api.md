@@ -36,7 +36,8 @@ Parameter symbols specify what we differentiate with respect to.
 | `:sw` | Switching states | DCPowerFlowState, DCOPFProblem, ACOPFProblem |
 | `:cq`, `:cl` | Cost coefficients (quadratic, linear) | DCOPFProblem, ACOPFProblem |
 | `:fmax` | Flow limits | DCOPFProblem, ACOPFProblem |
-| `:b` | Susceptances | DCPowerFlowState, DCOPFProblem |
+| `:b` | Branch susceptances | DCPowerFlowState, DCOPFProblem, ACPowerFlowState |
+| `:g` | Branch conductances | ACPowerFlowState |
 | `:p`, `:q` | Power injections (active, reactive) | ACPowerFlowState |
 | `:va` | Voltage phase angle | ACPowerFlowState (Jacobian block parameter) |
 | `:vm` | Voltage magnitude | ACPowerFlowState (Jacobian block parameter) |
@@ -60,19 +61,19 @@ Parameter symbols specify what we differentiate with respect to.
 | `:psh` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `:lmp` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-### AC Power Flow (24 combinations: 14 native + 10 via transforms)
+### AC Power Flow (34 combinations: 24 native + 10 via transforms)
 
-**Native combinations (14):**
+**Native combinations (24):**
 
-| | `:p` | `:q` | `:va` | `:vm` |
-|---|---|---|---|---|
-| `:vm` | ✓ | ✓ | | |
-| `:v` | ✓ | ✓ | | |
-| `:im` | ✓ | ✓ | | |
-| `:va` | ✓ | ✓ | | |
-| `:f` | ✓ | ✓ | | |
-| `:p` | | | ✓ | ✓ |
-| `:q` | | | ✓ | ✓ |
+| | `:p` | `:q` | `:g` | `:b` | `:va` | `:vm` |
+|---|---|---|---|---|---|---|
+| `:vm` | ✓ | ✓ | ✓ | ✓ | | |
+| `:v` | ✓ | ✓ | ✓ | ✓ | | |
+| `:im` | ✓ | ✓ | ✓ | ✓ | | |
+| `:va` | ✓ | ✓ | ✓ | ✓ | | |
+| `:f` | ✓ | ✓ | ✓ | ✓ | | |
+| `:p` | | | | | ✓ | ✓ |
+| `:q` | | | | | ✓ | ✓ |
 
 **Transform-derived combinations (10):**
 
@@ -148,7 +149,8 @@ Transforms are transparent: `calc_sensitivity(state, :vm, :d)` automatically com
 
 ## Symbol Aliases
 
-- `:g` → `:pg` (generator active power)
+- `:g` → `:pg` when used as an operand (generator active power)
+  As a parameter, `:g` means branch conductance in AC power flow.
 - `:pd` → `:d` (demand)
 
 ## Matrix Indexing Conventions

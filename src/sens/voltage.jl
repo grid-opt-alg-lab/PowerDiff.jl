@@ -312,5 +312,27 @@ function _insert_slack_zeros(K::Matrix{T}, idx_slack::Int, ::Type{T}) where T
     return K_full
 end
 
+"""
+    _insert_slack_zero_rows(K::Matrix{T}, idx_slack::Int) where T
+
+Insert a zero row at position `idx_slack` into a `d × cols` matrix,
+producing an `(d+1) × cols` matrix. Unlike `_insert_slack_zeros` which
+inserts both rows AND columns (for square bus×bus matrices), this only
+inserts rows — suitable for operand×parameter matrices where the column
+dimension is branches (not buses).
+"""
+function _insert_slack_zero_rows(K::Matrix{T}, idx_slack::Int) where T
+    d, cols = size(K)
+    n = d + 1
+    K_full = zeros(T, n, cols)
+    row_idx = 1
+    for i in 1:n
+        i == idx_slack && continue
+        K_full[i, :] = K[row_idx, :]
+        row_idx += 1
+    end
+    return K_full
+end
+
 """Return indices 1:n excluding idx, for removing the slack bus from vectors/matrices."""
 _non_slack_indices(n::Int, idx::Int) = [1:idx-1; idx+1:n]

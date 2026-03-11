@@ -840,6 +840,7 @@ include("test_acpf_jacobian.jl")
 include("test_acpf_va_flow.jl")
 include("test_parameter_transforms.jl")
 include("test_ac_opf_all_sens.jl")
+include("test_ac_topology_sens.jl")
 include("test_angle_diff_duals.jl")
 
 include("test_dcpf_susceptance.jl")
