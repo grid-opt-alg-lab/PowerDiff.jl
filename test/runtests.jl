@@ -28,19 +28,7 @@ import PowerDiff: kkt, kkt_dims, kkt_indices, calc_kkt_jacobian,
 
 PowerModels.silence()
 
-# Use PowerModels' built-in test cases
-const PM_DATA_DIR = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
-
-# Helper to load a test case
-function load_test_case(case_name::String)
-    case_path = joinpath(PM_DATA_DIR, case_name)
-    if isfile(case_path)
-        raw = PowerModels.parse_file(case_path)
-        return PowerModels.make_basic_network(raw)
-    else
-        return nothing
-    end
-end
+include("common.jl")
 
 # =============================================================================
 # DC OPF Tests

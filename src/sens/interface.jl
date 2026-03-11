@@ -445,33 +445,21 @@ function _branch_current_from_dv(∂v, state::ACPowerFlowState)
     return ∂I
 end
 
-"""Compute topology direct current term from explicit dependence on branch admittance."""
+"""
+Compute topology direct current term from explicit dependence on branch admittance.
+
+Returns a diagonal m × m matrix: ∂I_ℓ/∂(param)_e = scale · ΔV_ℓ · δ_{ℓe}, where
+scale is -1 for :g and -j for :b. Parallel branches (multiple branches between the
+same bus pair) are not supported — consistent with the Y[f,t] indexing used elsewhere.
+"""
 function _topology_branch_current_direct(state::ACPowerFlowState, param::Symbol)
     net = state.net
     isnothing(net) && throw(ArgumentError(
         "ACPowerFlowState must have an ACNetwork (net field) for topology sensitivities"))
 
-    m = state.m
-    ∂I_direct = zeros(ComplexF64, m, m)
     ΔV = net.A * state.v
-    pair_to_cols = Dict{Tuple{Int,Int}, Vector{Int}}()
-
-    for e in 1:m
-        i, j = net.incidences[e]
-        key = i < j ? (i, j) : (j, i)
-        push!(get!(pair_to_cols, key, Int[]), e)
-    end
-
     scale = param === :g ? ComplexF64(-1.0, 0.0) : ComplexF64(0.0, -1.0)
-    for ℓ in 1:m
-        i, j = net.incidences[ℓ]
-        key = i < j ? (i, j) : (j, i)
-        for e in pair_to_cols[key]
-            ∂I_direct[ℓ, e] = scale * ΔV[ℓ]
-        end
-    end
-
-    return ∂I_direct
+    return Diagonal(scale .* ΔV)
 end
 
 """Project complex branch current sensitivities to current magnitude sensitivities."""
@@ -506,7 +494,7 @@ function _current_magnitude_from_dv(∂v, state::ACPowerFlowState)
     return _current_magnitude_from_dI(_branch_current_from_dv(∂v, state), state)
 end
 
-"""Compute current magnitude sensitivity from pre-computed voltage phasor sensitivity."""
+"""Compute current magnitude sensitivity for topology parameters, including the direct ∂I/∂param term."""
 function _current_magnitude_from_dv(∂v, state::ACPowerFlowState, param::Symbol)
     ∂I = _branch_current_from_dv(∂v, state) + _topology_branch_current_direct(state, param)
     return _current_magnitude_from_dI(∂I, state)
@@ -538,7 +526,7 @@ function _branch_flow_from_dv(∂v, state::ACPowerFlowState)
     return _branch_flow_from_dv_dI(∂v, ∂I, state)
 end
 
-"""Compute branch active power flow sensitivity from pre-computed voltage phasor sensitivity."""
+"""Compute branch flow sensitivity for topology parameters, including the direct ∂I/∂param term."""
 function _branch_flow_from_dv(∂v, state::ACPowerFlowState, param::Symbol)
     ∂I = _branch_current_from_dv(∂v, state) + _topology_branch_current_direct(state, param)
     return _branch_flow_from_dv_dI(∂v, ∂I, state)
