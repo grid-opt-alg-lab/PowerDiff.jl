@@ -144,11 +144,36 @@ end
 Solve the AC OPF problem (if needed) and compute LMPs.
 """
 function calc_lmp(prob::ACOPFProblem)
-    sol = if isnothing(prob.cache.solution)
-        solve!(prob)
-    else
-        prob.cache.solution
-    end
+    sol = _ensure_ac_solved!(prob)
     return calc_lmp(sol, prob)
+end
+
+# =============================================================================
+# AC OPF Reactive Power LMP (QLMP) Computation
+# =============================================================================
+
+"""
+    calc_qlmp(sol::ACOPFSolution, prob::ACOPFProblem)
+
+Compute reactive power Locational Marginal Prices from AC OPF solution.
+
+The QLMP at bus i is the marginal cost of serving an additional unit of reactive
+demand at that bus: QLMP_i = ∂f*/∂Q_d_i = -ν_q_bal_i.
+
+# Returns
+Vector of QLMPs (length n), one per bus.
+"""
+function calc_qlmp(sol::ACOPFSolution, prob::ACOPFProblem)
+    return -sol.nu_q_bal
+end
+
+"""
+    calc_qlmp(prob::ACOPFProblem)
+
+Solve the AC OPF problem (if needed) and compute reactive power LMPs.
+"""
+function calc_qlmp(prob::ACOPFProblem)
+    sol = _ensure_ac_solved!(prob)
+    return calc_qlmp(sol, prob)
 end
 

@@ -40,6 +40,7 @@ Invalid combinations throw ArgumentError.
 - `:psh`: Load shedding (DC OPF only)
 - `:qg`: Generator reactive power (AC OPF)
 - `:lmp`: Locational marginal prices (DC OPF, AC OPF)
+- `:qlmp`: Reactive power locational marginal prices (AC OPF)
 - `:vm`: Voltage magnitude (AC PF, AC OPF)
 - `:im`: Current magnitude (AC PF)
 - `:v`: Complex voltage phasor (AC PF) — returns ComplexF64 elements
@@ -102,13 +103,13 @@ const _PARAMETER_ALIASES = Dict{Symbol, Symbol}(
     :pd => :d,
 )
 
-const _VALID_OPERANDS = Set([:va, :f, :pg, :lmp, :psh, :vm, :im, :v, :qg, :p, :q])
+const _VALID_OPERANDS = Set([:va, :f, :pg, :lmp, :qlmp, :psh, :vm, :im, :v, :qg, :p, :q])
 const _VALID_PARAMETERS = Set([:d, :sw, :cq, :cl, :fmax, :b, :p, :q, :va, :vm, :qd])
 
 function _resolve_operand(s::Symbol)
     s = get(_OPERAND_ALIASES, s, s)
     s in _VALID_OPERANDS || throw(ArgumentError(
-        "Unknown operand symbol :$s. Valid: :va, :f, :pg, :psh, :lmp, :vm, :im, :v, :qg, :p, :q (alias: :g → :pg)"))
+        "Unknown operand symbol :$s. Valid: :va, :f, :pg, :psh, :lmp, :qlmp, :vm, :im, :v, :qg, :p, :q (alias: :g → :pg)"))
     return s
 end
 
@@ -125,7 +126,7 @@ end
 
 # Map operand symbol to element type for rows
 const _OPERAND_ELEMENT = Dict{Symbol, Symbol}(
-    :va => :bus, :vm => :bus, :v => :bus, :lmp => :bus, :psh => :bus,
+    :va => :bus, :vm => :bus, :v => :bus, :lmp => :bus, :qlmp => :bus, :psh => :bus,
     :p => :bus, :q => :bus,
     :f => :branch, :im => :branch,
     :pg => :gen, :qg => :gen,
@@ -175,12 +176,12 @@ _valid_combinations(::Type{<:ACPowerFlowState}) = [
 ]
 
 _valid_combinations(::Type{<:ACOPFProblem}) = [
-    (:vm, :sw), (:va, :sw), (:pg, :sw), (:qg, :sw), (:lmp, :sw),
-    (:vm, :d), (:va, :d), (:pg, :d), (:qg, :d), (:lmp, :d),
-    (:vm, :qd), (:va, :qd), (:pg, :qd), (:qg, :qd), (:lmp, :qd),
-    (:vm, :cq), (:va, :cq), (:pg, :cq), (:qg, :cq), (:lmp, :cq),
-    (:vm, :cl), (:va, :cl), (:pg, :cl), (:qg, :cl), (:lmp, :cl),
-    (:vm, :fmax), (:va, :fmax), (:pg, :fmax), (:qg, :fmax), (:lmp, :fmax),
+    (:vm, :sw), (:va, :sw), (:pg, :sw), (:qg, :sw), (:lmp, :sw), (:qlmp, :sw),
+    (:vm, :d), (:va, :d), (:pg, :d), (:qg, :d), (:lmp, :d), (:qlmp, :d),
+    (:vm, :qd), (:va, :qd), (:pg, :qd), (:qg, :qd), (:lmp, :qd), (:qlmp, :qd),
+    (:vm, :cq), (:va, :cq), (:pg, :cq), (:qg, :cq), (:lmp, :cq), (:qlmp, :cq),
+    (:vm, :cl), (:va, :cl), (:pg, :cl), (:qg, :cl), (:lmp, :cl), (:qlmp, :cl),
+    (:vm, :fmax), (:va, :fmax), (:pg, :fmax), (:qg, :fmax), (:lmp, :fmax), (:qlmp, :fmax),
 ]
 
 _valid_combinations(T::Type) = throw(ArgumentError(
@@ -288,6 +289,10 @@ function calc_sensitivity(state, operand::Symbol, parameter::Symbol)
     col_mapping = _element_mapping(state, col_element)
 
     mat = Matrix(matrix)
+    if any(!isfinite, mat)
+        error("Sensitivity (:$op, :$param) produced non-finite values. " *
+              "The KKT system may be ill-conditioned.")
+    end
     form = _formulation_symbol(state)
     return Sensitivity(mat, form, op, param, row_mapping, col_mapping)
 end
@@ -336,7 +341,9 @@ const _DC_OPF_CACHE_FN = Dict{Symbol, Function}(
 )
 
 function _calc_sensitivity_matrix(prob::DCOPFProblem, op::Symbol, param::Symbol)
-    cache_fn = _DC_OPF_CACHE_FN[param]
+    cache_fn = get(_DC_OPF_CACHE_FN, param) do
+        error("No cached derivative function for DC OPF parameter :$param")
+    end
     dz_dp = cache_fn(prob)
     return _extract_sensitivity(prob, dz_dp, op)
 end
@@ -414,20 +421,26 @@ function _current_magnitude_from_dv(∂v, state::ACPowerFlowState)
     n = state.n
     m = state.m
     ∂Im = zeros(Float64, m, n)
+    n_suppressed = 0
     for (_, br) in state.branch_data
         ℓ = br["index"]
         f_bus = br["f_bus"]
         t_bus = br["t_bus"]
         Y_ft = state.Y[f_bus, t_bus]
         I_ℓ = Y_ft * (v[f_bus] - v[t_bus])
+        if abs(I_ℓ) <= VOLTAGE_ZERO_TOL
+            n_suppressed += 1
+            continue
+        end
         for i in 1:n
             if i != state.idx_slack
                 ∂I = Y_ft * (∂v[f_bus, i] - ∂v[t_bus, i])
-                if abs(I_ℓ) > VOLTAGE_ZERO_TOL
-                    ∂Im[ℓ, i] = real(∂I * conj(I_ℓ)) / abs(I_ℓ)
-                end
+                ∂Im[ℓ, i] = real(∂I * conj(I_ℓ)) / abs(I_ℓ)
             end
         end
+    end
+    if n_suppressed > 0
+        @debug "Current magnitude sensitivity: $n_suppressed branches had |I| < $VOLTAGE_ZERO_TOL; their ∂|I| rows are zero."
     end
     return ∂Im
 end
@@ -472,6 +485,8 @@ function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, param::Symbol)
         return dz_dp[idx.qg, :]
     elseif op === :lmp
         return -dz_dp[idx.nu_p_bal, :]
+    elseif op === :qlmp
+        return -dz_dp[idx.nu_q_bal, :]
     else
         throw(ArgumentError("Unknown AC OPF operand: $op"))
     end

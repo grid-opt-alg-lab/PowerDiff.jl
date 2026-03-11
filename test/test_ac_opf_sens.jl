@@ -66,6 +66,22 @@ using Test
         @test all(lmps3 .> 0)
     end
 
+    @testset "AC OPF QLMPs are finite" begin
+        prob = ACOPFProblem(pm_data; silent=true)
+        sol = solve!(prob)
+        qlmps = calc_qlmp(sol, prob)
+        @test all(isfinite, qlmps)
+
+        # calc_qlmp(prob) convenience: uses cached solution
+        qlmps2 = calc_qlmp(prob)
+        @test qlmps2 == qlmps
+
+        # calc_qlmp(prob) convenience: auto-solves if no cache
+        prob2 = ACOPFProblem(pm_data; silent=true)
+        qlmps3 = calc_qlmp(prob2)
+        @test all(isfinite, qlmps3)
+    end
+
     @testset "Switching sensitivity computation" begin
         prob = ACOPFProblem(pm_data; silent=true)
 
@@ -131,6 +147,7 @@ using Test
         dpg_dsw = calc_sensitivity(prob, :pg, :sw)
         dva_dsw = calc_sensitivity(prob, :va, :sw)
         dqg_dsw = calc_sensitivity(prob, :qg, :sw)
+        dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)
         sol_base = prob.cache.solution
 
         ε = 1e-5
@@ -168,6 +185,15 @@ using Test
             if norm(fd_dqg) > 1e-10
                 rel_error = norm(Matrix(dqg_dsw)[:, e] - fd_dqg) / norm(fd_dqg)
                 @test rel_error < 1e-3
+            end
+
+            # Verify LMP sensitivities (base - pert direction)
+            lmp_base = calc_lmp(sol_base, prob)
+            lmp_pert = calc_lmp(sol_pert, prob_pert)
+            fd_dlmp = (lmp_base - lmp_pert) / ε
+            if norm(fd_dlmp) > 1e-4
+                rel_error = norm(Matrix(dlmp_dsw)[:, e] - fd_dlmp) / norm(fd_dlmp)
+                @test rel_error < 1e-2
             end
         end
     end

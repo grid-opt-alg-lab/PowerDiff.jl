@@ -18,6 +18,7 @@ Operand symbols specify what quantity we differentiate.
 | `:psh` | Load shedding | DCOPFProblem |
 | `:qg` | Generator reactive power | ACOPFProblem |
 | `:lmp` | Locational marginal prices | DCOPFProblem, ACOPFProblem |
+| `:qlmp` | Reactive power locational marginal prices | ACOPFProblem |
 | `:vm` | Voltage magnitude | ACPowerFlowState, ACOPFProblem |
 | `:im` | Current magnitude | ACPowerFlowState |
 | `:v` | Complex voltage phasor | ACPowerFlowState |
@@ -85,7 +86,7 @@ Via `∂/∂d = -∂/∂p` and `∂/∂qd = -∂/∂q` (since `p_net = pg - pd` 
 | `:va` | ✓ | ✓ |
 | `:f` | ✓ | ✓ |
 
-### AC OPF (30 combinations)
+### AC OPF (36 combinations)
 
 | | `:sw` | `:d` | `:qd` | `:cq` | `:cl` | `:fmax` |
 |---|---|---|---|---|---|---|
@@ -94,6 +95,7 @@ Via `∂/∂d = -∂/∂p` and `∂/∂qd = -∂/∂q` (since `p_net = pg - pd` 
 | `:pg` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `:qg` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `:lmp` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `:qlmp` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ## Power Flow Jacobian
 

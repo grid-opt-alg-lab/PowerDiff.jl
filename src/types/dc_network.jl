@@ -368,6 +368,7 @@ function _factorize_B_r(net::DCNetwork)
         cholesky(Symmetric(B_r))
     catch e
         e isa PosDefException || rethrow()
+        @warn "Reduced susceptance matrix B_r is not positive definite; falling back to LU factorization"
         lu(B_r)
     end
     return factor, non_ref

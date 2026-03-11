@@ -24,6 +24,25 @@
 const COMPLEMENTARITY_SNAP_TOL = 1e-6
 
 """
+    _check_solve_status(model, label::String)
+
+Check JuMP model termination status and throw informative errors for common failure modes.
+"""
+function _check_solve_status(model, label::String)
+    status = termination_status(model)
+    status in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED) && return status
+    if status == MOI.INFEASIBLE
+        error("$label is infeasible. Check that demand is feasible given generator capacities and network constraints.")
+    elseif status == MOI.DUAL_INFEASIBLE
+        error("$label is unbounded (dual infeasible). Check cost coefficients and variable bounds.")
+    elseif status in (MOI.ITERATION_LIMIT, MOI.TIME_LIMIT)
+        error("$label solver reached $status. Try increasing solver limits or simplifying the problem.")
+    else
+        error("$label failed with status: $status")
+    end
+end
+
+"""
     _warn_negative_demand(d)
 
 Warn if any demand entries are negative, which makes shedding bounds infeasible.
@@ -54,8 +73,7 @@ function solve!(prob::DCOPFProblem)
 
     optimize!(prob.model)
 
-    status = termination_status(prob.model)
-    status in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED) || error("DC OPF failed with status: $status")
+    _check_solve_status(prob.model, "DC OPF")
 
     # Extract primal variables
     θ_val = value.(prob.va)

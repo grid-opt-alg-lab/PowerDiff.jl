@@ -178,14 +178,14 @@ using Test
         @test_throws ArgumentError calc_sensitivity(state, :pg, :p)
     end
 
-    @testset "AC OPF — all 30 combinations" begin
+    @testset "AC OPF — all 36 combinations" begin
         prob = ACOPFProblem(net_data; silent=true)
 
         n, m, k = prob.network.n, prob.network.m, prob.n_gen
-        operands = [:va, :vm, :pg, :qg, :lmp]
+        operands = [:va, :vm, :pg, :qg, :lmp, :qlmp]
         params = [:sw, :d, :qd, :cq, :cl, :fmax]
 
-        op_sizes = Dict(:va => n, :vm => n, :pg => k, :qg => k, :lmp => n)
+        op_sizes = Dict(:va => n, :vm => n, :pg => k, :qg => k, :lmp => n, :qlmp => n)
         param_sizes = Dict(:sw => m, :d => n, :qd => n, :cq => k, :cl => k, :fmax => m)
 
         for op in operands

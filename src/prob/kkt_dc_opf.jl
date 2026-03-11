@@ -55,7 +55,7 @@ function _ensure_kkt_factor!(prob::DCOPFProblem)
             lu(J_z)   # sparse LU (UmfpackLU)
         catch e
             if e isa LinearAlgebra.SingularException
-                @warn "KKT Jacobian is singular; applying Tikhonov perturbation ($TIKHONOV_EPS)"
+                @warn "KKT Jacobian is singular (likely degenerate complementarity, e.g., generators at bounds); applying Tikhonov perturbation (eps=$TIKHONOV_EPS). Sensitivity accuracy may be reduced."
                 J_reg = J_z + TIKHONOV_EPS * sparse(I, size(J_z, 1), size(J_z, 1))
                 try
                     lu(J_reg)

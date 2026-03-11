@@ -37,8 +37,7 @@ function solve!(prob::ACOPFProblem)
 
     optimize!(prob.model)
 
-    status = termination_status(prob.model)
-    status in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED) || error("AC OPF failed with status: $status")
+    _check_solve_status(prob.model, "AC OPF")
 
     sol = _extract_ac_opf_solution(prob)
 

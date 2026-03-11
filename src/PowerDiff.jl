@@ -96,7 +96,7 @@ export calc_generation_participation_factors, calc_ptdf_from_sensitivity
 export update_switching!
 
 # LMP Functions
-export calc_lmp, calc_congestion_component, calc_energy_component
+export calc_lmp, calc_qlmp, calc_congestion_component, calc_energy_component
 
 # AC OPF Types and Functions
 export ACOPFProblem, ACOPFSolution, ACSensitivityCache

@@ -172,6 +172,13 @@
         @test dva_dd.col_to_id == [1, 2, 3, 4, 10]
         @test all(isfinite, Matrix(dva_dd))
         @test all(isfinite, Matrix(df_dsw))
+
+        # Susceptance sensitivity
+        dva_db = calc_sensitivity(pf_nb, :va, :b)
+        df_db = calc_sensitivity(pf_nb, :f, :b)
+        @test all(isfinite, Matrix(dva_db))
+        @test all(isfinite, Matrix(df_db))
+        @test dva_db.col_to_id == collect(1:dc_nb.m)
     end
 
     # =================================================================

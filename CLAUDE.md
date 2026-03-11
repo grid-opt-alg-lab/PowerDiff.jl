@@ -72,6 +72,7 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 - `:psh` - Load shedding (DC OPF)
 - `:qg` - Generator reactive power (AC OPF)
 - `:lmp` - Locational marginal prices (DC OPF, AC OPF)
+- `:qlmp` - Reactive power locational marginal prices (AC OPF)
 - `:vm` - Voltage magnitude (AC PF, AC OPF)
 - `:im` - Current magnitude (AC PF)
 - `:v` - Complex voltage phasor (AC PF)
@@ -110,7 +111,7 @@ df_dp  = calc_sensitivity(ac_state, :f, :p)     # .formulation == :acpf, .operan
 J1     = calc_sensitivity(ac_state, :p, :va)    # ∂P/∂θ Jacobian block
 dvm_dd = calc_sensitivity(ac_state, :vm, :d)    # via transform: -∂|V|/∂p
 
-# AC OPF (30 combinations: 5 operands × 6 parameters)
+# AC OPF (36 combinations: 6 operands × 6 parameters)
 ac_prob = ACOPFProblem(pm_data)
 dvm_dsw = calc_sensitivity(ac_prob, :vm, :sw)    # .formulation == :acopf, .operand == :vm
 dlmp_dd = calc_sensitivity(ac_prob, :lmp, :d)    # .formulation == :acopf, .operand == :lmp
