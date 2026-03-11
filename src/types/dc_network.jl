@@ -208,6 +208,8 @@ function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,I
         z2 = r^2 + x^2
         if z2 > 1e-10
             b[idx] = -x / z2
+        else
+            @warn "Branch $(orig_id) has near-zero impedance (|z|² = $(z2)); treating as open (zero admittance)."
         end
     end
 
@@ -368,7 +370,7 @@ function _factorize_B_r(net::DCNetwork)
         cholesky(Symmetric(B_r))
     catch e
         e isa PosDefException || rethrow()
-        @warn "Reduced susceptance matrix B_r is not positive definite; falling back to LU factorization"
+        @warn "Reduced susceptance matrix B_r is not positive definite (e.g., capacitive branches or disconnected subnetwork); falling back to LU factorization. Results remain correct."
         lu(B_r)
     end
     return factor, non_ref

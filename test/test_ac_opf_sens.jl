@@ -148,6 +148,7 @@ using Test
         dva_dsw = calc_sensitivity(prob, :va, :sw)
         dqg_dsw = calc_sensitivity(prob, :qg, :sw)
         dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)
+        dqlmp_dsw = calc_sensitivity(prob, :qlmp, :sw)
         sol_base = prob.cache.solution
 
         ε = 1e-5
@@ -193,6 +194,15 @@ using Test
             fd_dlmp = (lmp_base - lmp_pert) / ε
             if norm(fd_dlmp) > 1e-4
                 rel_error = norm(Matrix(dlmp_dsw)[:, e] - fd_dlmp) / norm(fd_dlmp)
+                @test rel_error < 1e-2
+            end
+
+            # Verify QLMP sensitivities
+            qlmp_base = calc_qlmp(sol_base, prob)
+            qlmp_pert = calc_qlmp(sol_pert, prob_pert)
+            fd_dqlmp = (qlmp_base - qlmp_pert) / ε
+            if norm(fd_dqlmp) > 1e-4
+                rel_error = norm(Matrix(dqlmp_dsw)[:, e] - fd_dqlmp) / norm(fd_dqlmp)
                 @test rel_error < 1e-2
             end
         end

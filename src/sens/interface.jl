@@ -325,9 +325,11 @@ function _calc_sensitivity_matrix(state::DCPowerFlowState, op::Symbol, param::Sy
     elseif param === :sw
         sens = calc_sensitivity_switching(state)
         return op === :va ? sens.dva_dsw : sens.df_dsw
-    else  # :b
+    elseif param === :b
         sens = calc_sensitivity_susceptance(state)
         return op === :va ? sens.dva_db : sens.df_db
+    else
+        error("Unhandled DC PF parameter :$param")
     end
 end
 

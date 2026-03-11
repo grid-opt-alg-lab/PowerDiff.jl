@@ -223,6 +223,8 @@ function ACNetwork(net::Dict{String,<:Any}; idx_slack::Union{Nothing,Int}=nothin
         if z2 > 1e-10
             g[ix] = r / z2
             b[ix] = -x / z2
+        else
+            @warn "Branch $(orig_id) has near-zero impedance (|z|² = $(z2)); treating as open (zero admittance)."
         end
     end
 

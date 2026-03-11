@@ -146,10 +146,11 @@ Given the full derivative ``dz/dp``, individual operand sensitivities are extrac
 | `:pg` | ``2n{+}1 \ldots 2n{+}k`` | Active generation |
 | `:qg` | ``2n{+}k{+}1 \ldots 2n{+}2k`` | Reactive generation |
 | `:lmp` | ``2n{+}2k{+}1 \ldots 3n{+}2k`` | Active power balance duals (``\nu_p``) |
+| `:qlmp` | ``3n{+}2k{+}1 \ldots 4n{+}2k`` | Reactive power balance duals (``\nu_q``) |
 
 ## Supported Combinations
 
-The AC OPF supports all 30 operand × parameter combinations:
+The AC OPF supports all 36 operand × parameter combinations (6 operands × 6 parameters):
 
 | | `:sw` | `:d` | `:qd` | `:cq` | `:cl` | `:fmax` |
 |------|-------|------|--------|--------|--------|---------|
@@ -158,6 +159,7 @@ The AC OPF supports all 30 operand × parameter combinations:
 | `:pg` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `:qg` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `:lmp` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `:qlmp` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 ## LMP Computation
 

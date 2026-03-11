@@ -73,7 +73,14 @@ function calc_voltage_power_sensitivities(
     ns = _non_slack_indices(length(v), idx_slack)
     v_ = v[ns]
     d = length(v_)
-    A_lu = lu(A)
+    A_lu = try
+        lu(A)
+    catch e
+        e isa LinearAlgebra.SingularException || rethrow(e)
+        error("Voltage-power Jacobian is singular. " *
+              "This typically indicates voltage collapse, a disconnected subnetwork, " *
+              "or a degenerate operating point (e.g., zero-voltage buses).")
+    end
     ∂v_∂p, ∂vm_∂p, ∂va_∂p = _solve_voltage_sensitivities(A_lu, v_, d, 0)
     ∂v_∂q, ∂vm_∂q, ∂va_∂q = _solve_voltage_sensitivities(A_lu, v_, d, d)
     if full
@@ -133,7 +140,14 @@ function calc_voltage_active_power_sensitivities(
     ns = _non_slack_indices(length(v), idx_slack)
     v_ = v[ns]
     d = length(v_)
-    A_lu = lu(A)
+    A_lu = try
+        lu(A)
+    catch e
+        e isa LinearAlgebra.SingularException || rethrow(e)
+        error("Voltage-power Jacobian is singular. " *
+              "This typically indicates voltage collapse, a disconnected subnetwork, " *
+              "or a degenerate operating point (e.g., zero-voltage buses).")
+    end
     ∂v_∂p, ∂vm_∂p, ∂va_∂p = _solve_voltage_sensitivities(A_lu, v_, d, 0)
     if full
         ∂v_∂p = _insert_slack_zeros(∂v_∂p, idx_slack, ComplexF64)
@@ -164,7 +178,14 @@ function calc_voltage_reactive_power_sensitivities(
     ns = _non_slack_indices(length(v), idx_slack)
     v_ = v[ns]
     d = length(v_)
-    A_lu = lu(A)
+    A_lu = try
+        lu(A)
+    catch e
+        e isa LinearAlgebra.SingularException || rethrow(e)
+        error("Voltage-power Jacobian is singular. " *
+              "This typically indicates voltage collapse, a disconnected subnetwork, " *
+              "or a degenerate operating point (e.g., zero-voltage buses).")
+    end
     ∂v_∂q, ∂vm_∂q, ∂va_∂q = _solve_voltage_sensitivities(A_lu, v_, d, d)
     if full
         ∂v_∂q = _insert_slack_zeros(∂v_∂q, idx_slack, ComplexF64)

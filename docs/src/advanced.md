@@ -85,7 +85,7 @@ The [`ACOPFProblem`](@ref) maintains an `ACSensitivityCache` with:
 - `kkt_factor`: LU factorization of the KKT Jacobian
 - `dz_dsw`, `dz_dd`, `dz_dqd`, `dz_dcq`, `dz_dcl`, `dz_dfmax`: Full KKT derivative matrices
 
-All AC OPF operands (`:vm`, `:va`, `:pg`, `:qg`, `:lmp`) for the same parameter share a single cached `dz_d*` matrix. The KKT factorization is shared across all 6 parameter types.
+All AC OPF operands (`:vm`, `:va`, `:pg`, `:qg`, `:lmp`, `:qlmp`) for the same parameter share a single cached `dz_d*` matrix. The KKT factorization is shared across all 6 parameter types.
 
 ## Solver Configuration
 

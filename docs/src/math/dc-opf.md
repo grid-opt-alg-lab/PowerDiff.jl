@@ -17,6 +17,7 @@ f &= W A \theta & (\nu_{\text{flow}}) \\
 -f_{\max} \leq f &\leq f_{\max} & (\lambda_{\text{lb}}, \lambda_{\text{ub}}) \\
 g_{\min} \leq g &\leq g_{\max} & (\rho_{\text{lb}}, \rho_{\text{ub}}) \\
 0 \leq \text{psh} &\leq d & (\mu_{\text{lb}}, \mu_{\text{ub}}) \\
+\alpha_{\min} \leq A\theta &\leq \alpha_{\max} & (\gamma_{\text{lb}}, \gamma_{\text{ub}}) \\
 \theta_{\text{ref}} &= 0 & (\eta_{\text{ref}})
 \end{aligned}
 ```
@@ -46,20 +47,22 @@ By the implicit function theorem:
 The KKT variable vector ``z`` is structured as:
 
 ```math
-z = [\theta, g, f, \text{psh}, \lambda_{\text{lb}}, \lambda_{\text{ub}}, \rho_{\text{lb}}, \rho_{\text{ub}}, \mu_{\text{lb}}, \mu_{\text{ub}}, \nu_{\text{bal}}, \nu_{\text{flow}}, \eta_{\text{ref}}]
+z = [\theta, g, f, \text{psh}, \lambda_{\text{lb}}, \lambda_{\text{ub}}, \gamma_{\text{lb}}, \gamma_{\text{ub}}, \rho_{\text{lb}}, \rho_{\text{ub}}, \mu_{\text{lb}}, \mu_{\text{ub}}, \nu_{\text{bal}}, \nu_{\text{flow}}, \eta_{\text{ref}}]
 ```
 
-with total dimension ``5n + 4m + 3k + 1``.
+with total dimension ``5n + 6m + 3k + 1``.
 
 ### KKT Conditions
 
 The KKT residual ``K(z, p)`` consists of:
 
-1. **Stationarity w.r.t. ``\theta``**: ``B^\top \nu_{\text{bal}} + (WA)^\top \nu_{\text{flow}} + e_{\text{ref}} \eta_{\text{ref}} = 0``
+1. **Stationarity w.r.t. ``\theta``**: ``B^\top \nu_{\text{bal}} + (WA)^\top \nu_{\text{flow}} + e_{\text{ref}} \eta_{\text{ref}} + A^\top (\gamma_{\text{ub}} - \gamma_{\text{lb}}) = 0``
 2. **Stationarity w.r.t. ``g``**: ``2 C_q g + c_l - G_{\text{inc}}^\top \nu_{\text{bal}} - \rho_{\text{lb}} + \rho_{\text{ub}} = 0``
 3. **Stationarity w.r.t. ``f``**: ``\tau^2 f - \nu_{\text{flow}} - \lambda_{\text{lb}} + \lambda_{\text{ub}} = 0``
 4. **Stationarity w.r.t. psh**: ``c_{\text{shed}} - \nu_{\text{bal}} - \mu_{\text{lb}} + \mu_{\text{ub}} = 0``
-5. **Complementary slackness**: ``\lambda_{\text{lb}} \circ (f + f_{\max}) = 0``, etc.
+5. **Complementary slackness (flow bounds)**: ``\lambda_{\text{lb}} \circ (f + f_{\max}) = 0``, ``\lambda_{\text{ub}} \circ (f_{\max} - f) = 0``
+5b. **Complementary slackness (angle differences)**: ``\gamma_{\text{lb}} \circ (A\theta - \alpha_{\min}) = 0``, ``\gamma_{\text{ub}} \circ (\alpha_{\max} - A\theta) = 0``
+5c. **Complementary slackness (generation/shedding bounds)**: ``\rho \circ (\cdot) = 0``, ``\mu \circ (\cdot) = 0``
 6. **Primal feasibility**: ``G_{\text{inc}} g + \text{psh} - d - B\theta = 0``
 7. **Flow definition**: ``f - WA\theta = 0``
 8. **Reference bus**: ``\theta_{\text{ref}} = 0``
@@ -127,7 +130,7 @@ Locational marginal prices are the power balance duals ``\nu_{\text{bal}}``, dec
 The congestion component is extracted by solving:
 
 ```math
-\text{congestion}[\text{non-ref}] = B_r^{-1} \left(A_r^\top W (\lambda_{\text{ub}}^{\text{std}} - \lambda_{\text{lb}}^{\text{std}})\right)
+\text{congestion}[\text{non-ref}] = B_r^{-1} \left(A_r^\top W (\lambda_{\text{ub}}^{\text{std}} - \lambda_{\text{lb}}^{\text{std}}) + A_r^\top (\gamma_{\text{ub}}^{\text{std}} - \gamma_{\text{lb}}^{\text{std}})\right)
 ```
 
-where ``\lambda^{\text{std}}`` uses the standard sign convention (non-negative for binding constraints). The energy component is uniform across all buses in a connected network and reflects the marginal cost of generation.
+where ``\lambda^{\text{std}}``, ``\gamma^{\text{std}}`` use the standard sign convention (non-negative for binding constraints). The ``\gamma`` terms capture congestion from binding phase angle difference limits. The energy component is uniform across all buses in a connected network and reflects the marginal cost of generation.

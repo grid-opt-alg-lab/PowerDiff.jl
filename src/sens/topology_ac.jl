@@ -112,7 +112,14 @@ function _solve_topology_sensitivities(state::ACPowerFlowState, param::Symbol)
 
     # Build and factorize the LHS (same Jacobian as voltage-power sensitivity)
     A_mat = _build_voltage_sensitivity_matrix(state.v, state.Y, state.idx_slack)
-    A_lu = lu(A_mat)
+    A_lu = try
+        lu(A_mat)
+    catch e
+        e isa LinearAlgebra.SingularException || rethrow(e)
+        error("Voltage-power Jacobian is singular in topology sensitivity computation. " *
+              "This typically indicates voltage collapse, a disconnected subnetwork, " *
+              "or a degenerate operating point (e.g., zero-voltage buses).")
+    end
 
     # Build RHS: 2d × m
     RHS = _build_topology_rhs(state, param)
@@ -123,7 +130,7 @@ function _solve_topology_sensitivities(state::ACPowerFlowState, param::Symbol)
     # Extract complex voltage perturbation (reduced, d × m)
     dv_r = X[1:d, :] + im * X[d+1:2d, :]
 
-    # Project to magnitude and angle
+    # Project to magnitude and angle, zeroing out de-energized buses
     v_safe = ifelse.(abs.(v_) .> eps(Float64), v_, one(ComplexF64))
     abs_v = abs.(v_safe)
     abs2_v = abs2.(v_safe)
@@ -131,6 +138,15 @@ function _solve_topology_sensitivities(state::ACPowerFlowState, param::Symbol)
 
     dvm_r = real.(dv_r .* conj_v) ./ abs_v
     dva_r = imag.(dv_r .* conj_v) ./ abs2_v
+
+    # Zero out rows for de-energized buses (|V| below threshold)
+    for k in 1:d
+        if abs(v_[k]) <= VOLTAGE_ZERO_TOL
+            dv_r[k, :] .= 0
+            dvm_r[k, :] .= 0
+            dva_r[k, :] .= 0
+        end
+    end
 
     # Insert zero rows for slack bus
     dv = _insert_slack_zero_rows(dv_r, state.idx_slack)
