@@ -40,6 +40,7 @@ Invalid combinations throw ArgumentError.
 - `:psh`: Load shedding (DC OPF only)
 - `:qg`: Generator reactive power (AC OPF)
 - `:lmp`: Locational marginal prices (DC OPF, AC OPF)
+- `:qlmp`: Reactive power locational marginal prices (AC OPF)
 - `:vm`: Voltage magnitude (AC PF, AC OPF)
 - `:im`: Current magnitude (AC PF)
 - `:v`: Complex voltage phasor (AC PF) — returns ComplexF64 elements
@@ -52,7 +53,8 @@ Invalid combinations throw ArgumentError.
 - `:sw`: Switching states
 - `:cq`, `:cl`: Cost coefficients (DC OPF, AC OPF)
 - `:fmax`: Flow limits (DC OPF, AC OPF)
-- `:b`: Susceptances (DC OPF)
+- `:b`: Branch susceptances (DC PF, DC OPF, AC PF)
+- `:g`: Branch conductances (AC PF)
 - `:p`: Active power injection (AC PF)
 - `:q`: Reactive power injection (AC PF)
 - `:va`: Voltage phase angle (AC PF, as parameter for Jacobian blocks)
@@ -74,6 +76,7 @@ sens = calc_sensitivity(prob, :lmp, :d)
 
 # AC Power Flow — voltage/current sensitivities
 sens = calc_sensitivity(ac_state, :vm, :p)
+topo = calc_sensitivity(ac_state, :vm, :g)
 
 # AC Power Flow — Jacobian blocks
 J1 = calc_sensitivity(ac_state, :p, :va)   # ∂P/∂θ
@@ -102,20 +105,20 @@ const _PARAMETER_ALIASES = Dict{Symbol, Symbol}(
     :pd => :d,
 )
 
-const _VALID_OPERANDS = Set([:va, :f, :pg, :lmp, :psh, :vm, :im, :v, :qg, :p, :q])
-const _VALID_PARAMETERS = Set([:d, :sw, :cq, :cl, :fmax, :b, :p, :q, :va, :vm, :qd])
+const _VALID_OPERANDS = Set([:va, :f, :pg, :lmp, :qlmp, :psh, :vm, :im, :v, :qg, :p, :q])
+const _VALID_PARAMETERS = Set([:d, :sw, :cq, :cl, :fmax, :b, :g, :p, :q, :va, :vm, :qd])
 
 function _resolve_operand(s::Symbol)
     s = get(_OPERAND_ALIASES, s, s)
     s in _VALID_OPERANDS || throw(ArgumentError(
-        "Unknown operand symbol :$s. Valid: :va, :f, :pg, :psh, :lmp, :vm, :im, :v, :qg, :p, :q (alias: :g → :pg)"))
+        "Unknown operand symbol :$s. Valid: :va, :f, :pg, :psh, :lmp, :qlmp, :vm, :im, :v, :qg, :p, :q (alias: :g → :pg)"))
     return s
 end
 
 function _resolve_parameter(s::Symbol)
     s = get(_PARAMETER_ALIASES, s, s)
     s in _VALID_PARAMETERS || throw(ArgumentError(
-        "Unknown parameter symbol :$s. Valid: :d, :sw, :cq, :cl, :fmax, :b, :p, :q, :va, :vm, :qd (alias: :pd → :d)"))
+        "Unknown parameter symbol :$s. Valid: :d, :sw, :cq, :cl, :fmax, :b, :g, :p, :q, :va, :vm, :qd (alias: :pd → :d)"))
     return s
 end
 
@@ -125,7 +128,7 @@ end
 
 # Map operand symbol to element type for rows
 const _OPERAND_ELEMENT = Dict{Symbol, Symbol}(
-    :va => :bus, :vm => :bus, :v => :bus, :lmp => :bus, :psh => :bus,
+    :va => :bus, :vm => :bus, :v => :bus, :lmp => :bus, :qlmp => :bus, :psh => :bus,
     :p => :bus, :q => :bus,
     :f => :branch, :im => :branch,
     :pg => :gen, :qg => :gen,
@@ -134,7 +137,7 @@ const _OPERAND_ELEMENT = Dict{Symbol, Symbol}(
 # Map parameter symbol to element type for cols
 const _PARAM_ELEMENT = Dict{Symbol, Symbol}(
     :d => :bus, :p => :bus, :q => :bus, :va => :bus, :vm => :bus, :qd => :bus,
-    :sw => :branch, :fmax => :branch, :b => :branch,
+    :sw => :branch, :fmax => :branch, :b => :branch, :g => :branch,
     :cq => :gen, :cl => :gen,
 )
 
@@ -155,7 +158,7 @@ _formulation_symbol(state) = throw(ArgumentError(
 # =============================================================================
 
 _valid_combinations(::Type{<:DCPowerFlowState}) = [
-    (:va, :d), (:f, :d), (:va, :sw), (:f, :sw),
+    (:va, :d), (:f, :d), (:va, :sw), (:f, :sw), (:va, :b), (:f, :b),
 ]
 
 _valid_combinations(::Type{<:DCOPFProblem}) = [
@@ -172,15 +175,18 @@ _valid_combinations(::Type{<:ACPowerFlowState}) = [
     (:va, :p), (:va, :q),
     (:f, :p), (:f, :q),
     (:p, :va), (:p, :vm), (:q, :va), (:q, :vm),
+    # Topology sensitivities (branch conductance/susceptance)
+    (:vm, :g), (:va, :g), (:v, :g), (:f, :g), (:im, :g),
+    (:vm, :b), (:va, :b), (:v, :b), (:f, :b), (:im, :b),
 ]
 
 _valid_combinations(::Type{<:ACOPFProblem}) = [
-    (:vm, :sw), (:va, :sw), (:pg, :sw), (:qg, :sw), (:lmp, :sw),
-    (:vm, :d), (:va, :d), (:pg, :d), (:qg, :d), (:lmp, :d),
-    (:vm, :qd), (:va, :qd), (:pg, :qd), (:qg, :qd), (:lmp, :qd),
-    (:vm, :cq), (:va, :cq), (:pg, :cq), (:qg, :cq), (:lmp, :cq),
-    (:vm, :cl), (:va, :cl), (:pg, :cl), (:qg, :cl), (:lmp, :cl),
-    (:vm, :fmax), (:va, :fmax), (:pg, :fmax), (:qg, :fmax), (:lmp, :fmax),
+    (:vm, :sw), (:va, :sw), (:pg, :sw), (:qg, :sw), (:lmp, :sw), (:qlmp, :sw),
+    (:vm, :d), (:va, :d), (:pg, :d), (:qg, :d), (:lmp, :d), (:qlmp, :d),
+    (:vm, :qd), (:va, :qd), (:pg, :qd), (:qg, :qd), (:lmp, :qd), (:qlmp, :qd),
+    (:vm, :cq), (:va, :cq), (:pg, :cq), (:qg, :cq), (:lmp, :cq), (:qlmp, :cq),
+    (:vm, :cl), (:va, :cl), (:pg, :cl), (:qg, :cl), (:lmp, :cl), (:qlmp, :cl),
+    (:vm, :fmax), (:va, :fmax), (:pg, :fmax), (:qg, :fmax), (:lmp, :fmax), (:qlmp, :fmax),
 ]
 
 _valid_combinations(T::Type) = throw(ArgumentError(
@@ -288,6 +294,10 @@ function calc_sensitivity(state, operand::Symbol, parameter::Symbol)
     col_mapping = _element_mapping(state, col_element)
 
     mat = Matrix(matrix)
+    if any(!isfinite, mat)
+        error("Sensitivity (:$op, :$param) produced non-finite values. " *
+              "The KKT system may be ill-conditioned.")
+    end
     form = _formulation_symbol(state)
     return Sensitivity(mat, form, op, param, row_mapping, col_mapping)
 end
@@ -312,13 +322,14 @@ function _calc_sensitivity_matrix(state::DCPowerFlowState, op::Symbol, param::Sy
     if param === :d
         sens = calc_sensitivity_demand(state)
         return op === :va ? sens.dva_dd : sens.df_dd
-    else  # :sw
+    elseif param === :sw
         sens = calc_sensitivity_switching(state)
-        if op === :va
-            return sens.dva_dsw
-        else  # :f
-            return sens.df_dsw
-        end
+        return op === :va ? sens.dva_dsw : sens.df_dsw
+    elseif param === :b
+        sens = calc_sensitivity_susceptance(state)
+        return op === :va ? sens.dva_db : sens.df_db
+    else
+        error("Unhandled DC PF parameter :$param")
     end
 end
 
@@ -337,7 +348,9 @@ const _DC_OPF_CACHE_FN = Dict{Symbol, Function}(
 )
 
 function _calc_sensitivity_matrix(prob::DCOPFProblem, op::Symbol, param::Symbol)
-    cache_fn = _DC_OPF_CACHE_FN[param]
+    cache_fn = get(_DC_OPF_CACHE_FN, param) do
+        error("No cached derivative function for DC OPF parameter :$param")
+    end
     dz_dp = cache_fn(prob)
     return _extract_sensitivity(prob, dz_dp, op)
 end
@@ -378,6 +391,16 @@ function _calc_sensitivity_matrix(state::ACPowerFlowState, op::Symbol, param::Sy
         return _branch_flow_from_dv(∂v, state)
     end
 
+    # Topology sensitivities (conductance/susceptance)
+    if param in (:g, :b)
+        dv, dvm, dva = _solve_topology_sensitivities(state, param)
+        op === :vm && return dvm
+        op === :va && return dva
+        op === :v  && return dv
+        op === :im && return _current_magnitude_from_dv(dv, state, param)
+        op === :f  && return _branch_flow_from_dv(dv, state, param)
+    end
+
     # Power flow Jacobian blocks (operand is :p or :q, param is :va or :vm)
     if op in (:p, :q) && param in (:va, :vm)
         jac = calc_power_flow_jacobian(state)
@@ -407,40 +430,86 @@ function _voltage_phasor_single_dir(state::ACPowerFlowState, param::Symbol)
     return ∂v
 end
 
-"""Compute current magnitude sensitivity from pre-computed voltage phasor sensitivity."""
-function _current_magnitude_from_dv(∂v, state::ACPowerFlowState)
+"""Compute branch current phasor sensitivity from pre-computed voltage phasor sensitivity."""
+function _branch_current_from_dv(∂v, state::ACPowerFlowState)
+    !isnothing(state.branch_data) || throw(ArgumentError(
+        "ACPowerFlowState must have branch_data for current sensitivities"))
+    m = state.m
+    ncols = size(∂v, 2)
+    ∂I = zeros(ComplexF64, m, ncols)
+    for (_, br) in state.branch_data
+        ℓ = br["index"]
+        f_bus = br["f_bus"]
+        t_bus = br["t_bus"]
+        Y_ft = state.Y[f_bus, t_bus]
+        ∂I[ℓ, :] = Y_ft .* (∂v[f_bus, :] .- ∂v[t_bus, :])
+    end
+    return ∂I
+end
+
+"""
+Compute topology direct current term from explicit dependence on branch admittance.
+
+Returns a diagonal m × m matrix: ∂I_ℓ/∂(param)_e = scale · ΔV_ℓ · δ_{ℓe}, where
+scale is -1 for :g and -j for :b. Parallel branches (multiple branches between the
+same bus pair) are not supported — consistent with the Y[f,t] indexing used elsewhere.
+"""
+function _topology_branch_current_direct(state::ACPowerFlowState, param::Symbol)
+    net = state.net
+    isnothing(net) && throw(ArgumentError(
+        "ACPowerFlowState must have an ACNetwork (net field) for topology sensitivities"))
+
+    ΔV = net.A * state.v
+    scale = param === :g ? ComplexF64(-1.0, 0.0) : ComplexF64(0.0, -1.0)
+    return Diagonal(scale .* ΔV)
+end
+
+"""Project complex branch current sensitivities to current magnitude sensitivities."""
+function _current_magnitude_from_dI(∂I, state::ACPowerFlowState)
     !isnothing(state.branch_data) || throw(ArgumentError(
         "ACPowerFlowState must have branch_data for current sensitivities"))
     v = state.v
-    n = state.n
     m = state.m
-    ∂Im = zeros(Float64, m, n)
+    ncols = size(∂I, 2)
+    ∂Im = zeros(Float64, m, ncols)
+    n_suppressed = 0
     for (_, br) in state.branch_data
         ℓ = br["index"]
         f_bus = br["f_bus"]
         t_bus = br["t_bus"]
         Y_ft = state.Y[f_bus, t_bus]
         I_ℓ = Y_ft * (v[f_bus] - v[t_bus])
-        for i in 1:n
-            if i != state.idx_slack
-                ∂I = Y_ft * (∂v[f_bus, i] - ∂v[t_bus, i])
-                if abs(I_ℓ) > 1e-6
-                    ∂Im[ℓ, i] = real(∂I * conj(I_ℓ)) / abs(I_ℓ)
-                end
-            end
+        if abs(I_ℓ) <= VOLTAGE_ZERO_TOL
+            n_suppressed += 1
+            continue
         end
+        ∂Im[ℓ, :] = real.(∂I[ℓ, :] .* conj(I_ℓ)) ./ abs(I_ℓ)
+    end
+    if n_suppressed > 0
+        @debug "Current magnitude sensitivity: $n_suppressed branches had |I| < $VOLTAGE_ZERO_TOL; their ∂|I| rows are zero."
     end
     return ∂Im
 end
 
-"""Compute branch active power flow sensitivity from pre-computed voltage phasor sensitivity."""
-function _branch_flow_from_dv(∂v, state::ACPowerFlowState)
+"""Compute current magnitude sensitivity from pre-computed voltage phasor sensitivity."""
+function _current_magnitude_from_dv(∂v, state::ACPowerFlowState)
+    return _current_magnitude_from_dI(_branch_current_from_dv(∂v, state), state)
+end
+
+"""Compute current magnitude sensitivity for topology parameters, including the direct ∂I/∂param term."""
+function _current_magnitude_from_dv(∂v, state::ACPowerFlowState, param::Symbol)
+    ∂I = _branch_current_from_dv(∂v, state) + _topology_branch_current_direct(state, param)
+    return _current_magnitude_from_dI(∂I, state)
+end
+
+"""Project voltage/current sensitivities to branch active power flow sensitivities."""
+function _branch_flow_from_dv_dI(∂v, ∂I, state::ACPowerFlowState)
     !isnothing(state.branch_data) || throw(ArgumentError(
         "ACPowerFlowState must have branch_data for flow sensitivities"))
     v = state.v
-    n = state.n
     m = state.m
-    df = zeros(Float64, m, n)
+    ncols = size(∂I, 2)
+    df = zeros(Float64, m, ncols)
     for (_, br) in state.branch_data
         ℓ = br["index"]
         f_bus = br["f_bus"]
@@ -448,12 +517,21 @@ function _branch_flow_from_dv(∂v, state::ACPowerFlowState)
         Y_ft = state.Y[f_bus, t_bus]
         I_ℓ = Y_ft * (v[f_bus] - v[t_bus])
         v_f = v[f_bus]
-        for k in 1:n
-            ∂I = Y_ft * (∂v[f_bus, k] - ∂v[t_bus, k])
-            df[ℓ, k] = real(∂v[f_bus, k] * conj(I_ℓ) + v_f * conj(∂I))
-        end
+        df[ℓ, :] = real.(∂v[f_bus, :] .* conj(I_ℓ) .+ v_f .* conj.(∂I[ℓ, :]))
     end
     return df
+end
+
+"""Compute branch active power flow sensitivity from pre-computed voltage phasor sensitivity."""
+function _branch_flow_from_dv(∂v, state::ACPowerFlowState)
+    ∂I = _branch_current_from_dv(∂v, state)
+    return _branch_flow_from_dv_dI(∂v, ∂I, state)
+end
+
+"""Compute branch flow sensitivity for topology parameters, including the direct ∂I/∂param term."""
+function _branch_flow_from_dv(∂v, state::ACPowerFlowState, param::Symbol)
+    ∂I = _branch_current_from_dv(∂v, state) + _topology_branch_current_direct(state, param)
+    return _branch_flow_from_dv_dI(∂v, ∂I, state)
 end
 
 # =============================================================================
@@ -462,7 +540,7 @@ end
 
 function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, param::Symbol)
     dz_dp = _get_ac_dz_dparam!(prob, param)
-    idx = ac_kkt_indices(prob)
+    idx = kkt_indices(prob)
     if op === :va
         return dz_dp[idx.va, :]
     elseif op === :vm
@@ -472,7 +550,9 @@ function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, param::Symbol)
     elseif op === :qg
         return dz_dp[idx.qg, :]
     elseif op === :lmp
-        return dz_dp[idx.nu_p_bal, :]
+        return -dz_dp[idx.nu_p_bal, :]
+    elseif op === :qlmp
+        return -dz_dp[idx.nu_q_bal, :]
     else
         throw(ArgumentError("Unknown AC OPF operand: $op"))
     end
@@ -504,7 +584,7 @@ Includes symbols available via parameter transforms.
 
 # Examples
 ```julia
-parameter_symbols(pf_state)  # [:d, :sw]
+parameter_symbols(pf_state)  # [:d, :sw, :b]
 parameter_symbols(prob)       # [:d, :sw, :cq, :cl, :fmax, :b]  (DCOPFProblem)
 ```
 """

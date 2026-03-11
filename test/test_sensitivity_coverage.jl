@@ -27,7 +27,7 @@ using Test
     pm_data = PowerModels.parse_file(file)
     net_data = PowerModels.make_basic_network(pm_data)
 
-    @testset "DC Power Flow — all 4 combinations" begin
+    @testset "DC Power Flow — all 6 combinations" begin
         net = DCNetwork(net_data)
         d = calc_demand_vector(net_data)
         pf = DCPowerFlowState(net, d)
@@ -37,6 +37,8 @@ using Test
             (:f,  :d, (net.m, net.n)),
             (:va, :sw, (net.n, net.m)),
             (:f,  :sw, (net.m, net.m)),
+            (:va, :b, (net.n, net.m)),
+            (:f,  :b, (net.m, net.m)),
         ]
 
         for (op, param, expected_size) in combos
@@ -91,13 +93,13 @@ using Test
         @test_throws ArgumentError calc_sensitivity(prob, :qg, :d)
     end
 
-    @testset "AC Power Flow — 14 native + 10 transform = 24 combinations" begin
+    @testset "AC Power Flow — 24 native + 10 transform = 34 combinations" begin
         # Solve AC power flow first
         pf_data = deepcopy(net_data)
         PowerModels.compute_ac_pf!(pf_data)
         state = ACPowerFlowState(pf_data)
 
-        # 14 native combinations
+        # 24 native combinations
         native_combos = [
             # Existing 6
             (:vm, :p, (state.n, state.n)),
@@ -106,17 +108,29 @@ using Test
             (:v,  :q, (state.n, state.n)),
             (:im, :p, (state.m, state.n)),
             (:im, :q, (state.m, state.n)),
-            # New: voltage angle
+            # Voltage angle
             (:va, :p, (state.n, state.n)),
             (:va, :q, (state.n, state.n)),
-            # New: branch flow
+            # Branch flow
             (:f,  :p, (state.m, state.n)),
             (:f,  :q, (state.m, state.n)),
-            # New: Jacobian blocks
+            # Jacobian blocks
             (:p,  :va, (state.n, state.n)),
             (:p,  :vm, (state.n, state.n)),
             (:q,  :va, (state.n, state.n)),
             (:q,  :vm, (state.n, state.n)),
+            # Topology: conductance
+            (:vm, :g, (state.n, state.m)),
+            (:va, :g, (state.n, state.m)),
+            (:v,  :g, (state.n, state.m)),
+            (:f,  :g, (state.m, state.m)),
+            (:im, :g, (state.m, state.m)),
+            # Topology: susceptance
+            (:vm, :b, (state.n, state.m)),
+            (:va, :b, (state.n, state.m)),
+            (:v,  :b, (state.n, state.m)),
+            (:f,  :b, (state.m, state.m)),
+            (:im, :b, (state.m, state.m)),
         ]
 
         for (op, param, expected_size) in native_combos
@@ -176,14 +190,14 @@ using Test
         @test_throws ArgumentError calc_sensitivity(state, :pg, :p)
     end
 
-    @testset "AC OPF — all 30 combinations" begin
+    @testset "AC OPF — all 36 combinations" begin
         prob = ACOPFProblem(net_data; silent=true)
 
         n, m, k = prob.network.n, prob.network.m, prob.n_gen
-        operands = [:va, :vm, :pg, :qg, :lmp]
+        operands = [:va, :vm, :pg, :qg, :lmp, :qlmp]
         params = [:sw, :d, :qd, :cq, :cl, :fmax]
 
-        op_sizes = Dict(:va => n, :vm => n, :pg => k, :qg => k, :lmp => n)
+        op_sizes = Dict(:va => n, :vm => n, :pg => k, :qg => k, :lmp => n, :qlmp => n)
         param_sizes = Dict(:sw => m, :d => n, :qd => n, :cq => k, :cl => k, :fmax => m)
 
         for op in operands

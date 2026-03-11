@@ -100,3 +100,85 @@ function create_3bus_congested_network()
         cl=[10.0, 50.0], cq=[0.0, 0.0],
         ref_bus=1, tau=0.0)
 end
+
+# =============================================================================
+# PQ-Only Newton-Raphson Solver
+#
+# Solves AC power flow treating ALL non-slack buses as PQ (free voltage).
+# Used by finite-difference verification tests to compare against analytical
+# sensitivities, which also treat all non-slack buses as PQ.
+# =============================================================================
+
+"""
+    pf_residual_pq(state, Y_re, Y_im, p_target, q_target, v_slack_re, v_slack_im, idx_slack, n)
+
+Power flow residual in rectangular form. `state` = [v_re[non_slack]; v_im[non_slack]].
+Uses standard convention: S_i = V_i * conj(I_i) where I = Y*V.
+All arguments are real-valued for ForwardDiff compatibility.
+"""
+function pf_residual_pq(state, Y_re, Y_im, p_target, q_target,
+                        v_slack_re, v_slack_im, idx_slack, n)
+    d = n - 1
+    non_slack = [i for i in 1:n if i != idx_slack]
+
+    T = eltype(state)
+    v_re = zeros(T, n)
+    v_im = zeros(T, n)
+    v_re[idx_slack] = v_slack_re
+    v_im[idx_slack] = v_slack_im
+    for (idx, bus) in enumerate(non_slack)
+        v_re[bus] = state[idx]
+        v_im[bus] = state[d + idx]
+    end
+
+    P = zeros(T, n)
+    Q = zeros(T, n)
+    for i in 1:n
+        for k in 1:n
+            I_re = Y_re[i,k]*v_re[k] - Y_im[i,k]*v_im[k]
+            I_im = Y_re[i,k]*v_im[k] + Y_im[i,k]*v_re[k]
+            P[i] += v_re[i]*I_re + v_im[i]*I_im
+            Q[i] += v_im[i]*I_re - v_re[i]*I_im
+        end
+    end
+
+    return [P[non_slack] - p_target; Q[non_slack] - q_target]
+end
+
+"""
+    solve_pf_pq(Y, v_base, p_target, q_target, idx_slack; max_iter=30, tol=1e-12)
+
+Solve AC power flow treating ALL non-slack buses as PQ.
+Uses Newton-Raphson with ForwardDiff Jacobian for independence from analytical code.
+Returns converged complex voltage vector.
+"""
+function solve_pf_pq(Y, v_base, p_target, q_target, idx_slack;
+                     max_iter=30, tol=1e-12)
+    n = length(v_base)
+    non_slack = [i for i in 1:n if i != idx_slack]
+    d = n - 1
+
+    Y_re = real.(Matrix(Y))
+    Y_im = imag.(Matrix(Y))
+    v_slack_re = real(v_base[idx_slack])
+    v_slack_im = imag(v_base[idx_slack])
+
+    state = [real.(v_base[non_slack]); imag.(v_base[non_slack])]
+
+    for _ in 1:max_iter
+        r = pf_residual_pq(state, Y_re, Y_im, p_target, q_target,
+                           v_slack_re, v_slack_im, idx_slack, n)
+        norm(r) < tol && break
+        J = ForwardDiff.jacobian(
+            s -> pf_residual_pq(s, Y_re, Y_im, p_target, q_target,
+                                v_slack_re, v_slack_im, idx_slack, n),
+            state)
+        state = state - J \ r
+    end
+
+    v = copy(v_base)
+    for (idx, bus) in enumerate(non_slack)
+        v[bus] = state[idx] + im * state[d + idx]
+    end
+    return v
+end

@@ -85,17 +85,17 @@ The [`ACOPFProblem`](@ref) maintains an `ACSensitivityCache` with:
 - `kkt_factor`: LU factorization of the KKT Jacobian
 - `dz_dsw`, `dz_dd`, `dz_dqd`, `dz_dcq`, `dz_dcl`, `dz_dfmax`: Full KKT derivative matrices
 
-All AC OPF operands (`:vm`, `:va`, `:pg`, `:qg`, `:lmp`) for the same parameter share a single cached `dz_d*` matrix. The KKT factorization is shared across all 6 parameter types.
+All AC OPF operands (`:vm`, `:va`, `:pg`, `:qg`, `:lmp`, `:qlmp`) for the same parameter share a single cached `dz_d*` matrix. The KKT factorization is shared across all 6 parameter types.
 
 ## Solver Configuration
 
 ### DC OPF
 
-Default solver is Clarabel (interior-point conic). Override with:
+Default solver is Ipopt. Override with any JuMP-compatible QP solver:
 
 ```julia
-using Ipopt
-prob = DCOPFProblem(dc_net, d; optimizer=Ipopt.Optimizer)
+using HiGHS
+prob = DCOPFProblem(dc_net, d; optimizer=HiGHS.Optimizer)
 ```
 
 ### AC OPF
@@ -106,18 +106,25 @@ Default solver is Ipopt. The `silent` keyword suppresses solver output:
 prob = ACOPFProblem(net; silent=true)
 ```
 
-## KKT System Access
+## KKT System Access (Qualified)
 
-For advanced users, the KKT system is directly accessible:
+KKT internals are available via qualified access (`PowerDiff.function_name`), not exported:
 
 ```julia
-# DC OPF
-z = flatten_variables(sol, prob)     # Solution → vector
-vars = unflatten_variables(z, prob)  # Vector → named tuple
-K = kkt(z, prob, d)                  # KKT residuals
-J = calc_kkt_jacobian(prob)          # Sparse Jacobian dK/dz
+using PowerDiff
+const PD = PowerDiff
 
-# AC OPF
-z = ac_flatten_variables(sol, prob)
-J = calc_ac_kkt_jacobian(prob)       # Dense Jacobian via ForwardDiff
+# DC OPF
+z = PD.flatten_variables(sol, prob)     # Solution → vector
+vars = PD.unflatten_variables(z, prob)  # Vector → named tuple
+K = PD.kkt(z, prob, d)                  # KKT residuals
+J = PD.calc_kkt_jacobian(prob)          # Sparse Jacobian dK/dz
+dim = PD.kkt_dims(dc_net)              # KKT dimension
+idx = PD.kkt_indices(dc_net)           # Named index ranges
+
+# AC OPF — same unified API
+z = PD.flatten_variables(sol, ac_prob)
+J = PD.calc_kkt_jacobian(ac_prob)       # Dense Jacobian via ForwardDiff
+dim = PD.kkt_dims(ac_prob)             # KKT dimension
+idx = PD.kkt_indices(ac_prob)          # Named index ranges
 ```

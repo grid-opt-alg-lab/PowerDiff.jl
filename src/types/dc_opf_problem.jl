@@ -142,14 +142,14 @@ end
 # =============================================================================
 
 """
-    DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.Optimizer, silent=true)
+    DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Ipopt.Optimizer, silent=true)
 
 Build a B-θ DC OPF problem for the given network and demand.
 
 # Arguments
 - `network`: DCNetwork containing topology and parameters
 - `d`: Demand vector (length n)
-- `optimizer`: JuMP-compatible optimizer (default: Clarabel, supports Ipopt/HiGHS/Gurobi)
+- `optimizer`: JuMP-compatible optimizer (default: Ipopt, supports HiGHS/Gurobi/etc.)
 - `silent`: Suppress solver output (default: true)
 
 # Example
@@ -160,7 +160,7 @@ prob = DCOPFProblem(dc_net, d)
 solve!(prob)
 ```
 """
-function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.Optimizer, silent::Bool=true)
+function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Ipopt.Optimizer, silent::Bool=true)
     length(d) == network.n || throw(DimensionMismatch("Demand vector length $(length(d)) must match number of buses $(network.n)"))
 
     _warn_negative_demand(d)
@@ -172,6 +172,10 @@ function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Clarabel.
     _rebuild_jump_model!(prob)
     return prob
 end
+
+"""Check if the optimizer is Ipopt, including when wrapped by optimizer_with_attributes."""
+_is_ipopt_optimizer(opt) = opt === Ipopt.Optimizer
+_is_ipopt_optimizer(opt::MOI.OptimizerWithAttributes) = opt.optimizer_constructor === Ipopt.Optimizer
 
 """
     _rebuild_jump_model!(prob::DCOPFProblem)
@@ -191,6 +195,11 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     # Create model
     model = JuMP.Model(prob._optimizer)
     prob._silent && set_silent(model)
+    # Tighten Ipopt tolerances for accurate dual recovery (needed by sensitivity analysis)
+    if _is_ipopt_optimizer(prob._optimizer)
+        set_optimizer_attribute(model, "tol", 1e-10)
+        set_optimizer_attribute(model, "acceptable_tol", 1e-8)
+    end
 
     # Variables
     @variable(model, va[1:n])
@@ -254,7 +263,7 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
 end
 
 """
-    DCOPFProblem(network::DCNetwork; d=nothing, optimizer=Clarabel.Optimizer, silent=true)
+    DCOPFProblem(network::DCNetwork; d=nothing, optimizer=Ipopt.Optimizer, silent=true)
 
 Build a B-θ DC OPF problem from a DCNetwork.
 

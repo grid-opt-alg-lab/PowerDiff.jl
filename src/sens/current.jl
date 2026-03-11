@@ -102,7 +102,7 @@ function calc_current_power_sensitivities(
                 ∂I_∂q[ℓ, i] = Y_ft * (∂v_∂q[f_bus, i] - ∂v_∂q[t_bus, i])
 
                 # Magnitude sensitivity: ∂|I|/∂p = Re(∂I/∂p * conj(I)) / |I|
-                if abs(I_ℓ) > 1e-6
+                if abs(I_ℓ) > VOLTAGE_ZERO_TOL
                     ∂Im_∂p[ℓ, i] = real(∂I_∂p[ℓ, i] * conj(I_ℓ)) / abs(I_ℓ)
                     ∂Im_∂q[ℓ, i] = real(∂I_∂q[ℓ, i] * conj(I_ℓ)) / abs(I_ℓ)
                 end

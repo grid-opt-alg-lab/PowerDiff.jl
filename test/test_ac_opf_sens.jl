@@ -49,6 +49,39 @@ using Test
 
     end
 
+    @testset "AC OPF LMPs are positive" begin
+        prob = ACOPFProblem(pm_data; silent=true)
+        sol = solve!(prob)
+        lmps = calc_lmp(sol, prob)
+        @test all(isfinite, lmps)
+        @test all(lmps .> 0)
+
+        # calc_lmp(prob) convenience: uses cached solution
+        lmps2 = calc_lmp(prob)
+        @test lmps2 == lmps
+
+        # calc_lmp(prob) convenience: auto-solves if no cache
+        prob2 = ACOPFProblem(pm_data; silent=true)
+        lmps3 = calc_lmp(prob2)
+        @test all(lmps3 .> 0)
+    end
+
+    @testset "AC OPF QLMPs are finite" begin
+        prob = ACOPFProblem(pm_data; silent=true)
+        sol = solve!(prob)
+        qlmps = calc_qlmp(sol, prob)
+        @test all(isfinite, qlmps)
+
+        # calc_qlmp(prob) convenience: uses cached solution
+        qlmps2 = calc_qlmp(prob)
+        @test qlmps2 == qlmps
+
+        # calc_qlmp(prob) convenience: auto-solves if no cache
+        prob2 = ACOPFProblem(pm_data; silent=true)
+        qlmps3 = calc_qlmp(prob2)
+        @test all(isfinite, qlmps3)
+    end
+
     @testset "Switching sensitivity computation" begin
         prob = ACOPFProblem(pm_data; silent=true)
 
@@ -90,15 +123,15 @@ using Test
     @testset "KKT residual at optimum" begin
         prob = ACOPFProblem(pm_data; silent=true)
         sol = solve!(prob)
-        z0 = ac_flatten_variables(sol, prob)
-        K = ac_kkt(z0, prob)
-        @test length(K) == ac_kkt_dims(prob)
+        z0 = flatten_variables(sol, prob)
+        K = kkt(z0, prob)
+        @test length(K) == kkt_dims(prob)
 
         # Full KKT residual should be small (bounded by solver tolerance)
         @test norm(K) < 1e-2
 
         # Individual components
-        idx = ac_kkt_indices(prob)
+        idx = kkt_indices(prob)
         @test norm(K[idx.va]) < 1e-2          # va stationarity
         @test norm(K[idx.vm]) < 1e-2          # vm stationarity
         @test norm(K[idx.pg]) < 1e-6          # pg stationarity (exact: linear)
@@ -114,6 +147,8 @@ using Test
         dpg_dsw = calc_sensitivity(prob, :pg, :sw)
         dva_dsw = calc_sensitivity(prob, :va, :sw)
         dqg_dsw = calc_sensitivity(prob, :qg, :sw)
+        dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)
+        dqlmp_dsw = calc_sensitivity(prob, :qlmp, :sw)
         sol_base = prob.cache.solution
 
         ε = 1e-5
@@ -151,6 +186,24 @@ using Test
             if norm(fd_dqg) > 1e-10
                 rel_error = norm(Matrix(dqg_dsw)[:, e] - fd_dqg) / norm(fd_dqg)
                 @test rel_error < 1e-3
+            end
+
+            # Verify LMP sensitivities (base - pert direction)
+            lmp_base = calc_lmp(sol_base, prob)
+            lmp_pert = calc_lmp(sol_pert, prob_pert)
+            fd_dlmp = (lmp_base - lmp_pert) / ε
+            if norm(fd_dlmp) > 1e-4
+                rel_error = norm(Matrix(dlmp_dsw)[:, e] - fd_dlmp) / norm(fd_dlmp)
+                @test rel_error < 1e-2
+            end
+
+            # Verify QLMP sensitivities
+            qlmp_base = calc_qlmp(sol_base, prob)
+            qlmp_pert = calc_qlmp(sol_pert, prob_pert)
+            fd_dqlmp = (qlmp_base - qlmp_pert) / ε
+            if norm(fd_dqlmp) > 1e-4
+                rel_error = norm(Matrix(dqlmp_dsw)[:, e] - fd_dqlmp) / norm(fd_dqlmp)
+                @test rel_error < 1e-2
             end
         end
     end

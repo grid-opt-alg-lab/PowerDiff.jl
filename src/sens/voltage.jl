@@ -22,6 +22,9 @@
 # of Node Voltages and Line Currents in Unbalanced Radial Electrical
 # Distribution Networks", IEEE Trans. Smart Grid, vol. 4, no. 2, pp. 741-750, 2013.
 
+# Zero-voltage threshold: buses with |v| below this are treated as de-energized
+const VOLTAGE_ZERO_TOL = 1e-6
+
 # =============================================================================
 # Voltage-Power Sensitivity
 # =============================================================================
@@ -70,7 +73,14 @@ function calc_voltage_power_sensitivities(
     ns = _non_slack_indices(length(v), idx_slack)
     v_ = v[ns]
     d = length(v_)
-    A_lu = lu(A)
+    A_lu = try
+        lu(A)
+    catch e
+        e isa LinearAlgebra.SingularException || rethrow(e)
+        error("Voltage-power Jacobian is singular. " *
+              "This typically indicates voltage collapse, a disconnected subnetwork, " *
+              "or a degenerate operating point (e.g., zero-voltage buses).")
+    end
     ∂v_∂p, ∂vm_∂p, ∂va_∂p = _solve_voltage_sensitivities(A_lu, v_, d, 0)
     ∂v_∂q, ∂vm_∂q, ∂va_∂q = _solve_voltage_sensitivities(A_lu, v_, d, d)
     if full
@@ -130,7 +140,14 @@ function calc_voltage_active_power_sensitivities(
     ns = _non_slack_indices(length(v), idx_slack)
     v_ = v[ns]
     d = length(v_)
-    A_lu = lu(A)
+    A_lu = try
+        lu(A)
+    catch e
+        e isa LinearAlgebra.SingularException || rethrow(e)
+        error("Voltage-power Jacobian is singular. " *
+              "This typically indicates voltage collapse, a disconnected subnetwork, " *
+              "or a degenerate operating point (e.g., zero-voltage buses).")
+    end
     ∂v_∂p, ∂vm_∂p, ∂va_∂p = _solve_voltage_sensitivities(A_lu, v_, d, 0)
     if full
         ∂v_∂p = _insert_slack_zeros(∂v_∂p, idx_slack, ComplexF64)
@@ -161,7 +178,14 @@ function calc_voltage_reactive_power_sensitivities(
     ns = _non_slack_indices(length(v), idx_slack)
     v_ = v[ns]
     d = length(v_)
-    A_lu = lu(A)
+    A_lu = try
+        lu(A)
+    catch e
+        e isa LinearAlgebra.SingularException || rethrow(e)
+        error("Voltage-power Jacobian is singular. " *
+              "This typically indicates voltage collapse, a disconnected subnetwork, " *
+              "or a degenerate operating point (e.g., zero-voltage buses).")
+    end
     ∂v_∂q, ∂vm_∂q, ∂va_∂q = _solve_voltage_sensitivities(A_lu, v_, d, d)
     if full
         ∂v_∂q = _insert_slack_zeros(∂v_∂q, idx_slack, ComplexF64)
@@ -199,7 +223,7 @@ function _solve_voltage_sensitivities(A_lu, v_, d, rhs_offset)
     abs2_v_safe = abs2.(v_safe)
     conj_v_safe = conj.(v_safe)
     for k in 1:d
-        if abs(v_[k]) > 1e-6
+        if abs(v_[k]) > VOLTAGE_ZERO_TOL
             fill!(b, 0.0)
             b[rhs_offset + k] = 1.0
             ldiv!(x, A_lu, b)
@@ -306,6 +330,28 @@ function _insert_slack_zeros(K::Matrix{T}, idx_slack::Int, ::Type{T}) where T
         row_idx += 1
     end
 
+    return K_full
+end
+
+"""
+    _insert_slack_zero_rows(K::Matrix{T}, idx_slack::Int) where T
+
+Insert a zero row at position `idx_slack` into a `d × cols` matrix,
+producing an `(d+1) × cols` matrix. Unlike `_insert_slack_zeros` which
+inserts both rows AND columns (for square bus×bus matrices), this only
+inserts rows — suitable for operand×parameter matrices where the column
+dimension is branches (not buses).
+"""
+function _insert_slack_zero_rows(K::Matrix{T}, idx_slack::Int) where T
+    d, cols = size(K)
+    n = d + 1
+    K_full = zeros(T, n, cols)
+    row_idx = 1
+    for i in 1:n
+        i == idx_slack && continue
+        K_full[i, :] = K[row_idx, :]
+        row_idx += 1
+    end
     return K_full
 end
 

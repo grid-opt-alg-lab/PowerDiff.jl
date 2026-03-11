@@ -31,87 +31,8 @@ using LinearAlgebra
 using SparseArrays
 using Test
 
-"""
-    _pf_residual(state, Y_re, Y_im, p_target, q_target, v_slack_re, v_slack_im, idx_slack, n)
-
-Power flow residual in rectangular form. `state` = [v_re[non_slack]; v_im[non_slack]].
-Uses standard convention: S_i = V_i * conj(I_i) where I = Y*V.
-All arguments are real-valued for ForwardDiff compatibility.
-"""
-function _pf_residual(state, Y_re, Y_im, p_target, q_target,
-                      v_slack_re, v_slack_im, idx_slack, n)
-    d = n - 1
-    non_slack = [i for i in 1:n if i != idx_slack]
-
-    T = eltype(state)
-    v_re = zeros(T, n)
-    v_im = zeros(T, n)
-    v_re[idx_slack] = v_slack_re
-    v_im[idx_slack] = v_slack_im
-    for (idx, bus) in enumerate(non_slack)
-        v_re[bus] = state[idx]
-        v_im[bus] = state[d + idx]
-    end
-
-    # S_i = V_i * conj(I_i), I = Y*V
-    # P_i = v_re_i * Re(I_i) + v_im_i * Im(I_i)
-    # Q_i = v_im_i * Re(I_i) - v_re_i * Im(I_i)
-    # where Re(I_i) = Σ(G_ik*v_re_k - B_ik*v_im_k)
-    #       Im(I_i) = Σ(G_ik*v_im_k + B_ik*v_re_k)
-    P = zeros(T, n)
-    Q = zeros(T, n)
-    for i in 1:n
-        for k in 1:n
-            I_re = Y_re[i,k]*v_re[k] - Y_im[i,k]*v_im[k]
-            I_im = Y_re[i,k]*v_im[k] + Y_im[i,k]*v_re[k]
-            P[i] += v_re[i]*I_re + v_im[i]*I_im
-            Q[i] += v_im[i]*I_re - v_re[i]*I_im
-        end
-    end
-
-    return [P[non_slack] - p_target; Q[non_slack] - q_target]
-end
-
-"""
-    _solve_pf_pq(Y, v_base, p_target, q_target, idx_slack)
-
-Solve AC power flow treating ALL non-slack buses as PQ.
-Uses Newton-Raphson with ForwardDiff Jacobian for independence from analytical code.
-Returns converged complex voltage vector.
-"""
-function _solve_pf_pq(Y, v_base, p_target, q_target, idx_slack;
-                      max_iter=30, tol=1e-12)
-    n = length(v_base)
-    non_slack = [i for i in 1:n if i != idx_slack]
-    d = n - 1
-
-    Y_re = real.(Matrix(Y))
-    Y_im = imag.(Matrix(Y))
-    v_slack_re = real(v_base[idx_slack])
-    v_slack_im = imag(v_base[idx_slack])
-
-    state = [real.(v_base[non_slack]); imag.(v_base[non_slack])]
-
-    for iter in 1:max_iter
-        r = _pf_residual(state, Y_re, Y_im, p_target, q_target,
-                         v_slack_re, v_slack_im, idx_slack, n)
-        if norm(r) < tol
-            break
-        end
-        J = ForwardDiff.jacobian(
-            s -> _pf_residual(s, Y_re, Y_im, p_target, q_target,
-                              v_slack_re, v_slack_im, idx_slack, n),
-            state)
-        state = state - J \ r
-    end
-
-    # Reconstruct full voltage vector
-    v = copy(v_base)
-    for (idx, bus) in enumerate(non_slack)
-        v[bus] = state[idx] + im * state[d + idx]
-    end
-    return v
-end
+# PQ Newton solver: pf_residual_pq / solve_pf_pq from common.jl
+@isdefined(pf_residual_pq) || include("common.jl")
 
 @testset "AC PF Finite-Difference Verification" begin
     pm_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
@@ -174,7 +95,7 @@ end
             p_pert = copy(p_base)
             p_pert[k_local] += delta
 
-            v_new = _solve_pf_pq(Y, v_base, p_pert, q_base, slack)
+            v_new = solve_pf_pq(Y, v_base, p_pert, q_base, slack)
             fd_dvm = (abs.(v_new) - abs.(v_base)) / delta
 
             analytical_col = Matrix(dvm_dp)[:, k_global]
@@ -198,7 +119,7 @@ end
             q_pert = copy(q_base)
             q_pert[k_local] += delta
 
-            v_new = _solve_pf_pq(Y, v_base, p_base, q_pert, slack)
+            v_new = solve_pf_pq(Y, v_base, p_base, q_pert, slack)
             fd_dvm = (abs.(v_new) - abs.(v_base)) / delta
 
             analytical_col = Matrix(dvm_dq)[:, k_global]
@@ -222,7 +143,7 @@ end
             p_pert = copy(p_base)
             p_pert[k_local] += delta
 
-            v_new = _solve_pf_pq(Y, v_base, p_pert, q_base, slack)
+            v_new = solve_pf_pq(Y, v_base, p_pert, q_base, slack)
 
             im_pert = zeros(n_branch)
             for (_, br) in pf_data["branch"]
@@ -256,7 +177,7 @@ end
             q_pert = copy(q_base)
             q_pert[k_local] += delta
 
-            v_new = _solve_pf_pq(Y, v_base, p_base, q_pert, slack)
+            v_new = solve_pf_pq(Y, v_base, p_base, q_pert, slack)
 
             im_pert = zeros(n_branch)
             for (_, br) in pf_data["branch"]
@@ -294,7 +215,7 @@ end
             p_pert = copy(p_base)
             p_pert[k_local] += delta
 
-            v_new = _solve_pf_pq(Y, v_base, p_pert, q_base, slack)
+            v_new = solve_pf_pq(Y, v_base, p_pert, q_base, slack)
             fd_dv = (v_new - v_base) / delta
 
             analytical_col = Matrix(dv_dp)[:, k_global]
@@ -318,7 +239,7 @@ end
             q_pert = copy(q_base)
             q_pert[k_local] += delta
 
-            v_new = _solve_pf_pq(Y, v_base, p_base, q_pert, slack)
+            v_new = solve_pf_pq(Y, v_base, p_base, q_pert, slack)
             fd_dv = (v_new - v_base) / delta
 
             analytical_col = Matrix(dv_dq)[:, k_global]

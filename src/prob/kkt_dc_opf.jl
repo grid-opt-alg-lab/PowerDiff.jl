@@ -18,7 +18,8 @@
 #
 # Implements KKT conditions for implicit differentiation of DC OPF solutions.
 
-# Tikhonov regularization magnitude for singular KKT Jacobians
+# Tikhonov regularization for degenerate complementarity (e.g., all generators at bounds).
+# Smallest perturbation that restores invertibility without introducing O(eps) error.
 const TIKHONOV_EPS = 1e-10
 
 # =============================================================================
@@ -54,7 +55,7 @@ function _ensure_kkt_factor!(prob::DCOPFProblem)
             lu(J_z)   # sparse LU (UmfpackLU)
         catch e
             if e isa LinearAlgebra.SingularException
-                @warn "KKT Jacobian is singular; applying Tikhonov perturbation ($TIKHONOV_EPS)"
+                @warn "KKT Jacobian is singular (likely degenerate complementarity, e.g., generators at bounds); applying Tikhonov perturbation (eps=$TIKHONOV_EPS). Sensitivity accuracy may be reduced."
                 J_reg = J_z + TIKHONOV_EPS * sparse(I, size(J_z, 1), size(J_z, 1))
                 try
                     lu(J_reg)
@@ -73,6 +74,11 @@ end
 # =============================================================================
 # Cached Derivative Computation Functions
 # =============================================================================
+#
+# Each _get_dz_d*! function computes dz/dp = -(dK/dz)⁻¹ · (dK/dp) for one
+# parameter type, caching the result. The sparse RHS from calc_kkt_jacobian_*
+# is converted to dense via Matrix() before the backsolve because Julia ≥1.12
+# does not support UmfpackLU \ SparseMatrixCSC (MethodError in ldiv!).
 
 """
     _get_dz_dd!(prob::DCOPFProblem) → Matrix{Float64}

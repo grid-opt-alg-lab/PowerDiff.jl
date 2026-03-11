@@ -22,21 +22,13 @@ using ForwardDiff
 using Ipopt
 using JuMP: MOI, optimizer_with_attributes
 
+# Import non-exported KKT functions used by tests
+import PowerDiff: kkt, kkt_dims, kkt_indices, calc_kkt_jacobian,
+                  flatten_variables, unflatten_variables
+
 PowerModels.silence()
 
-# Use PowerModels' built-in test cases
-const PM_DATA_DIR = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
-
-# Helper to load a test case
-function load_test_case(case_name::String)
-    case_path = joinpath(PM_DATA_DIR, case_name)
-    if isfile(case_path)
-        raw = PowerModels.parse_file(case_path)
-        return PowerModels.make_basic_network(raw)
-    else
-        return nothing
-    end
-end
+include("common.jl")
 
 # =============================================================================
 # DC OPF Tests
@@ -161,8 +153,8 @@ end
     else
         ac_prob = ACOPFProblem(net)
         ac_sol = solve!(ac_prob)
-        z = ac_flatten_variables(ac_sol, ac_prob)
-        K = ac_kkt(z, ac_prob)
+        z = flatten_variables(ac_sol, ac_prob)
+        K = kkt(z, ac_prob)
 
         # No NaN sentinels survived (validates pre-allocated index assignment is complete)
         @test !any(isnan, K)
@@ -836,6 +828,11 @@ include("test_acpf_jacobian.jl")
 include("test_acpf_va_flow.jl")
 include("test_parameter_transforms.jl")
 include("test_ac_opf_all_sens.jl")
+include("test_ac_topology_sens.jl")
 include("test_angle_diff_duals.jl")
+
+include("test_dcpf_susceptance.jl")
+
+include("unified/test_sensitivity_verification.jl")
 
 include("test_apf_integration.jl")

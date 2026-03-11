@@ -248,9 +248,8 @@ function _problem_status_str(model::JuMP.Model)
     try
         status = JuMP.termination_status(model)
         return string(status)
-    catch e
-        e isa ErrorException && return "not solved"
-        rethrow(e)
+    catch
+        return "unknown (status query failed)"
     end
 end
 

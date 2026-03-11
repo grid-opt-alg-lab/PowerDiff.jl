@@ -72,6 +72,7 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 - `:psh` - Load shedding (DC OPF)
 - `:qg` - Generator reactive power (AC OPF)
 - `:lmp` - Locational marginal prices (DC OPF, AC OPF)
+- `:qlmp` - Reactive power locational marginal prices (AC OPF)
 - `:vm` - Voltage magnitude (AC PF, AC OPF)
 - `:im` - Current magnitude (AC PF)
 - `:v` - Complex voltage phasor (AC PF)
@@ -84,7 +85,8 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 - `:sw` - Switching states
 - `:cq`, `:cl` - Cost coefficients (DC OPF, AC OPF)
 - `:fmax` - Flow limits (DC OPF, AC OPF)
-- `:b` - Susceptances (DC OPF)
+- `:b` - Branch susceptances (DC PF, DC OPF, AC PF)
+- `:g` - Branch conductances (AC PF)
 - `:p`, `:q` - Power injections (AC PF)
 - `:va` - Voltage phase angle (AC PF, Jacobian block parameter)
 - `:vm` - Voltage magnitude (AC PF, Jacobian block parameter)
@@ -95,6 +97,7 @@ Returns a `Sensitivity{T}` result that acts like a matrix but carries formulatio
 pf_state = DCPowerFlowState(net, d)
 dva_dd = calc_sensitivity(pf_state, :va, :d)    # Sensitivity{Float64}, .formulation == :dcpf
 df_dsw = calc_sensitivity(pf_state, :f, :sw)     # Sensitivity{Float64}, .formulation == :dcpf
+dva_db = calc_sensitivity(pf_state, :va, :b)     # Sensitivity{Float64}, .formulation == :dcpf
 
 # DC OPF (has LMP because it has duals)
 prob = DCOPFProblem(net, d)
@@ -106,10 +109,12 @@ dpg_dcq = calc_sensitivity(prob, :pg, :cq)      # .formulation == :dcopf, .opera
 dvm_dp = calc_sensitivity(ac_state, :vm, :p)    # .formulation == :acpf, .operand == :vm
 dva_dp = calc_sensitivity(ac_state, :va, :p)    # .formulation == :acpf, .operand == :va
 df_dp  = calc_sensitivity(ac_state, :f, :p)     # .formulation == :acpf, .operand == :f
+dvm_dg = calc_sensitivity(ac_state, :vm, :g)    # ∂|V|/∂g (n × m)
+dim_db = calc_sensitivity(ac_state, :im, :b)    # ∂|I|/∂b (m × m)
 J1     = calc_sensitivity(ac_state, :p, :va)    # ∂P/∂θ Jacobian block
 dvm_dd = calc_sensitivity(ac_state, :vm, :d)    # via transform: -∂|V|/∂p
 
-# AC OPF (30 combinations: 5 operands × 6 parameters)
+# AC OPF (36 combinations: 6 operands × 6 parameters)
 ac_prob = ACOPFProblem(pm_data)
 dvm_dsw = calc_sensitivity(ac_prob, :vm, :sw)    # .formulation == :acopf, .operand == :vm
 dlmp_dd = calc_sensitivity(ac_prob, :lmp, :d)    # .formulation == :acopf, .operand == :lmp
@@ -129,7 +134,7 @@ Fields:
 - `matrix`: The sensitivity data (Matrix{T})
 - `formulation`: Symbol (:dcpf, :dcopf, :acpf, :acopf)
 - `operand`: Symbol (:va, :vm, :pg, :qg, :f, :psh, :lmp, :im, :v)
-- `parameter`: Symbol (:d, :sw, :cq, :cl, :fmax, :b, :p, :q)
+- `parameter`: Symbol (:d, :sw, :cq, :cl, :fmax, :b, :g, :p, :q, :va, :vm, :qd)
 - `row_to_id`, `id_to_row`: Row index ↔ element ID
 - `col_to_id`, `id_to_col`: Column index ↔ element ID
 
@@ -192,9 +197,9 @@ kkt_dims(net)                  # Total KKT dimension
 flatten_variables(sol, prob)   # Solution -> vector
 calc_kkt_jacobian(prob)        # Sparse Jacobian d(KKT)/dz
 
-# AC OPF (ForwardDiff Jacobian)
-ac_kkt_dims(prob)              # Total KKT dimension
-calc_ac_kkt_jacobian(prob)     # Dense Jacobian via ForwardDiff
+# AC OPF (ForwardDiff Jacobian — same unified API)
+kkt_dims(ac_prob)              # Total KKT dimension
+calc_kkt_jacobian(ac_prob)     # Dense Jacobian via ForwardDiff
 ```
 
 ## File Organization
@@ -225,18 +230,21 @@ src/
 │   ├── flowlimit.jl            # DC OPF flow limit sensitivity (cached)
 │   ├── susceptance.jl          # DC OPF susceptance sensitivity (cached)
 │   ├── voltage.jl              # AC voltage-power sensitivity
+│   ├── topology_ac.jl          # AC PF topology sensitivity (:g, :b)
 │   ├── current.jl              # AC current sensitivity
 │   └── lmp.jl                  # LMP computation
-├── apf/
-│   └── interop.jl              # AcceleratedDCPowerFlows integration (conversion, PTDF/LODF)
 ├── pf/                         # Power flow equations
 └── graphs/                     # Incidence matrices, Laplacian utilities
+
+ext/
+└── PowerDiffAPFExt.jl          # AcceleratedDCPowerFlows extension (PTDF/LODF, conversion)
 
 test/
 ├── runtests.jl                 # Main test runner (~810 lines inline + includes below)
 ├── common.jl                   # Shared helpers: load_test_case, create_2bus_network, etc.
 ├── test_ac_opf_sens.jl         # AC OPF sensitivity tests
 ├── test_ac_pf_verification.jl  # AC PF finite-difference verification
+├── test_ac_topology_sens.jl    # AC PF topology finite-difference verification
 ├── test_sensitivity_coverage.jl # Exhaustive (operand, parameter) coverage tests
 ├── test_dc_opf_verification.jl # DC OPF finite-difference verification
 ├── test_update_switching.jl    # update_switching! correctness tests
@@ -247,6 +255,8 @@ test/
 ├── test_acpf_va_flow.jl        # AC PF voltage angle and flow sensitivity tests
 ├── test_parameter_transforms.jl # AC PF parameter transform tests (d→p, qd→q)
 ├── test_ac_opf_all_sens.jl     # AC OPF all-parameter FD verification (d, qd, cq, cl, fmax)
+├── test_angle_diff_duals.jl    # Angle difference constraint dual tests
+├── test_dcpf_susceptance.jl    # DC PF susceptance sensitivity tests
 ├── unified/
 │   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
 │   └── test_sensitivity_verification.jl  # ForwardDiff verification
@@ -290,21 +300,21 @@ docs/
 - Derivatives are continuous (not discrete on/off)
 
 **AcceleratedDCPowerFlows (APF) Integration**
-- APF is a direct dependency (sibling package from same lab)
-- Module alias: `const APF = AcceleratedDCPowerFlows` (in PowerDiff module)
+- APF is a **weak dependency** (package extension in `ext/PowerDiffAPFExt.jl`)
+- Extension loads automatically when `using AcceleratedDCPowerFlows` is called before/after `using PowerDiff`
 - `to_apf_network(::DCNetwork) → APF.Network`: one-way conversion (APF lacks generators/costs)
 - `apf_ptdf(::DCNetwork)` and `apf_lodf(::DCNetwork)`: convenience PTDF/LODF via APF
-- `ptdf_matrix(::DCPowerFlowState)`: standard PTDF = `-calc_sensitivity(state, :f, :d)`
-- `compare_ptdf(::DCPowerFlowState)`: cross-validates PD vs APF PTDF
+- `ptdf_matrix(::DCPowerFlowState)`: standard PTDF = `-calc_sensitivity(state, :f, :d)` (core, no APF needed)
+- `compare_ptdf(::DCPowerFlowState)`: cross-validates PD vs APF PTDF (requires APF extension)
 - Both packages use identical susceptance sign conventions and sort by PM key
 - LODF ↔ switching sensitivity: `LODF[k,e] = -∂f_k/∂sw_e / ∂f_e/∂sw_e` (exact, via Sherman-Morrison)
 - `DCPowerFlowState` uses Cholesky factorization for B_r (inspired by APF), with LU fallback
 - APF is DC-only; no bridge from AC PF to DC PTDF/LODF (future work)
-- Julia ≥ 1.11 required for `[sources]` TOML syntax in Project.toml (used by APF dependency)
+- Julia ≥ 1.9 required (package extensions introduced in 1.9)
 
 **Default Solver**
-- Clarabel for DC OPF, Ipopt for AC OPF
-- Override: `DCOPFProblem(net, d; optimizer=Ipopt.Optimizer)`
+- Ipopt for both DC OPF and AC OPF
+- Override: `DCOPFProblem(net, d; optimizer=HiGHS.Optimizer)`
 
 **Testing**
 - `runtests.jl` contains ~800 lines of inline tests plus `include()` calls for 13 additional test files

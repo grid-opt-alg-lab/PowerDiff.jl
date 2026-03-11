@@ -17,12 +17,10 @@ module PowerDiff
 using LinearAlgebra
 using SparseArrays
 using JuMP
-using Clarabel
 using Ipopt
 using ForwardDiff
 import PowerModels
 const PM = PowerModels
-import AcceleratedDCPowerFlows as APF
 
 const MOI = JuMP.MOI
 
@@ -41,13 +39,6 @@ include("types/ac_network.jl")      # ACNetwork, ACPowerFlowState
 include("types/ac_opf_problem.jl")  # ACOPFProblem, ACOPFSolution + constructors
 include("types/sensitivities.jl")   # Sensitivity{T} (public API wrapper)
 include("types/show.jl")           # Pretty-printing (Base.show methods)
-
-# =============================================================================
-# Power flow and graph utilities
-# =============================================================================
-include("pf/admittance_matrix.jl")
-include("graphs/laplacian.jl")
-include("pf/pf_eqns.jl")
 
 # =============================================================================
 # DC OPF (B-theta formulation) - solving and KKT conditions
@@ -72,37 +63,30 @@ include("sens/cost.jl")
 include("sens/flowlimit.jl")
 include("sens/susceptance.jl")
 include("sens/voltage.jl")
+include("sens/topology_ac.jl")
 include("sens/current.jl")
 include("sens/jacobian.jl")
 include("sens/interface.jl")
 
 # =============================================================================
-# Exports
+# Exports — clean public API
 # =============================================================================
 
-# -----------------------------------------------------------------------------
 # Abstract Type Hierarchy
-# -----------------------------------------------------------------------------
 export AbstractPowerNetwork, AbstractPowerFlowState, AbstractOPFSolution
 export AbstractOPFProblem
 export IDMapping
 
-# -----------------------------------------------------------------------------
 # Sensitivity Interface
-# -----------------------------------------------------------------------------
 export calc_sensitivity
 export Sensitivity
 export operand_symbols, parameter_symbols
 export jvp, vjp, dict_to_vec, vec_to_dict
 
-# -----------------------------------------------------------------------------
 # DC Power Flow Types
-# -----------------------------------------------------------------------------
 export DCNetwork, DCPowerFlowState
 
-# -----------------------------------------------------------------------------
 # DC OPF Types and Functions
-# -----------------------------------------------------------------------------
 export DCOPFProblem, DCOPFSolution
 export DCSensitivityCache, invalidate!
 export solve!, update_demand!
@@ -113,43 +97,50 @@ export calc_generation_participation_factors, calc_ptdf_from_sensitivity
 export update_switching!
 
 # LMP Functions
-export calc_lmp, calc_congestion_component, calc_energy_component
+export calc_lmp, calc_qlmp, calc_congestion_component, calc_energy_component
 
-# KKT Functions (advanced)
-export kkt, kkt_dims, kkt_indices, calc_kkt_jacobian
-export flatten_variables, unflatten_variables
-
-# -----------------------------------------------------------------------------
 # AC OPF Types and Functions
-# -----------------------------------------------------------------------------
 export ACOPFProblem, ACOPFSolution, ACSensitivityCache
-export ac_kkt_dims, ac_kkt_indices, ac_flatten_variables, ac_unflatten_variables
-export calc_ac_kkt_jacobian, ac_kkt
 
-# -----------------------------------------------------------------------------
 # AC Power Flow Types and Functions
-# -----------------------------------------------------------------------------
 export ACNetwork, ACPowerFlowState
 export admittance_matrix, branch_current, branch_power
 export calc_power_flow_jacobian
 
-# -----------------------------------------------------------------------------
-# Graph Utilities
-# -----------------------------------------------------------------------------
-export VectorizedAdmittanceMatrix, vectorize_laplacian_weights
-export laplacian, complete_incidence_matrix, calc_incidence_matrix
+# =============================================================================
+# PTDF convenience (core, no APF dependency)
+# =============================================================================
 
-# Power Flow Equations
-export p, q, vm, vm2, pf_eqns
-export p_polar, q_polar
-export branch_flow, p_flow, q_flow
+"""
+    ptdf_matrix(state::DCPowerFlowState) → Matrix{Float64}
+
+Return the standard PTDF matrix (`∂f/∂p`) from a DC power flow state.
+
+PD's `calc_sensitivity(state, :f, :d)` computes `∂f/∂d = -PTDF` because
+`p = g - d ⟹ ∂p/∂d = -I`. This function negates to recover the standard
+PTDF sign convention: `PTDF = ∂f/∂p`.
+"""
+ptdf_matrix(state::DCPowerFlowState) = -Matrix(calc_sensitivity(state, :f, :d))
+
+export ptdf_matrix
 
 # =============================================================================
-# AcceleratedDCPowerFlows integration
+# APF extension stubs — implemented in ext/PowerDiffAPFExt.jl
 # =============================================================================
-include("apf/interop.jl")
 
-# APF interop exports
-export to_apf_network, apf_ptdf, apf_lodf, compare_ptdf, ptdf_matrix, materialize_apf_ptdf
+const _APF_HINT = "Load AcceleratedDCPowerFlows first: `using AcceleratedDCPowerFlows`"
+
+function to_apf_network end
+function apf_ptdf end
+function apf_lodf end
+function compare_ptdf end
+function materialize_apf_ptdf end
+
+# Fallback methods with informative error when APF is not loaded
+for fn in (:to_apf_network, :apf_ptdf, :apf_lodf, :compare_ptdf, :materialize_apf_ptdf)
+    @eval $fn(args...; kwargs...) = error("$($fn) requires AcceleratedDCPowerFlows. " * _APF_HINT)
+end
+
+export to_apf_network, apf_ptdf, apf_lodf, compare_ptdf, materialize_apf_ptdf
 
 end # module PowerDiff

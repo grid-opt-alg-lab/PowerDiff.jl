@@ -28,11 +28,17 @@
 #     congestion_component = B_r⁻¹ [A_r' Diag(-b .* sw) (λ_ub - λ_lb) + A_r'(γ_ub - γ_lb)]  (non-ref block)
 #     energy_component = ν_bal - congestion_component  (uniform for connected network)
 #
-# Sign conventions:
+# Sign conventions (DC OPF):
 #     - Our LMPs are positive (cost increases when demand increases)
 #     - PowerModels uses negative LMPs: our_lmp = -pm_lmp
 #     - DCOPFSolution stores standard KKT duals (non-negative for inequality constraints)
 #       JuMP's sign convention for <= constraints is handled at extraction in solve!
+#
+# Sign conventions (AC OPF):
+#     The power balance constraint is h_P = P_flow + G_s|V|² + P_d - P_g = 0
+#     (demand positive). JuMP's Lagrangian L = f - ν · h gives ν_p_bal < 0
+#     at optimum (since marginal cost is positive). The LMP is the marginal
+#     cost of serving demand: LMP = ∂f*/∂P_d = -ν_p_bal > 0.
 
 """
     calc_lmp(sol::DCOPFSolution, net::DCNetwork)
@@ -108,5 +114,66 @@ Vector (length n) of energy contributions to each bus's LMP.
 """
 function calc_energy_component(sol::DCOPFSolution, net::DCNetwork)
     return sol.nu_bal .- calc_congestion_component(sol, net)
+end
+
+# =============================================================================
+# AC OPF LMP Computation
+# =============================================================================
+
+"""
+    calc_lmp(sol::ACOPFSolution, prob::ACOPFProblem)
+
+Compute Locational Marginal Prices from AC OPF solution.
+
+The LMP at bus i is the marginal cost of serving an additional unit of active
+demand at that bus: LMP_i = ∂f*/∂P_d_i = -ν_p_bal_i.
+
+The sign negation arises because JuMP's dual `ν_p_bal` is negative at optimum
+for the standard power balance formulation (see sign derivation in file header).
+
+# Returns
+Vector of LMPs (length n), one per bus.
+"""
+function calc_lmp(sol::ACOPFSolution, prob::ACOPFProblem)
+    return -sol.nu_p_bal
+end
+
+"""
+    calc_lmp(prob::ACOPFProblem)
+
+Solve the AC OPF problem (if needed) and compute LMPs.
+"""
+function calc_lmp(prob::ACOPFProblem)
+    sol = _ensure_ac_solved!(prob)
+    return calc_lmp(sol, prob)
+end
+
+# =============================================================================
+# AC OPF Reactive Power LMP (QLMP) Computation
+# =============================================================================
+
+"""
+    calc_qlmp(sol::ACOPFSolution, prob::ACOPFProblem)
+
+Compute reactive power Locational Marginal Prices from AC OPF solution.
+
+The QLMP at bus i is the marginal cost of serving an additional unit of reactive
+demand at that bus: QLMP_i = ∂f*/∂Q_d_i = -ν_q_bal_i.
+
+# Returns
+Vector of QLMPs (length n), one per bus.
+"""
+function calc_qlmp(sol::ACOPFSolution, prob::ACOPFProblem)
+    return -sol.nu_q_bal
+end
+
+"""
+    calc_qlmp(prob::ACOPFProblem)
+
+Solve the AC OPF problem (if needed) and compute reactive power LMPs.
+"""
+function calc_qlmp(prob::ACOPFProblem)
+    sol = _ensure_ac_solved!(prob)
+    return calc_qlmp(sol, prob)
 end
 

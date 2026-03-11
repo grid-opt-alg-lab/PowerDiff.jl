@@ -21,14 +21,16 @@ using PowerModels
 using LinearAlgebra
 using Test
 
-"""Check FD agreement for LMP (dual) sensitivities."""
-function _check_fd_lmp(sol_base, sol_pert, sens, col_idx, ε)
-    fd_lmp = (sol_pert.nu_p_bal - sol_base.nu_p_bal) / ε
-    analytical_lmp = Matrix(sens[:lmp])[:, col_idx]
-    # Dual variables (LMPs) can have smaller magnitudes than primal
-    # operands, so use a looser skip threshold (1e-4 vs 1e-6)
-    if norm(fd_lmp) > 1e-4
-        rel_err = norm(analytical_lmp - fd_lmp) / norm(fd_lmp)
+"""Check FD agreement for dual sensitivities using the calc function end-to-end."""
+function _check_fd_dual(calc_fn, key, sol_base, sol_pert, prob_base, prob_pert, sens, col_idx, ε)
+    val_base = calc_fn(sol_base, prob_base)
+    val_pert = calc_fn(sol_pert, prob_pert)
+    fd = (val_pert - val_base) / ε
+    analytical = Matrix(sens[key])[:, col_idx]
+    # Dual variables can have smaller magnitudes than primal operands,
+    # so use a looser skip threshold (1e-4 vs 1e-6)
+    if norm(fd) > 1e-4
+        rel_err = norm(analytical - fd) / norm(fd)
         @test rel_err < 1e-2
     end
 end
@@ -39,18 +41,18 @@ end
     pm_data = PowerModels.parse_file(file)
     pm_data = PowerModels.make_basic_network(pm_data)
 
-    operands = [:va, :vm, :pg, :qg, :lmp]
+    operands = [:va, :vm, :pg, :qg, :lmp, :qlmp]
     n, m, k = 5, 7, 5  # case5 dimensions
 
     # Expected row sizes for each operand
-    op_sizes = Dict(:va => n, :vm => n, :pg => k, :qg => k, :lmp => n)
+    op_sizes = Dict(:va => n, :vm => n, :pg => k, :qg => k, :lmp => n, :qlmp => n)
     # Expected col sizes for each parameter
     param_sizes = Dict(:sw => m, :d => n, :qd => n, :cq => k, :cl => k, :fmax => m)
 
     # =========================================================================
-    # Coverage: all 30 combinations produce correct sizes and finite values
+    # Coverage: all 36 combinations produce correct sizes and finite values
     # =========================================================================
-    @testset "All 30 combinations — sizes & finiteness" begin
+    @testset "All 36 combinations — sizes & finiteness" begin
         prob = ACOPFProblem(pm_data; silent=true)
 
         for param in [:sw, :d, :qd, :cq, :cl, :fmax]
@@ -120,7 +122,8 @@ end
                 end
             end
 
-            _check_fd_lmp(sol_base, sol_pert, sens, bus_idx, ε)
+            _check_fd_dual(calc_lmp, :lmp, sol_base, sol_pert, prob, prob_pert, sens, bus_idx, ε)
+            _check_fd_dual(calc_qlmp, :qlmp, sol_base, sol_pert, prob, prob_pert, sens, bus_idx, ε)
         end
     end
 
@@ -163,7 +166,8 @@ end
                 end
             end
 
-            _check_fd_lmp(sol_base, sol_pert, sens, bus_idx, ε)
+            _check_fd_dual(calc_lmp, :lmp, sol_base, sol_pert, prob, prob_pert, sens, bus_idx, ε)
+            _check_fd_dual(calc_qlmp, :qlmp, sol_base, sol_pert, prob, prob_pert, sens, bus_idx, ε)
         end
     end
 
@@ -193,7 +197,8 @@ end
                 end
             end
 
-            _check_fd_lmp(sol_base, sol_pert, sens, gen_idx, ε)
+            _check_fd_dual(calc_lmp, :lmp, sol_base, sol_pert, prob, prob_pert, sens, gen_idx, ε)
+            _check_fd_dual(calc_qlmp, :qlmp, sol_base, sol_pert, prob, prob_pert, sens, gen_idx, ε)
         end
     end
 
@@ -223,7 +228,8 @@ end
                 end
             end
 
-            _check_fd_lmp(sol_base, sol_pert, sens, gen_idx, ε)
+            _check_fd_dual(calc_lmp, :lmp, sol_base, sol_pert, prob, prob_pert, sens, gen_idx, ε)
+            _check_fd_dual(calc_qlmp, :qlmp, sol_base, sol_pert, prob, prob_pert, sens, gen_idx, ε)
         end
     end
 
@@ -253,7 +259,8 @@ end
                 end
             end
 
-            _check_fd_lmp(sol_base, sol_pert, sens, branch_idx, ε)
+            _check_fd_dual(calc_lmp, :lmp, sol_base, sol_pert, prob, prob_pert, sens, branch_idx, ε)
+            _check_fd_dual(calc_qlmp, :qlmp, sol_base, sol_pert, prob, prob_pert, sens, branch_idx, ε)
         end
     end
 
