@@ -833,4 +833,6 @@ include("test_angle_diff_duals.jl")
 
 include("test_dcpf_susceptance.jl")
 
+include("unified/test_sensitivity_verification.jl")
+
 include("test_apf_integration.jl")

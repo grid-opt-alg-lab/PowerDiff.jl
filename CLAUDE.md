@@ -255,6 +255,8 @@ test/
 ├── test_acpf_va_flow.jl        # AC PF voltage angle and flow sensitivity tests
 ├── test_parameter_transforms.jl # AC PF parameter transform tests (d→p, qd→q)
 ├── test_ac_opf_all_sens.jl     # AC OPF all-parameter FD verification (d, qd, cq, cl, fmax)
+├── test_angle_diff_duals.jl    # Angle difference constraint dual tests
+├── test_dcpf_susceptance.jl    # DC PF susceptance sensitivity tests
 ├── unified/
 │   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
 │   └── test_sensitivity_verification.jl  # ForwardDiff verification
