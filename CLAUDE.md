@@ -65,7 +65,7 @@ calc_sensitivity(state, :operand, :parameter) → Sensitivity{T}
 
 Returns a `Sensitivity{T}` result that acts like a matrix but carries formulation/operand/parameter as symbol fields, plus bidirectional index mappings.
 
-A **single-column** variant avoids materializing the full matrix (O(nnz) vs O(nnz × n)):
+A **single-column** variant avoids materializing the full matrix for OPF problems (O(nnz) vs O(nnz × n)):
 
 ```julia
 calc_sensitivity_column(state, :operand, :parameter, col_id) → Vector{T}

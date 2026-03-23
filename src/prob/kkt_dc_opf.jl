@@ -227,16 +227,6 @@ const _DC_CACHE_FIELD = Dict{Symbol, Symbol}(
     :cl => :dz_dcl, :fmax => :dz_dfmax, :b => :dz_db,
 )
 
-# Map parameter symbols to full-matrix Jacobian builder functions
-const _DC_PARAM_JAC_FN = Dict{Symbol, Function}(
-    :d    => (prob, sol) -> calc_kkt_jacobian_demand(prob.network, prob.d, sol),
-    :sw   => (prob, sol) -> calc_kkt_jacobian_switching(prob, sol),
-    :cq   => (prob, sol) -> calc_kkt_jacobian_cost_quadratic(prob, sol),
-    :cl   => (prob, _)   -> calc_kkt_jacobian_cost_linear(prob.network),
-    :fmax => (prob, sol) -> calc_kkt_jacobian_flowlimit(prob, sol),
-    :b    => (prob, sol) -> calc_kkt_jacobian_susceptance(prob, sol),
-)
-
 # Map parameter symbols to single-column Jacobian builder functions.
 # Each returns Vector{Float64} of size kkt_dims — O(1) nonzeros per column.
 const _DC_PARAM_COL_FN = Dict{Symbol, Function}(

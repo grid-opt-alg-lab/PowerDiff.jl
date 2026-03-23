@@ -50,24 +50,41 @@
         @test !isnothing(pm_data)
 
         for (op, param) in [(:lmp, :d), (:va, :sw), (:pg, :cq), (:f, :cl), (:psh, :fmax), (:lmp, :b)]
-            # Fresh problem each time so cache is empty
+            # Reference full matrix
             net = DCNetwork(pm_data)
             d = calc_demand_vector(pm_data)
             prob = DCOPFProblem(net, d)
             solve!(prob)
-
             S = calc_sensitivity(prob, op, param)
-            # Test column 1
-            col_id = S.col_to_id[1]
 
-            # New fresh problem — no cache
-            net2 = DCNetwork(pm_data)
-            d2 = calc_demand_vector(pm_data)
-            prob2 = DCOPFProblem(net2, d2)
-            solve!(prob2)
+            # Test first and last column with fresh (uncached) problems
+            for j in [1, size(S, 2)]
+                col_id = S.col_to_id[j]
+                net2 = DCNetwork(pm_data)
+                d2 = calc_demand_vector(pm_data)
+                prob2 = DCOPFProblem(net2, d2)
+                solve!(prob2)
 
-            col = calc_sensitivity_column(prob2, op, param, col_id)
-            @test col ≈ Matrix(S)[:, 1] atol=1e-10
+                col = calc_sensitivity_column(prob2, op, param, col_id)
+                @test col ≈ Matrix(S)[:, j] atol=1e-10
+            end
+        end
+    end
+
+    # =========================================================================
+    # DC OPF — load shedding column (psh with active shedding)
+    # =========================================================================
+    @testset "DC OPF (psh shedding)" begin
+        result = _make_case14_shedding()
+        if !isnothing(result)
+            prob = DCOPFProblem(result.dc_net, result.d)
+            solve!(prob)
+            S = calc_sensitivity(prob, :psh, :d)
+            for j in [1, size(S, 2)]
+                col_id = S.col_to_id[j]
+                col = calc_sensitivity_column(prob, :psh, :d, col_id)
+                @test col ≈ Matrix(S)[:, j] atol=1e-10
+            end
         end
     end
 
