@@ -67,6 +67,7 @@ include("sens/topology_ac.jl")
 include("sens/current.jl")
 include("sens/jacobian.jl")
 include("sens/interface.jl")
+include("sens/vjp_jvp.jl")
 
 # =============================================================================
 # Exports — clean public API
