@@ -86,6 +86,54 @@
             @test vjp(prob2, :lmp, :d, w) ≈ S.matrix' * w atol=1e-10
             @test jvp(prob2, :lmp, :d, v) ≈ S.matrix * v atol=1e-10
         end
+
+        @testset "In-place vjp!/jvp!" begin
+            prob3 = DCOPFProblem(basic); solve!(prob3)
+            S = calc_sensitivity(prob3, :lmp, :d)
+            w = randn(size(S, 1))
+            v = randn(size(S, 2))
+
+            work = zeros(kkt_dims(prob3))
+            out_vjp = zeros(size(S, 2))
+            out_jvp = zeros(size(S, 1))
+
+            # With explicit workspace
+            vjp!(out_vjp, prob3, :lmp, :d, w; work=work)
+            @test out_vjp ≈ S.matrix' * w atol=1e-10
+
+            jvp!(out_jvp, prob3, :lmp, :d, v; work=work)
+            @test out_jvp ≈ S.matrix * v atol=1e-10
+
+            # Without workspace (auto-allocates)
+            w2 = randn(size(S, 1))
+            vjp!(out_vjp, prob3, :lmp, :d, w2)
+            @test out_vjp ≈ S.matrix' * w2 atol=1e-10
+
+            # Verify repeated calls reuse buffers correctly
+            vjp!(out_vjp, prob3, :lmp, :d, w; work=work)
+            @test out_vjp ≈ S.matrix' * w atol=1e-10
+        end
+
+        @testset "In-place vjp!/jvp! slow path" begin
+            prob4 = DCOPFProblem(basic); solve!(prob4)
+            @test isnothing(prob4.cache.dz_dd)
+
+            S = calc_sensitivity(DCOPFProblem(basic) |> p -> (solve!(p); p), :lmp, :d)
+            w = randn(size(S, 1))
+            v = randn(size(S, 2))
+            work = zeros(kkt_dims(prob4))
+
+            out_vjp = zeros(size(S, 2))
+            vjp!(out_vjp, prob4, :lmp, :d, w; work=work)
+            @test out_vjp ≈ S.matrix' * w atol=1e-10
+
+            # Invalidate and test JVP slow path
+            invalidate!(prob4.cache)
+            prob4.cache.solution = solve!(prob4)
+            out_jvp = zeros(size(S, 1))
+            jvp!(out_jvp, prob4, :lmp, :d, v; work=work)
+            @test out_jvp ≈ S.matrix * v atol=1e-10
+        end
     end
 
     # =================================================================

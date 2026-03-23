@@ -45,23 +45,154 @@ _vec_to_dict(v::AbstractVector, idx_to_id::Vector{Int}) =
     Dict{Int,Float64}(idx_to_id[i] => v[i] for i in eachindex(v))
 
 # =============================================================================
-# DC OPF: Parameter Jacobian Builders (full sparse matrices)
+# DC OPF: Inline Parameter VJP  (out = -(dK/dp)ᵀ · u)
+# =============================================================================
+#
+# Each parameter's dK/dp has O(1) nonzeros per column. Instead of building
+# the full sparse matrix, we compute the dot product inline per column.
+
+function _dc_param_vjp!(out::AbstractVector, prob::DCOPFProblem,
+                        sol::DCOPFSolution, param::Symbol,
+                        u::AbstractVector, idx::NamedTuple)
+    if param === :d
+        _dc_demand_vjp!(out, sol, u, idx, prob.network.n)
+    elseif param === :cl
+        _dc_cost_linear_vjp!(out, u, idx, prob.network.k)
+    elseif param === :cq
+        _dc_cost_quadratic_vjp!(out, sol, u, idx, prob.network.k)
+    elseif param === :fmax
+        _dc_flowlimit_vjp!(out, sol, u, idx, prob.network.m)
+    elseif param === :sw
+        _dc_topo_vjp!(out, prob, sol, u, idx, prob.network.b)
+    else  # :b
+        _dc_topo_vjp!(out, prob, sol, u, idx, prob.network.sw)
+    end
+    return out
+end
+
+# `:d` — 2 nonzeros/col at nu_bal[j]=-1, mu_ub[j]=sol.mu_ub[j]
+function _dc_demand_vjp!(out, sol, u, idx, n)
+    @inbounds for j in 1:n
+        out[j] = u[idx.nu_bal[j]] - sol.mu_ub[j] * u[idx.mu_ub[j]]
+    end
+end
+
+# `:cl` — 1 nonzero/col at pg[j]=1
+function _dc_cost_linear_vjp!(out, u, idx, k)
+    @inbounds for j in 1:k
+        out[j] = -u[idx.pg[j]]
+    end
+end
+
+# `:cq` — 1 nonzero/col at pg[j]=2*g[j]
+function _dc_cost_quadratic_vjp!(out, sol, u, idx, k)
+    @inbounds for j in 1:k
+        out[j] = -2.0 * sol.pg[j] * u[idx.pg[j]]
+    end
+end
+
+# `:fmax` — 2 nonzeros/col at lam_lb[e], lam_ub[e]
+function _dc_flowlimit_vjp!(out, sol, u, idx, m)
+    @inbounds for e in 1:m
+        out[e] = -(sol.lam_lb[e] * u[idx.lam_lb[e]] + sol.lam_ub[e] * u[idx.lam_ub[e]])
+    end
+end
+
+# `:sw`/`:b` — 3 KKT blocks (nu_bal, nu_flow, va), vectorized via sparse matvecs.
+# `coeff` is net.b for :sw, net.sw for :b (the coefficient that multiplies the parameter).
+function _dc_topo_vjp!(out, prob, sol, u, idx, coeff)
+    A = prob.network.A
+    Aθ = A * sol.va
+    Au_nb = A * @view(u[idx.nu_bal])
+    Au_va = A * @view(u[idx.va])
+    Aν = A * sol.nu_bal
+    @inbounds for e in 1:prob.network.m
+        out[e] = -coeff[e] * (Aθ[e] * (Au_nb[e] + u[idx.nu_flow[e]]) -
+                               (Aν[e] + sol.nu_flow[e]) * Au_va[e])
+    end
+end
+
+# =============================================================================
+# DC OPF: Inline Parameter JVP  (v += dK/dp · tang, v is kkt-space accumulator)
+# =============================================================================
+#
+# Scatters tang[j]-weighted nonzeros into the kkt-dims accumulator.
+
+function _dc_param_jvp!(v::AbstractVector, prob::DCOPFProblem,
+                        sol::DCOPFSolution, param::Symbol,
+                        tang::AbstractVector, idx::NamedTuple)
+    if param === :d
+        _dc_demand_jvp!(v, sol, tang, idx, prob.network.n)
+    elseif param === :cl
+        _dc_cost_linear_jvp!(v, tang, idx, prob.network.k)
+    elseif param === :cq
+        _dc_cost_quadratic_jvp!(v, sol, tang, idx, prob.network.k)
+    elseif param === :fmax
+        _dc_flowlimit_jvp!(v, sol, tang, idx, prob.network.m)
+    elseif param === :sw
+        _dc_topo_jvp!(v, prob, sol, tang, idx, prob.network.b)
+    else  # :b
+        _dc_topo_jvp!(v, prob, sol, tang, idx, prob.network.sw)
+    end
+    return v
+end
+
+# `:d` — scatter -tang[j] into nu_bal, mu_ub[j]*tang[j] into mu_ub
+function _dc_demand_jvp!(v, sol, tang, idx, n)
+    @inbounds for j in 1:n
+        v[idx.nu_bal[j]] += -tang[j]
+        v[idx.mu_ub[j]] += sol.mu_ub[j] * tang[j]
+    end
+end
+
+function _dc_cost_linear_jvp!(v, tang, idx, k)
+    @inbounds for j in 1:k
+        v[idx.pg[j]] += tang[j]
+    end
+end
+
+function _dc_cost_quadratic_jvp!(v, sol, tang, idx, k)
+    @inbounds for j in 1:k
+        v[idx.pg[j]] += 2.0 * sol.pg[j] * tang[j]
+    end
+end
+
+function _dc_flowlimit_jvp!(v, sol, tang, idx, m)
+    @inbounds for e in 1:m
+        v[idx.lam_lb[e]] += sol.lam_lb[e] * tang[e]
+        v[idx.lam_ub[e]] += sol.lam_ub[e] * tang[e]
+    end
+end
+
+# `:sw`/`:b` — 2 sparse transpose-matvecs + elementwise scatter
+function _dc_topo_jvp!(v, prob, sol, tang, idx, coeff)
+    A = prob.network.A
+    Aθ = A * sol.va
+    Aν = A * sol.nu_bal
+
+    # nu_bal block: v[nu_bal] += A' * (coeff .* Aθ .* tang)
+    w_nb = coeff .* Aθ .* tang
+    mul!(@view(v[idx.nu_bal]), A', w_nb, 1.0, 1.0)
+
+    # nu_flow block: v[nu_flow] += coeff .* Aθ .* tang  (same as w_nb)
+    @views v[idx.nu_flow] .+= w_nb
+
+    # va block: v[va] += A' * (-coeff .* (Aν .+ nu_flow) .* tang)
+    w_va = (-coeff) .* (Aν .+ sol.nu_flow) .* tang
+    mul!(@view(v[idx.va]), A', w_va, 1.0, 1.0)
+end
+
+# =============================================================================
+# DC OPF: VJP/JVP Core (in-place with caller-provided workspace)
 # =============================================================================
 
-const _DC_PARAM_JAC_FN = Dict{Symbol, Function}(
-    :d    => (prob, sol) -> calc_kkt_jacobian_demand(prob.network, prob.d, sol),
-    :sw   => (prob, sol) -> calc_kkt_jacobian_switching(prob, sol),
-    :cq   => (prob, sol) -> calc_kkt_jacobian_cost_quadratic(prob, sol),
-    :cl   => (prob, _)   -> calc_kkt_jacobian_cost_linear(prob.network),
-    :fmax => (prob, sol) -> calc_kkt_jacobian_flowlimit(prob, sol),
-    :b    => (prob, sol) -> calc_kkt_jacobian_susceptance(prob, sol),
-)
+"""
+    _dcopf_vjp!(out, prob, op, param, adj, work) → out
 
-# =============================================================================
-# DC OPF: VJP/JVP Core
-# =============================================================================
-
-function _dcopf_vjp(prob::DCOPFProblem, op::Symbol, param::Symbol, adj::AbstractVector)
+In-place DC OPF VJP. `work` must be `Vector{Float64}` of length `kkt_dims(prob)`.
+"""
+function _dcopf_vjp!(out::AbstractVector, prob::DCOPFProblem, op::Symbol, param::Symbol,
+                     adj::AbstractVector, work::AbstractVector)
     idx = kkt_indices(prob)
     op_rows = _dc_operand_kkt_rows(idx, op)
 
@@ -69,26 +200,34 @@ function _dcopf_vjp(prob::DCOPFProblem, op::Symbol, param::Symbol, adj::Abstract
     field = _DC_CACHE_FIELD[param]
     cached = getfield(prob.cache, field)
     if !isnothing(cached)
-        return Vector(cached[op_rows, :]' * adj)
+        mul!(out, (@view cached[op_rows, :])', adj)
+        return out
     end
 
-    # Slow path: one transpose solve + one sparse matvec
+    # Slow path: in-place transpose solve + inline parameter VJP
     kkt_lu = _ensure_kkt_factor!(prob)
     sol = _ensure_solved!(prob)
 
     # Step 1: Lift adjoint into KKT space (no sign flip for DC OPF)
-    w = zeros(kkt_dims(prob))
-    w[op_rows] .= adj
+    fill!(work, 0.0)
+    @views work[op_rows] .= adj
 
-    # Step 2: Transpose solve: u = (dK/dz)⁻ᵀ · w
-    u = kkt_lu' \ w
+    # Step 2: In-place transpose solve: work ← (dK/dz)⁻ᵀ · work
+    ldiv!(transpose(kkt_lu), work)
 
-    # Step 3: result = -(dK/dp)ᵀ · u
-    J_p = _DC_PARAM_JAC_FN[param](prob, sol)
-    return Vector(-(J_p' * u))
+    # Step 3: Inline parameter VJP: out = -(dK/dp)ᵀ · work
+    _dc_param_vjp!(out, prob, sol, param, work, idx)
+
+    return out
 end
 
-function _dcopf_jvp(prob::DCOPFProblem, op::Symbol, param::Symbol, tang::AbstractVector)
+"""
+    _dcopf_jvp!(out, prob, op, param, tang, work) → out
+
+In-place DC OPF JVP. `work` must be `Vector{Float64}` of length `kkt_dims(prob)`.
+"""
+function _dcopf_jvp!(out::AbstractVector, prob::DCOPFProblem, op::Symbol, param::Symbol,
+                     tang::AbstractVector, work::AbstractVector)
     idx = kkt_indices(prob)
     op_rows = _dc_operand_kkt_rows(idx, op)
 
@@ -96,22 +235,52 @@ function _dcopf_jvp(prob::DCOPFProblem, op::Symbol, param::Symbol, tang::Abstrac
     field = _DC_CACHE_FIELD[param]
     cached = getfield(prob.cache, field)
     if !isnothing(cached)
-        return Vector(cached[op_rows, :] * tang)
+        mul!(out, @view(cached[op_rows, :]), tang)
+        return out
     end
 
-    # Slow path: one sparse matvec + one forward solve
+    # Slow path: inline parameter JVP + in-place forward solve
     kkt_lu = _ensure_kkt_factor!(prob)
     sol = _ensure_solved!(prob)
 
-    # Step 1: v = dK/dp · tang
-    J_p = _DC_PARAM_JAC_FN[param](prob, sol)
-    v = Vector(J_p * tang)
+    # Step 1: Scatter dK/dp · tang into work (kkt-space accumulator)
+    fill!(work, 0.0)
+    _dc_param_jvp!(work, prob, sol, param, tang, idx)
 
-    # Step 2: u = -(dK/dz)⁻¹ · v
-    u = kkt_lu \ v
+    # Step 2: In-place forward solve: work ← (dK/dz)⁻¹ · work
+    ldiv!(kkt_lu, work)
 
-    # Step 3: Extract operand rows (no sign flip for DC OPF)
-    return -u[op_rows]
+    # Step 3: Extract operand rows with negation (no sign flip for DC OPF)
+    @inbounds for (i, r) in enumerate(op_rows)
+        out[i] = -work[r]
+    end
+
+    return out
+end
+
+# Allocating wrappers
+function _dcopf_vjp(prob::DCOPFProblem, op::Symbol, param::Symbol, adj::AbstractVector)
+    pdim = _param_dim(prob, param)
+    out = Vector{Float64}(undef, pdim)
+    work = Vector{Float64}(undef, kkt_dims(prob))
+    return _dcopf_vjp!(out, prob, op, param, adj, work)
+end
+
+function _dcopf_jvp(prob::DCOPFProblem, op::Symbol, param::Symbol, tang::AbstractVector)
+    idx = kkt_indices(prob)
+    odim = length(_dc_operand_kkt_rows(idx, op))
+    out = Vector{Float64}(undef, odim)
+    work = Vector{Float64}(undef, kkt_dims(prob))
+    return _dcopf_jvp!(out, prob, op, param, tang, work)
+end
+
+# Parameter dimension helper
+function _param_dim(prob::DCOPFProblem, param::Symbol)
+    net = prob.network
+    param in (:d,) && return net.n
+    param in (:sw, :fmax, :b) && return net.m
+    param in (:cq, :cl) && return net.k
+    error("Unknown DC OPF parameter: $param")
 end
 
 # =============================================================================
@@ -214,14 +383,10 @@ function _acopf_vjp(prob::ACOPFProblem, op::Symbol, param::Symbol, adj::Abstract
     kkt_lu = _ensure_ac_kkt_factor!(prob)
     ctx = _ac_kkt_context(prob)
 
-    # Step 1: Lift adjoint into KKT space with sign
     w = zeros(kkt_dims(prob))
     w[op_rows] .= sign .* adj
-
-    # Step 2: Transpose solve
     u = kkt_lu' \ w
 
-    # Step 3: result = -(dK/dp)ᵀ · u via ForwardDiff.gradient
     return -_ac_param_vjp_grad(prob, ctx, param, u)
 end
 
@@ -241,18 +406,14 @@ function _acopf_jvp(prob::ACOPFProblem, op::Symbol, param::Symbol, tang::Abstrac
     kkt_lu = _ensure_ac_kkt_factor!(prob)
     ctx = _ac_kkt_context(prob)
 
-    # Step 1: v = dK/dp · tang via ForwardDiff.derivative
     v = _ac_param_jvp_deriv(prob, ctx, param, tang)
-
-    # Step 2: u = -(dK/dz)⁻¹ · v
     u = kkt_lu \ v
 
-    # Step 3: Extract operand rows with sign
     return sign .* (-u[op_rows])
 end
 
 # =============================================================================
-# DC PF: VJP/JVP Core
+# DC PF: VJP/JVP Core (vectorized, no per-branch loops)
 # =============================================================================
 
 function _dcpf_vjp(state::DCPowerFlowState, op::Symbol, param::Symbol, adj::AbstractVector)
@@ -260,47 +421,34 @@ function _dcpf_vjp(state::DCPowerFlowState, op::Symbol, param::Symbol, adj::Abst
     nr = state.non_ref
     n, m = net.n, net.m
 
-    # Lift :f adjoint into :va space: adj_va = Aᵀ · W · adj_f
+    # Lift :f adjoint into :va space via (W·A)ᵀ = Aᵀ·W
     if op === :f
-        W = Diagonal(-net.b .* net.sw)
-        adj_va = Vector(net.A' * W * adj)
+        w_diag = -net.b .* net.sw
+        adj_va = Vector(net.A' * (w_diag .* adj))
     else
         adj_va = adj
     end
 
-    # Core: solve Bᵣᵀ \ adj_va[nr] (B_r is symmetric, so same as forward solve)
+    # Core: B_r is symmetric, so B_r⁻ᵀ = B_r⁻¹
     u = state.B_r_factor \ adj_va[nr]
 
     if param === :d
-        # VJP of dva/dd: result[nr] = -(B_r⁻¹ · adj_va[nr])
         result = zeros(n)
         result[nr] .= -u
-        if op === :f
-            # Direct term is zero for demand (no direct dependence of f on d)
-        end
         return result
     end
 
-    # :sw and :b share structure: differ only in coefficient per branch
+    # :sw/:b — vectorized via sparse matvecs
+    coeffs = param === :sw ? net.b : net.sw
     Aθ = net.A * state.va
-    # Embed u into full n-vector so dot(A[e,:], u_full) works without slicing
     u_full = zeros(n)
     u_full[nr] .= u
-    result = zeros(m)
-    for e in 1:m
-        coeff = param === :sw ? net.b[e] : net.sw[e]
-        # Indirect term: coeff · (A·θ)[e] · dot(A[e,:], u_full)
-        result[e] = coeff * Aθ[e] * dot(net.A[e, :], u_full)
-    end
+    Au = net.A * u_full
 
+    result = coeffs .* Aθ .* Au
     if op === :f
-        # Direct term: -coeff_e · (A·θ)[e] · adj_f[e]
-        for e in 1:m
-            coeff = param === :sw ? net.b[e] : net.sw[e]
-            result[e] += -coeff * Aθ[e] * adj[e]
-        end
+        result .+= (-coeffs) .* Aθ .* adj
     end
-
     return result
 end
 
@@ -309,38 +457,28 @@ function _dcpf_jvp(state::DCPowerFlowState, op::Symbol, param::Symbol, tang::Abs
     nr = state.non_ref
     n, m = net.n, net.m
 
-    Aθ = param !== :d ? net.A * state.va : nothing
-
     if param === :d
-        # JVP of dva/dd · tang: -(B_r \ tang[nr])
         dva = zeros(n)
         dva[nr] .= -(state.B_r_factor \ tang[nr])
     else
-        # :sw / :b: accumulate RHS = Σ_e tang[e] · (-coeff_e · Aθ_e · a_{e,r})
-        n_r = length(nr)
-        rhs = zeros(n_r)
-        for e in 1:m
-            coeff = param === :sw ? net.b[e] : net.sw[e]
-            a_e_r = Vector(net.A[e, nr])
-            rhs .+= tang[e] .* (-coeff * Aθ[e]) .* a_e_r
-        end
+        # :sw/:b — vectorized: rhs = A'[:, nr] * (weighted), then solve
+        coeffs = param === :sw ? net.b : net.sw
+        Aθ = net.A * state.va
+        weighted = (-coeffs) .* Aθ .* tang
+        rhs_full = Vector(net.A' * weighted)
         dva = zeros(n)
-        dva[nr] .= -(state.B_r_factor \ rhs)
+        dva[nr] .= -(state.B_r_factor \ rhs_full[nr])
     end
 
-    if op === :va
-        return dva
-    end
+    op === :va && return dva
 
-    # :f operand: f = W·A·va + direct term for :sw/:b
-    W = Diagonal(-net.b .* net.sw)
-    df = Vector(W * net.A * dva)
+    # :f operand: W·A·dva + direct term
+    w_diag = -net.b .* net.sw
+    df = w_diag .* Vector(net.A * dva)
     if param !== :d
-        # Direct term: -coeff_e · (A·θ)[e] · tang[e]
-        for e in 1:m
-            coeff = param === :sw ? net.b[e] : net.sw[e]
-            df[e] += -coeff * Aθ[e] * tang[e]
-        end
+        coeffs = param === :sw ? net.b : net.sw
+        Aθ = net.A * state.va
+        df .+= (-coeffs) .* Aθ .* tang
     end
     return df
 end
@@ -358,7 +496,8 @@ Efficient vector-Jacobian product `(∂operand/∂parameter)ᵀ · adj` without
 materializing the full sensitivity matrix.
 
 Uses a single KKT transpose-solve (O(nnz)) instead of building the full
-O(n²) sensitivity matrix.
+O(n²) sensitivity matrix. For performance-critical loops, use `vjp!` with
+pre-allocated buffers.
 
 # Examples
 ```julia
@@ -388,6 +527,9 @@ _vjp_core(state::ACPowerFlowState, op, param, adj) = throw(ArgumentError(
     vjp(state, operand::Symbol, parameter::Symbol, adj::AbstractDict{Int}) → Dict{Int,Float64}
 
 ID-aware VJP. Input keyed by operand element IDs, output keyed by parameter element IDs.
+
+Note: allocates a Dict for the output. For performance-critical loops, prefer
+the `AbstractVector` interface.
 """
 function vjp(state, operand::Symbol, parameter::Symbol, adj::AbstractDict{Int,<:Number})
     op = _resolve_operand(operand)
@@ -395,17 +537,49 @@ function vjp(state, operand::Symbol, parameter::Symbol, adj::AbstractDict{Int,<:
     T = typeof(state)
     (op, param) in _valid_combinations(T) || _throw_invalid_combo(state, op, param)
 
-    # Convert Dict → Vector
     row_element = _OPERAND_ELEMENT[op]
     row_to_id, id_to_row = _element_mapping(state, row_element)
     adj_vec = _dict_to_vec(adj, id_to_row, length(row_to_id))
-
     result_vec = _vjp_core(state, op, param, adj_vec)
-
-    # Convert Vector → Dict
     col_element = _PARAM_ELEMENT[param]
     col_to_id, _ = _element_mapping(state, col_element)
     return _vec_to_dict(result_vec, col_to_id)
+end
+
+# --- VJP!: In-place with caller-provided workspace ---
+
+"""
+    vjp!(out, prob::DCOPFProblem, operand::Symbol, parameter::Symbol,
+         adj::AbstractVector; work=nothing) → out
+
+In-place VJP for performance-critical loops (e.g., bilevel optimization).
+
+`out` must be pre-allocated to the parameter dimension. Pass `work` (a
+`Vector{Float64}` of length `kkt_dims(prob)`) to avoid internal allocation;
+if omitted, a workspace is allocated automatically.
+
+# Examples
+```julia
+prob = DCOPFProblem(net, d); solve!(prob)
+out = zeros(net.n)
+
+# Simple (auto-allocates workspace):
+vjp!(out, prob, :lmp, :d, adj)
+
+# Hot loop (pre-allocate workspace):
+work = zeros(kkt_dims(prob))
+for iter in 1:max_iter
+    vjp!(out, prob, :lmp, :d, adj; work=work)
+end
+```
+"""
+function vjp!(out::AbstractVector, prob::DCOPFProblem, operand::Symbol, parameter::Symbol,
+              adj::AbstractVector; work::Union{Nothing,AbstractVector}=nothing)
+    op = _resolve_operand(operand)
+    param = _resolve_parameter(parameter)
+    (op, param) in _valid_combinations(DCOPFProblem) || _throw_invalid_combo(prob, op, param)
+    w = isnothing(work) ? Vector{Float64}(undef, kkt_dims(prob)) : work
+    return _dcopf_vjp!(out, prob, op, param, adj, w)
 end
 
 # --- JVP: Vector input → Vector output ---
@@ -417,7 +591,8 @@ Efficient Jacobian-vector product `(∂operand/∂parameter) · tang` without
 materializing the full sensitivity matrix.
 
 Uses a single KKT forward-solve (O(nnz)) instead of building the full
-O(n²) sensitivity matrix.
+O(n²) sensitivity matrix. For performance-critical loops, use `jvp!` with
+pre-allocated buffers.
 
 # Examples
 ```julia
@@ -447,6 +622,9 @@ _jvp_core(state::ACPowerFlowState, op, param, tang) = throw(ArgumentError(
     jvp(state, operand::Symbol, parameter::Symbol, tang::AbstractDict{Int}) → Dict{Int,Float64}
 
 ID-aware JVP. Input keyed by parameter element IDs, output keyed by operand element IDs.
+
+Note: allocates a Dict for the output. For performance-critical loops, prefer
+the `AbstractVector` interface.
 """
 function jvp(state, operand::Symbol, parameter::Symbol, tang::AbstractDict{Int,<:Number})
     op = _resolve_operand(operand)
@@ -454,15 +632,47 @@ function jvp(state, operand::Symbol, parameter::Symbol, tang::AbstractDict{Int,<
     T = typeof(state)
     (op, param) in _valid_combinations(T) || _throw_invalid_combo(state, op, param)
 
-    # Convert Dict → Vector
     col_element = _PARAM_ELEMENT[param]
     col_to_id, id_to_col = _element_mapping(state, col_element)
     tang_vec = _dict_to_vec(tang, id_to_col, length(col_to_id))
-
     result_vec = _jvp_core(state, op, param, tang_vec)
-
-    # Convert Vector → Dict
     row_element = _OPERAND_ELEMENT[op]
     row_to_id, _ = _element_mapping(state, row_element)
     return _vec_to_dict(result_vec, row_to_id)
+end
+
+# --- JVP!: In-place with caller-provided workspace ---
+
+"""
+    jvp!(out, prob::DCOPFProblem, operand::Symbol, parameter::Symbol,
+         tang::AbstractVector; work=nothing) → out
+
+In-place JVP for performance-critical loops (e.g., bilevel optimization).
+
+`out` must be pre-allocated to the operand dimension. Pass `work` (a
+`Vector{Float64}` of length `kkt_dims(prob)`) to avoid internal allocation;
+if omitted, a workspace is allocated automatically.
+
+# Examples
+```julia
+prob = DCOPFProblem(net, d); solve!(prob)
+out = zeros(net.n)
+
+# Simple (auto-allocates workspace):
+jvp!(out, prob, :lmp, :d, tang)
+
+# Hot loop (pre-allocate workspace):
+work = zeros(kkt_dims(prob))
+for iter in 1:max_iter
+    jvp!(out, prob, :lmp, :d, tang; work=work)
+end
+```
+"""
+function jvp!(out::AbstractVector, prob::DCOPFProblem, operand::Symbol, parameter::Symbol,
+              tang::AbstractVector; work::Union{Nothing,AbstractVector}=nothing)
+    op = _resolve_operand(operand)
+    param = _resolve_parameter(parameter)
+    (op, param) in _valid_combinations(DCOPFProblem) || _throw_invalid_combo(prob, op, param)
+    w = isnothing(work) ? Vector{Float64}(undef, kkt_dims(prob)) : work
+    return _dcopf_jvp!(out, prob, op, param, tang, w)
 end
