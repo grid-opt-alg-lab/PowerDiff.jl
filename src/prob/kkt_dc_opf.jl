@@ -215,6 +215,50 @@ function _extract_sensitivity(prob::DCOPFProblem, dz_dp::Matrix{Float64}, operan
 end
 
 # =============================================================================
+# Single-Column Extraction Helpers
+# =============================================================================
+
+# Map parameter symbols to cache field names (mirrors _AC_CACHE_FIELD in kkt_ac_opf.jl)
+const _DC_CACHE_FIELD = Dict{Symbol, Symbol}(
+    :d => :dz_dd, :sw => :dz_dsw, :cq => :dz_dcq,
+    :cl => :dz_dcl, :fmax => :dz_dfmax, :b => :dz_db,
+)
+
+# Map parameter symbols to Jacobian builder functions
+const _DC_PARAM_JAC_FN = Dict{Symbol, Function}(
+    :d    => (prob, sol) -> calc_kkt_jacobian_demand(prob.network, prob.d, sol),
+    :sw   => (prob, sol) -> calc_kkt_jacobian_switching(prob, sol),
+    :cq   => (prob, sol) -> calc_kkt_jacobian_cost_quadratic(prob, sol),
+    :cl   => (prob, _)   -> calc_kkt_jacobian_cost_linear(prob.network),
+    :fmax => (prob, sol) -> calc_kkt_jacobian_flowlimit(prob, sol),
+    :b    => (prob, sol) -> calc_kkt_jacobian_susceptance(prob, sol),
+)
+
+"""
+    _dc_operand_kkt_rows(idx::NamedTuple, op::Symbol) → UnitRange{Int}
+
+Return the KKT index range for a DC OPF operand.
+"""
+function _dc_operand_kkt_rows(idx::NamedTuple, op::Symbol)
+    op === :va  && return idx.va
+    op === :pg  && return idx.pg
+    op === :f   && return idx.f
+    op === :psh && return idx.psh
+    op === :lmp && return idx.nu_bal
+    throw(ArgumentError("Unknown DC OPF operand: $op"))
+end
+
+"""
+    _extract_dz_column(prob::DCOPFProblem, dz_col::Vector{Float64}, op::Symbol) → Vector{Float64}
+
+Extract operand rows from a single dz/dp column vector.
+"""
+function _extract_dz_column(prob::DCOPFProblem, dz_col::Vector{Float64}, op::Symbol)
+    idx = kkt_indices(prob)
+    return dz_col[_dc_operand_kkt_rows(idx, op)]
+end
+
+# =============================================================================
 # Dimension Calculations
 # =============================================================================
 

@@ -559,6 +559,134 @@ function _calc_sensitivity_matrix(prob::ACOPFProblem, op::Symbol, param::Symbol)
 end
 
 # =============================================================================
+# Single-Column Sensitivity API
+# =============================================================================
+
+"""
+    calc_sensitivity_column(state, operand::Symbol, parameter::Symbol, col_id::Int) → Vector
+
+Compute a single column of the sensitivity matrix — the sensitivity of `operand`
+with respect to a single element of `parameter` identified by `col_id`.
+
+`col_id` is an **element ID** (bus/branch/gen ID), consistent with
+`Sensitivity.col_to_id`. Returns a dense vector of length matching the operand
+dimension.
+
+For OPF problems, this avoids materializing the full N×N sensitivity matrix by
+solving a single KKT backsubstitution (O(nnz) instead of O(nnz × n)).
+
+# Examples
+```julia
+# Sensitivity of all LMPs to demand at bus 3
+col = calc_sensitivity_column(prob, :lmp, :d, 3)
+
+# Compare with full matrix
+S = calc_sensitivity(prob, :lmp, :d)
+col ≈ Matrix(S)[:, S.id_to_col[3]]  # true
+```
+"""
+function calc_sensitivity_column(state, operand::Symbol, parameter::Symbol, col_id::Int)
+    op = _resolve_operand(operand)
+    param = _resolve_parameter(parameter)
+    T = typeof(state)
+
+    # Resolve parameter transforms (e.g., :d → :p for ACPowerFlowState)
+    transform_fn = identity
+    base_param = param
+    if !((op, param) in _valid_combinations(T))
+        transform = _parameter_transform(T, Val(param))
+        if !isnothing(transform)
+            base_param, transform_fn = transform
+            (op, base_param) in _valid_combinations(T) || _throw_invalid_combo(state, op, param)
+        else
+            _throw_invalid_combo(state, op, param)
+        end
+    end
+
+    # Convert element ID → sequential index
+    col_element = _PARAM_ELEMENT[param]
+    _, id_to_col = _element_mapping(state, col_element)
+    col_idx = get(id_to_col, col_id, nothing)
+    isnothing(col_idx) && throw(ArgumentError(
+        "Unknown $(col_element) ID $col_id for parameter :$param"))
+
+    # Compute single column using base parameter
+    col = _calc_sensitivity_column(state, op, base_param, col_idx)
+
+    # Apply transform if needed
+    result = transform_fn === identity ? col : transform_fn(col)
+
+    # Finite check
+    if any(!isfinite, result)
+        error("Sensitivity column (:$op, :$param, col=$col_id) produced non-finite values. " *
+              "The KKT system may be ill-conditioned.")
+    end
+    return result
+end
+
+# =============================================================================
+# DC Power Flow: Column Implementation
+# =============================================================================
+
+function _calc_sensitivity_column(state::DCPowerFlowState, op::Symbol, param::Symbol, col_idx::Int)
+    matrix = _calc_sensitivity_matrix(state, op, param)
+    return matrix[:, col_idx]
+end
+
+# =============================================================================
+# DC OPF: Column Implementation
+# =============================================================================
+
+function _calc_sensitivity_column(prob::DCOPFProblem, op::Symbol, param::Symbol, col_idx::Int)
+    # Fast path: if full matrix already cached, extract column
+    field = _DC_CACHE_FIELD[param]
+    cached = getfield(prob.cache, field)
+    if !isnothing(cached)
+        idx = kkt_indices(prob)
+        return cached[_dc_operand_kkt_rows(idx, op), col_idx]
+    end
+
+    # Compute single column: solve K \ J_param[:, col_idx]
+    kkt_lu = _ensure_kkt_factor!(prob)
+    sol = _ensure_solved!(prob)
+    J_param = _DC_PARAM_JAC_FN[param](prob, sol)
+    rhs = Vector(J_param[:, col_idx])
+    ldiv!(kkt_lu, rhs)
+    lmul!(-1, rhs)
+    return _extract_dz_column(prob, rhs, op)
+end
+
+# =============================================================================
+# AC Power Flow: Column Implementation
+# =============================================================================
+
+function _calc_sensitivity_column(state::ACPowerFlowState, op::Symbol, param::Symbol, col_idx::Int)
+    matrix = _calc_sensitivity_matrix(state, op, param)
+    return matrix[:, col_idx]
+end
+
+# =============================================================================
+# AC OPF: Column Implementation
+# =============================================================================
+
+function _calc_sensitivity_column(prob::ACOPFProblem, op::Symbol, param::Symbol, col_idx::Int)
+    # Fast path: if full matrix already cached, extract column
+    field = _AC_CACHE_FIELD[param]
+    cached = getfield(prob.cache, field)
+    if !isnothing(cached)
+        return _extract_ac_dz_column(prob, cached, op, col_idx)
+    end
+
+    # Compute single column
+    kkt_lu = _ensure_ac_kkt_factor!(prob)
+    sol = _ensure_ac_solved!(prob)
+    J_col = _calc_ac_kkt_param_column(prob, sol, param, col_idx)
+    ldiv!(kkt_lu, J_col)
+    lmul!(-1, J_col)
+    return _extract_ac_dz_column_vec(prob, J_col, op)
+end
+
+# =============================================================================
 # Symbol Introspection API
 # =============================================================================
 

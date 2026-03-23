@@ -78,7 +78,7 @@ export AbstractOPFProblem
 export IDMapping
 
 # Sensitivity Interface
-export calc_sensitivity
+export calc_sensitivity, calc_sensitivity_column
 export Sensitivity
 export operand_symbols, parameter_symbols
 export jvp, vjp, dict_to_vec, vec_to_dict
