@@ -306,59 +306,53 @@ function _ac_kkt_context(prob::ACOPFProblem)
     return (; sol, z0, sw, idx, constants, pd0, qd0, cq0, cl0, fmax0)
 end
 
+"""Build kwargs for KKT with one parameter varying and the rest fixed."""
+function _ac_fixed_kwargs(prob::ACOPFProblem, ctx, param::Symbol)
+    kw = _PARAM_KWARG_MAP[param]
+    p0 = _AC_PARAM_EXTRACT[param](prob)
+    all_fixed = Dict{Symbol,Any}(
+        :pd => ctx.pd0, :qd => ctx.qd0, :cq => ctx.cq0,
+        :cl => ctx.cl0, :fmax => ctx.fmax0)
+    delete!(all_fixed, kw)
+    fixed_nt = (; (k => v for (k, v) in all_fixed)...)
+    return kw, p0, fixed_nt
+end
+
+function _ac_kkt_call(prob::ACOPFProblem, ctx, sw, param_nt, fixed_nt)
+    kkt(ctx.z0, prob, sw; param_nt..., fixed_nt...,
+        idx=ctx.idx, constants=ctx.constants)
+end
+
 """
 Compute (dK/dp)ᵀ · u via ForwardDiff.gradient of dot(u, kkt(...)).
-
-Uses a single forward-mode pass: ∇_p [uᵀ · K(z,p)] = J_Kpᵀ · u.
 """
 function _ac_param_vjp_grad(prob::ACOPFProblem, ctx, param::Symbol, u::AbstractVector)
     if param === :sw
         return ForwardDiff.gradient(
-            s -> dot(u, kkt(ctx.z0, prob, s;
-                pd=ctx.pd0, qd=ctx.qd0, cq=ctx.cq0, cl=ctx.cl0, fmax=ctx.fmax0,
-                idx=ctx.idx, constants=ctx.constants)),
+            s -> dot(u, _ac_kkt_call(prob, ctx, s,
+                (pd=ctx.pd0, qd=ctx.qd0, cq=ctx.cq0, cl=ctx.cl0, fmax=ctx.fmax0), (;))),
             ctx.sw)
     else
-        kw = _PARAM_KWARG_MAP[param]
-        p0 = _AC_PARAM_EXTRACT[param](prob)
-        all_fixed = Dict{Symbol,Any}(
-            :pd => ctx.pd0, :qd => ctx.qd0, :cq => ctx.cq0,
-            :cl => ctx.cl0, :fmax => ctx.fmax0)
-        delete!(all_fixed, kw)
-        fixed_nt = (; (k => v for (k, v) in all_fixed)...)
+        kw, p0, fixed_nt = _ac_fixed_kwargs(prob, ctx, param)
         return ForwardDiff.gradient(
-            x -> dot(u, kkt(ctx.z0, prob, ctx.sw;
-                NamedTuple{(kw,)}((x,))..., fixed_nt...,
-                idx=ctx.idx, constants=ctx.constants)),
+            x -> dot(u, _ac_kkt_call(prob, ctx, ctx.sw, NamedTuple{(kw,)}((x,)), fixed_nt)),
             p0)
     end
 end
 
 """
 Compute dK/dp · tang via ForwardDiff.derivative (directional derivative).
-
-A single scalar derivative: f'(0) where f(t) = K(z, p₀ + t·tang).
-Cost is O(kkt_dims), independent of param_dims.
 """
 function _ac_param_jvp_deriv(prob::ACOPFProblem, ctx, param::Symbol, tang::AbstractVector)
     if param === :sw
         return ForwardDiff.derivative(
-            t -> kkt(ctx.z0, prob, ctx.sw .+ t .* tang;
-                pd=ctx.pd0, qd=ctx.qd0, cq=ctx.cq0, cl=ctx.cl0, fmax=ctx.fmax0,
-                idx=ctx.idx, constants=ctx.constants),
+            t -> _ac_kkt_call(prob, ctx, ctx.sw .+ t .* tang,
+                (pd=ctx.pd0, qd=ctx.qd0, cq=ctx.cq0, cl=ctx.cl0, fmax=ctx.fmax0), (;)),
             0.0)
     else
-        kw = _PARAM_KWARG_MAP[param]
-        p0 = _AC_PARAM_EXTRACT[param](prob)
-        all_fixed = Dict{Symbol,Any}(
-            :pd => ctx.pd0, :qd => ctx.qd0, :cq => ctx.cq0,
-            :cl => ctx.cl0, :fmax => ctx.fmax0)
-        delete!(all_fixed, kw)
-        fixed_nt = (; (k => v for (k, v) in all_fixed)...)
+        kw, p0, fixed_nt = _ac_fixed_kwargs(prob, ctx, param)
         return ForwardDiff.derivative(
-            t -> kkt(ctx.z0, prob, ctx.sw;
-                NamedTuple{(kw,)}((p0 .+ t .* tang,))..., fixed_nt...,
-                idx=ctx.idx, constants=ctx.constants),
+            t -> _ac_kkt_call(prob, ctx, ctx.sw, NamedTuple{(kw,)}((p0 .+ t .* tang,)), fixed_nt),
             0.0)
     end
 end
