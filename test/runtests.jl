@@ -838,3 +838,28 @@ include("test_sensitivity_column.jl")
 include("unified/test_sensitivity_verification.jl")
 
 include("test_apf_integration.jl")
+
+# =============================================================================
+# silence() tests (must be last — resets _SILENCE_WARNINGS flag)
+# =============================================================================
+@testset "silence()" begin
+    PowerDiff._SILENCE_WARNINGS[] = false
+
+    # Before silence: negative demand warning should fire
+    net5 = load_test_case("case5.m")
+    if !isnothing(net5)
+        dc_net = DCNetwork(net5)
+        d = calc_demand_vector(dc_net)
+        d_neg = copy(d)
+        d_neg[1] = -1.0
+        @test_warn "Negative demand" DCOPFProblem(dc_net, d_neg)
+
+        # After silence: same call should be quiet
+        PowerDiff.silence()
+        @test PowerDiff._SILENCE_WARNINGS[] == true
+        @test_nowarn DCOPFProblem(dc_net, d_neg)
+    end
+
+    # Reset for safety
+    PowerDiff._SILENCE_WARNINGS[] = false
+end

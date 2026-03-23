@@ -844,7 +844,7 @@ function _ensure_ac_kkt_factor!(prob::ACOPFProblem)
             lu(J_z)
         catch e
             if e isa LinearAlgebra.SingularException
-                @warn "AC KKT Jacobian is singular (likely degenerate complementarity, e.g., generators at bounds); applying Tikhonov perturbation (eps=$TIKHONOV_EPS). Sensitivity accuracy may be reduced."
+                _SILENCE_WARNINGS[] || @warn "AC KKT Jacobian is singular (likely degenerate complementarity, e.g., generators at bounds); applying Tikhonov perturbation (eps=$TIKHONOV_EPS). Sensitivity accuracy may be reduced."
                 J_reg = J_z + TIKHONOV_EPS * I
                 try
                     lu(J_reg)
