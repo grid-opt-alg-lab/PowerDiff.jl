@@ -65,6 +65,14 @@ calc_sensitivity(state, :operand, :parameter) → Sensitivity{T}
 
 Returns a `Sensitivity{T}` result that acts like a matrix but carries formulation/operand/parameter as symbol fields, plus bidirectional index mappings.
 
+A **single-column** variant avoids materializing the full matrix for OPF problems (O(nnz) vs O(nnz × n)):
+
+```julia
+calc_sensitivity_column(state, :operand, :parameter, col_id) → Vector{T}
+```
+
+`col_id` is an element ID (bus/branch/gen) matching the parameter type.
+
 **Operand symbols** (what we differentiate):
 - `:va` - Voltage phase angles (DC PF, DC OPF, AC PF, AC OPF)
 - `:f` - Branch active power flows (DC PF, DC OPF, AC PF)
@@ -202,6 +210,11 @@ kkt_dims(ac_prob)              # Total KKT dimension
 calc_kkt_jacobian(ac_prob)     # Dense Jacobian via ForwardDiff
 ```
 
+**LMP Sign Conventions**
+- DC OPF: LMP = ν_bal (positive dual, no negation). Constraint `G*g + psh - d = B*θ` places demand negatively.
+- AC OPF: LMP = -ν_p_bal (dual is negative, negated). Constraint `P_flow + P_d - P_g = 0` places demand positively.
+- This difference is intentional — see `docs/src/advanced.md` and `src/sens/lmp.jl` for the full sign chain.
+
 ## File Organization
 
 ```
@@ -257,6 +270,7 @@ test/
 ├── test_ac_opf_all_sens.jl     # AC OPF all-parameter FD verification (d, qd, cq, cl, fmax)
 ├── test_angle_diff_duals.jl    # Angle difference constraint dual tests
 ├── test_dcpf_susceptance.jl    # DC PF susceptance sensitivity tests
+├── test_sensitivity_column.jl  # calc_sensitivity_column tests (all formulations)
 ├── unified/
 │   ├── test_interface.jl       # Unified API tests (symbol-based Sensitivity{T})
 │   └── test_sensitivity_verification.jl  # ForwardDiff verification

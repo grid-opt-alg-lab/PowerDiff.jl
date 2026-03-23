@@ -208,10 +208,59 @@ function _extract_sensitivity(prob::DCOPFProblem, dz_dp::Matrix{Float64}, operan
     elseif operand === :psh
         return dz_dp[idx.psh, :]
     elseif operand === :lmp
+        # DC OPF: LMP = ν_bal directly (no negation).
+        # The constraint G*g + psh - d = B*θ places demand negatively →
+        # JuMP dual ν_bal > 0 at optimum. See lmp.jl:31-35.
         return dz_dp[idx.nu_bal, :]
     else
         throw(ArgumentError("Unknown operand: $operand"))
     end
+end
+
+# =============================================================================
+# Single-Column Extraction Helpers
+# =============================================================================
+
+# Map parameter symbols to cache field names (mirrors _AC_CACHE_FIELD in kkt_ac_opf.jl)
+const _DC_CACHE_FIELD = Dict{Symbol, Symbol}(
+    :d => :dz_dd, :sw => :dz_dsw, :cq => :dz_dcq,
+    :cl => :dz_dcl, :fmax => :dz_dfmax, :b => :dz_db,
+)
+
+# Map parameter symbols to single-column Jacobian builder functions.
+# Each returns Vector{Float64} of size kkt_dims — O(1) nonzeros per column.
+const _DC_PARAM_COL_FN = Dict{Symbol, Function}(
+    :d    => (prob, sol, j) -> calc_kkt_jacobian_demand_column(prob.network, sol, j),
+    :sw   => (prob, sol, e) -> calc_kkt_jacobian_switching_column(prob, sol, e),
+    :cq   => (prob, sol, j) -> calc_kkt_jacobian_cost_quadratic_column(prob.network, sol, j),
+    :cl   => (prob, _, j)   -> calc_kkt_jacobian_cost_linear_column(prob.network, j),
+    :fmax => (prob, sol, e) -> calc_kkt_jacobian_flowlimit_column(prob.network, sol, e),
+    :b    => (prob, sol, e) -> calc_kkt_jacobian_susceptance_column(prob, sol, e),
+)
+
+"""
+    _dc_operand_kkt_rows(idx::NamedTuple, op::Symbol) → UnitRange{Int}
+
+Return the KKT index range for a DC OPF operand.
+"""
+function _dc_operand_kkt_rows(idx::NamedTuple, op::Symbol)
+    op === :va  && return idx.va
+    op === :pg  && return idx.pg
+    op === :f   && return idx.f
+    op === :psh && return idx.psh
+    # DC OPF: no sign flip for LMP — ν_bal > 0 by DC constraint convention (see lmp.jl:31-35)
+    op === :lmp && return idx.nu_bal
+    throw(ArgumentError("Unknown DC OPF operand: $op"))
+end
+
+"""
+    _extract_dz_column(prob::DCOPFProblem, dz_col::Vector{Float64}, op::Symbol) → Vector{Float64}
+
+Extract operand rows from a single dz/dp column vector.
+"""
+function _extract_dz_column(prob::DCOPFProblem, dz_col::Vector{Float64}, op::Symbol)
+    idx = kkt_indices(prob)
+    return dz_col[_dc_operand_kkt_rows(idx, op)]
 end
 
 # =============================================================================
@@ -619,6 +668,20 @@ function calc_kkt_jacobian_demand(net::DCNetwork, d::AbstractVector, sol::DCOPFS
     return J_d
 end
 
+"""
+    calc_kkt_jacobian_demand_column(net, sol, j::Int) → Vector{Float64}
+
+Compute column `j` of the KKT parameter Jacobian ∂K/∂d.
+Only 2 nonzeros: `nu_bal[j]` and `mu_ub[j]`.
+"""
+function calc_kkt_jacobian_demand_column(net::DCNetwork, sol::DCOPFSolution, j::Int)
+    col = zeros(kkt_dims(net))
+    idx = kkt_indices(net)
+    col[idx.nu_bal[j]] = -1.0
+    col[idx.mu_ub[j]] = sol.mu_ub[j]
+    return col
+end
+
 # =============================================================================
 # Topology (Switching) Sensitivity
 # =============================================================================
@@ -683,6 +746,46 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
     end
 
     return J_s
+end
+
+"""
+    _branch_bus_indices(A::AbstractMatrix, e::Int) → (f_bus::Int, t_bus::Int)
+
+Extract the from-bus (+1) and to-bus (-1) indices from row `e` of the incidence matrix.
+"""
+function _branch_bus_indices(A::AbstractMatrix, e::Int)
+    js, vs = findnz(A[e, :])
+    f_bus = 0; t_bus = 0
+    for (j, v) in zip(js, vs)
+        if v > 0; f_bus = j; else; t_bus = j; end
+    end
+    return f_bus, t_bus
+end
+
+"""
+    calc_kkt_jacobian_switching_column(prob, sol, e::Int) → Vector{Float64}
+
+Compute column `e` of the KKT parameter Jacobian ∂K/∂sw.
+~6 nonzeros from the incidence structure of branch `e`.
+"""
+function calc_kkt_jacobian_switching_column(prob::DCOPFProblem, sol::DCOPFSolution, e::Int)
+    net = prob.network
+    col = zeros(kkt_dims(net))
+    idx = kkt_indices(net)
+    A = net.A; b = net.b; θ = sol.va
+    Aθ_e = dot(A[e, :], θ)
+    f_bus, t_bus = _branch_bus_indices(A, e)
+
+    # ∂K_power_bal/∂s_e: b[e] * A[e,:] * (A*θ)[e]
+    col[idx.nu_bal[f_bus]] += b[e] * Aθ_e
+    col[idx.nu_bal[t_bus]] -= b[e] * Aθ_e
+    # ∂K_flow_def/∂s_e: only row e
+    col[idx.nu_flow[e]] = b[e] * Aθ_e
+    # ∂K_θ/∂s_e = -b[e] * A[e,:] * (dot(A[e,:], ν_bal) + ν_flow[e])
+    coeff = -b[e] * (sol.nu_bal[f_bus] - sol.nu_bal[t_bus] + sol.nu_flow[e])
+    col[idx.va[f_bus]] += coeff
+    col[idx.va[t_bus]] -= coeff
+    return col
 end
 
 """

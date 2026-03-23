@@ -68,3 +68,16 @@ function calc_kkt_jacobian_flowlimit(prob::DCOPFProblem, sol::DCOPFSolution)
 
     return J_fmax
 end
+
+"""
+    calc_kkt_jacobian_flowlimit_column(net, sol, e::Int) → Vector{Float64}
+
+Compute column `e` of ∂K/∂fmax. Only 2 nonzeros: `lam_lb[e]` and `lam_ub[e]`.
+"""
+function calc_kkt_jacobian_flowlimit_column(net::DCNetwork, sol::DCOPFSolution, e::Int)
+    col = zeros(kkt_dims(net))
+    idx = kkt_indices(net)
+    col[idx.lam_lb[e]] = sol.lam_lb[e]
+    col[idx.lam_ub[e]] = sol.lam_ub[e]
+    return col
+end

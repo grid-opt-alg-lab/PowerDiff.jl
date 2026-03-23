@@ -890,3 +890,99 @@ function _get_ac_dz_dparam!(prob::ACOPFProblem, param::Symbol)::Matrix{Float64}
     end
     return cached
 end
+
+# =============================================================================
+# Single-Column Helpers
+# =============================================================================
+
+"""
+    _ac_operand_kkt_rows(idx::NamedTuple, op::Symbol) → UnitRange{Int}
+
+Return the KKT index range for an AC OPF operand.
+"""
+function _ac_operand_kkt_rows(idx::NamedTuple, op::Symbol)
+    op === :va   && return idx.va
+    op === :vm   && return idx.vm
+    op === :pg   && return idx.pg
+    op === :qg   && return idx.qg
+    op === :lmp  && return idx.nu_p_bal
+    op === :qlmp && return idx.nu_q_bal
+    throw(ArgumentError("Unknown AC OPF operand: $op"))
+end
+
+# AC OPF: LMP = -ν_p_bal (negation required).
+# The constraint P_flow + P_d - P_g = 0 places demand positively →
+# JuMP dual ν_p_bal < 0 at optimum. See lmp.jl:38-41.
+_ac_operand_sign(op::Symbol) = (op === :lmp || op === :qlmp) ? -1.0 : 1.0
+
+"""
+    _extract_ac_dz_column(prob, dz_dp::Matrix{Float64}, op::Symbol, col_idx::Int) → Vector{Float64}
+
+Extract operand rows from column col_idx of a cached full dz/dp matrix.
+"""
+function _extract_ac_dz_column(prob::ACOPFProblem, dz_dp::Matrix{Float64}, op::Symbol, col_idx::Int)
+    idx = kkt_indices(prob)
+    col = dz_dp[_ac_operand_kkt_rows(idx, op), col_idx]
+    _ac_operand_sign(op) == -1.0 && lmul!(-1, col)
+    return col
+end
+
+"""
+    _extract_ac_dz_column_vec(prob, dz_col::Vector{Float64}, op::Symbol) → Vector{Float64}
+
+Extract operand rows from a single dz/dp column vector.
+"""
+function _extract_ac_dz_column_vec(prob::ACOPFProblem, dz_col::Vector{Float64}, op::Symbol)
+    idx = kkt_indices(prob)
+    col = dz_col[_ac_operand_kkt_rows(idx, op)]
+    _ac_operand_sign(op) == -1.0 && lmul!(-1, col)
+    return col
+end
+
+"""
+    _calc_ac_kkt_param_column(prob, sol, param, col_idx) → Vector{Float64}
+
+Compute a single column of ∂K/∂param via ForwardDiff.derivative (scalar → vector).
+Much cheaper than the full Jacobian when only one column is needed.
+"""
+function _calc_ac_kkt_param_column(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol, col_idx::Int)
+    z0 = flatten_variables(sol, prob)
+    sw = prob.network.sw
+    p0 = _AC_PARAM_EXTRACT[param](prob)
+    idx = kkt_indices(prob)
+    constants = prob.cache.kkt_constants
+    if isnothing(constants)
+        constants = _extract_kkt_constants(prob)
+        prob.cache.kkt_constants = constants
+    end
+
+    pd0 = _extract_bus_pd(prob)
+    qd0 = _extract_bus_qd(prob)
+    cq0 = _extract_gen_cq(prob)
+    cl0 = _extract_gen_cl(prob)
+    fmax0 = _extract_branch_fmax(prob)
+
+    if param === :sw
+        f_col = t -> begin
+            # Promote to Dual-compatible type so ForwardDiff can track derivatives
+            sw_t = typeof(t).(sw)
+            sw_t[col_idx] = t
+            kkt(z0, prob, sw_t; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0,
+                idx=idx, constants=constants)
+        end
+        return ForwardDiff.derivative(f_col, sw[col_idx])
+    else
+        kw = _PARAM_KWARG_MAP[param]
+        all_fixed = Dict{Symbol,Any}(:pd => pd0, :qd => qd0, :cq => cq0, :cl => cl0, :fmax => fmax0)
+        delete!(all_fixed, kw)
+        fixed_nt = (; (k => v for (k, v) in all_fixed)...)
+
+        f_col = t -> begin
+            p_t = typeof(t).(p0)
+            p_t[col_idx] = t
+            kkt(z0, prob, sw; NamedTuple{(kw,)}((p_t,))..., fixed_nt...,
+                idx=idx, constants=constants)
+        end
+        return ForwardDiff.derivative(f_col, p0[col_idx])
+    end
+end

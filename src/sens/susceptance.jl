@@ -83,3 +83,28 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
 
     return J_b
 end
+
+"""
+    calc_kkt_jacobian_susceptance_column(prob, sol, e::Int) → Vector{Float64}
+
+Compute column `e` of ∂K/∂b. ~6 nonzeros from the incidence structure of branch `e`.
+"""
+function calc_kkt_jacobian_susceptance_column(prob::DCOPFProblem, sol::DCOPFSolution, e::Int)
+    net = prob.network
+    col = zeros(kkt_dims(net))
+    idx = kkt_indices(net)
+    A = net.A; sw = net.sw; θ = sol.va
+    Aθ_e = dot(A[e, :], θ)
+    f_bus, t_bus = _branch_bus_indices(A, e)
+
+    # ∂K_power_bal/∂b_e: sw[e] * A[e,:] * (A*θ)[e]
+    col[idx.nu_bal[f_bus]] += sw[e] * Aθ_e
+    col[idx.nu_bal[t_bus]] -= sw[e] * Aθ_e
+    # ∂K_flow_def/∂b_e: only row e
+    col[idx.nu_flow[e]] = sw[e] * Aθ_e
+    # ∂K_θ/∂b_e = -sw[e] * A[e,:] * (dot(A[e,:], ν_bal) + ν_flow[e])
+    coeff = -sw[e] * (sol.nu_bal[f_bus] - sol.nu_bal[t_bus] + sol.nu_flow[e])
+    col[idx.va[f_bus]] += coeff
+    col[idx.va[t_bus]] -= coeff
+    return col
+end
