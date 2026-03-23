@@ -16,3 +16,7 @@ docs/Manifest.toml
 
 # Development reference materials
 development/
+
+# Experiments and generated artifacts
+experiments/
+presentation.html
