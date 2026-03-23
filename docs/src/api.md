@@ -17,7 +17,10 @@ IDMapping
 
 ```@docs
 jvp
+jvp!
 vjp
+vjp!
+kkt_dims
 dict_to_vec
 vec_to_dict
 ```

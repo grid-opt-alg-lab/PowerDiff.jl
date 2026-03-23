@@ -67,6 +67,7 @@ include("sens/topology_ac.jl")
 include("sens/current.jl")
 include("sens/jacobian.jl")
 include("sens/interface.jl")
+include("sens/vjp_jvp.jl")
 
 # =============================================================================
 # Exports — clean public API
@@ -81,7 +82,7 @@ export IDMapping
 export calc_sensitivity, calc_sensitivity_column
 export Sensitivity
 export operand_symbols, parameter_symbols
-export jvp, vjp, dict_to_vec, vec_to_dict
+export jvp, vjp, jvp!, vjp!, dict_to_vec, vec_to_dict, kkt_dims
 
 # DC Power Flow Types
 export DCNetwork, DCPowerFlowState
