@@ -128,3 +128,21 @@ J = PD.calc_kkt_jacobian(ac_prob)       # Dense Jacobian via ForwardDiff
 dim = PD.kkt_dims(ac_prob)             # KKT dimension
 idx = PD.kkt_indices(ac_prob)          # Named index ranges
 ```
+
+## LMP Sign Conventions
+
+DC OPF and AC OPF use **different LMP sign conventions** due to their constraint formulations. This is intentional and consistent within each formulation.
+
+| Aspect | DC OPF | AC OPF |
+|--------|--------|--------|
+| **Power balance constraint** | `G*g + psh - d = B*θ` | `P_flow + P_d - P_g = 0` |
+| **Demand sign in constraint** | Negative (subtracted) | Positive |
+| **JuMP dual at optimum** | `ν_bal > 0` | `ν_p_bal < 0` |
+| **`calc_lmp()` formula** | `return ν_bal` | `return -ν_p_bal` |
+| **Sensitivity extraction** | `dz_dp[idx.nu_bal, :]` (no flip) | `-dz_dp[idx.nu_p_bal, :]` (negated) |
+
+**Root cause:** The DC OPF constraint subtracts demand (`-d`), so increasing demand directly increases the dual. The AC OPF constraint adds demand (`+P_d`), so JuMP's Lagrangian `L = f - ν·h` produces a negative dual, requiring negation to get the positive marginal cost.
+
+Both formulations produce **positive LMPs** at the API level: `calc_lmp()` and `calc_sensitivity(prob, :lmp, ...)` return values where a positive entry means "increasing demand at this bus increases cost."
+
+See `src/sens/lmp.jl` for the authoritative sign convention documentation.

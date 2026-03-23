@@ -629,8 +629,71 @@ end
 # =============================================================================
 
 function _calc_sensitivity_column(state::DCPowerFlowState, op::Symbol, param::Symbol, col_idx::Int)
-    matrix = _calc_sensitivity_matrix(state, op, param)
-    return matrix[:, col_idx]
+    if param === :d
+        return _dcpf_demand_column(state, op, col_idx)
+    elseif param === :sw
+        return _dcpf_switching_column(state, op, col_idx)
+    elseif param === :b
+        return _dcpf_susceptance_column(state, op, col_idx)
+    else
+        error("Unhandled DC PF parameter :$param")
+    end
+end
+
+"""Single-column demand sensitivity: solve B_r \\ e_j instead of B_r \\ I."""
+function _dcpf_demand_column(state::DCPowerFlowState, op::Symbol, col_idx::Int)
+    net = state.net; n = net.n; nr = state.non_ref
+    dva = zeros(n)
+    r_idx = findfirst(==(col_idx), nr)
+    if !isnothing(r_idx)
+        n_r = length(nr)
+        e_j = zeros(n_r)
+        e_j[r_idx] = 1.0
+        dva[nr] = -(state.B_r_factor \ e_j)
+    end
+    op === :va && return dva
+    W = Diagonal(-net.b .* net.sw)
+    return Vector(W * net.A * dva)
+end
+
+"""Single-column switching sensitivity: solve B_r \\ (rank-1 RHS for branch e)."""
+function _dcpf_switching_column(state::DCPowerFlowState, op::Symbol, e::Int)
+    net = state.net; n = net.n; nr = state.non_ref
+    a_e_r = Vector(net.A[e, nr])
+    Aθ_e = dot(a_e_r, state.va[nr])
+    rhs = (-net.b[e] * Aθ_e) .* a_e_r
+
+    dva = zeros(n)
+    dva[nr] = -(state.B_r_factor \ rhs)
+
+    if op === :va
+        return dva
+    end
+    # :f — indirect effect through all edges + direct effect on edge e
+    W = Diagonal(-net.b .* net.sw)
+    df = Vector(W * net.A * dva)
+    df[e] += -net.b[e] * dot(net.A[e, :], state.va)
+    return df
+end
+
+"""Single-column susceptance sensitivity: same structure as switching with sw/b swapped."""
+function _dcpf_susceptance_column(state::DCPowerFlowState, op::Symbol, e::Int)
+    net = state.net; n = net.n; nr = state.non_ref
+    a_e_r = Vector(net.A[e, nr])
+    Aθ_e = dot(a_e_r, state.va[nr])
+    rhs = (-net.sw[e] * Aθ_e) .* a_e_r
+
+    dva = zeros(n)
+    dva[nr] = -(state.B_r_factor \ rhs)
+
+    if op === :va
+        return dva
+    end
+    # :f — indirect effect + direct effect (∂W/∂b_e * A * θ)
+    W = Diagonal(-net.b .* net.sw)
+    df = Vector(W * net.A * dva)
+    df[e] += -net.sw[e] * dot(net.A[e, :], state.va)
+    return df
 end
 
 # =============================================================================
@@ -646,11 +709,10 @@ function _calc_sensitivity_column(prob::DCOPFProblem, op::Symbol, param::Symbol,
         return cached[_dc_operand_kkt_rows(idx, op), col_idx]
     end
 
-    # Compute single column: solve K \ J_param[:, col_idx]
+    # Compute single column directly: O(1) Jacobian column + O(nnz) LU solve
     kkt_lu = _ensure_kkt_factor!(prob)
     sol = _ensure_solved!(prob)
-    J_param = _DC_PARAM_JAC_FN[param](prob, sol)
-    rhs = Vector(J_param[:, col_idx])
+    rhs = _DC_PARAM_COL_FN[param](prob, sol, col_idx)
     ldiv!(kkt_lu, rhs)
     lmul!(-1, rhs)
     return _extract_dz_column(prob, rhs, op)

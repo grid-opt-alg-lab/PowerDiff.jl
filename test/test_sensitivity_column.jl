@@ -153,7 +153,7 @@
         @test !isnothing(pm_data)
         prob = ACOPFProblem(pm_data)
 
-        for (op, param) in [(:lmp, :d), (:va, :sw), (:qg, :fmax)]
+        for (op, param) in [(:lmp, :d), (:va, :sw), (:qg, :fmax), (:qlmp, :d)]
             S = calc_sensitivity(prob, op, param)
             for j in [1, size(S, 2)]
                 col_id = S.col_to_id[j]

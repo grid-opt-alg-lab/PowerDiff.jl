@@ -910,7 +910,9 @@ function _ac_operand_kkt_rows(idx::NamedTuple, op::Symbol)
     throw(ArgumentError("Unknown AC OPF operand: $op"))
 end
 
-# LMP/QLMP are negated relative to the KKT dual
+# AC OPF: LMP = -ν_p_bal (negation required).
+# The constraint P_flow + P_d - P_g = 0 places demand positively →
+# JuMP dual ν_p_bal < 0 at optimum. See lmp.jl:38-41.
 _ac_operand_sign(op::Symbol) = (op === :lmp || op === :qlmp) ? -1.0 : 1.0
 
 """
@@ -920,7 +922,9 @@ Extract operand rows from column col_idx of a cached full dz/dp matrix.
 """
 function _extract_ac_dz_column(prob::ACOPFProblem, dz_dp::Matrix{Float64}, op::Symbol, col_idx::Int)
     idx = kkt_indices(prob)
-    return _ac_operand_sign(op) .* dz_dp[_ac_operand_kkt_rows(idx, op), col_idx]
+    col = dz_dp[_ac_operand_kkt_rows(idx, op), col_idx]
+    _ac_operand_sign(op) == -1.0 && lmul!(-1, col)
+    return col
 end
 
 """
@@ -930,7 +934,9 @@ Extract operand rows from a single dz/dp column vector.
 """
 function _extract_ac_dz_column_vec(prob::ACOPFProblem, dz_col::Vector{Float64}, op::Symbol)
     idx = kkt_indices(prob)
-    return _ac_operand_sign(op) .* dz_col[_ac_operand_kkt_rows(idx, op)]
+    col = dz_col[_ac_operand_kkt_rows(idx, op)]
+    _ac_operand_sign(op) == -1.0 && lmul!(-1, col)
+    return col
 end
 
 """

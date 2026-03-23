@@ -46,6 +46,18 @@ function calc_kkt_jacobian_cost_linear(net::DCNetwork)
 end
 
 """
+    calc_kkt_jacobian_cost_linear_column(net, j::Int) → Vector{Float64}
+
+Compute column `j` of ∂K/∂cl. Only 1 nonzero: `pg[j] = 1.0`.
+"""
+function calc_kkt_jacobian_cost_linear_column(net::DCNetwork, j::Int)
+    col = zeros(kkt_dims(net))
+    idx = kkt_indices(net)
+    col[idx.pg[j]] = 1.0
+    return col
+end
+
+"""
     calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem, sol::DCOPFSolution)
 
 Compute the Jacobian of KKT conditions with respect to quadratic cost coefficients dK/dcq.
@@ -80,4 +92,16 @@ function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem, sol::DCOPFSolution
     J_cq[idx.pg, :] = 2 * sparse(Diagonal(g))
 
     return J_cq
+end
+
+"""
+    calc_kkt_jacobian_cost_quadratic_column(net, sol, j::Int) → Vector{Float64}
+
+Compute column `j` of ∂K/∂cq. Only 1 nonzero: `pg[j] = 2*g[j]`.
+"""
+function calc_kkt_jacobian_cost_quadratic_column(net::DCNetwork, sol::DCOPFSolution, j::Int)
+    col = zeros(kkt_dims(net))
+    idx = kkt_indices(net)
+    col[idx.pg[j]] = 2.0 * sol.pg[j]
+    return col
 end

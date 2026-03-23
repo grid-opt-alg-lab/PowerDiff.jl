@@ -210,6 +210,11 @@ kkt_dims(ac_prob)              # Total KKT dimension
 calc_kkt_jacobian(ac_prob)     # Dense Jacobian via ForwardDiff
 ```
 
+**LMP Sign Conventions**
+- DC OPF: LMP = ν_bal (positive dual, no negation). Constraint `G*g + psh - d = B*θ` places demand negatively.
+- AC OPF: LMP = -ν_p_bal (dual is negative, negated). Constraint `P_flow + P_d - P_g = 0` places demand positively.
+- This difference is intentional — see `docs/src/advanced.md` and `src/sens/lmp.jl` for the full sign chain.
+
 ## File Organization
 
 ```
