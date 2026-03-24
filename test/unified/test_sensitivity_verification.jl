@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Cross-verification of DC PF sensitivities against ForwardDiff (exact) and
+# DC OPF sensitivities against finite differences (demand, switching).
+# ForwardDiff tests differentiate through the same linear algebra as the
+# analytical code, so they verify correctness rather than just consistency.
+
 using PowerDiff
 using PowerModels
 using ForwardDiff
@@ -54,7 +59,8 @@ using Test
         sw0 = copy(net.sw)
         fd_dva_dsw = ForwardDiff.jacobian(theta_of_sw, sw0)
 
-        # Compare analytical vs ForwardDiff
+        # Both paths compute the same linear algebra (L_r \ p_r), so agreement
+        # should be O(eps_mach * cond(B_r)) — well within 1e-10.
         @test size(dva_dsw) == size(fd_dva_dsw)
         @test maximum(abs.(Matrix(dva_dsw) - fd_dva_dsw)) < 1e-10
 
@@ -147,6 +153,8 @@ using Test
         dva_dd = calc_sensitivity(prob, :va, :d)
 
         # Verify with finite differences
+        # 1e-3 absolute tolerance: demand perturbation doesn't change the active set,
+        # so FD accuracy is O(ε) ≈ 1e-5 plus Ipopt noise O(tol/ε) ≈ 1e-3.
         ε = 1e-5
         n = net.n
 
@@ -190,7 +198,8 @@ using Test
 
             fd_dva_dsw_col = (sol.va - sol_pert.va) / ε  # Reversed due to negative ε
 
-            # Larger tolerance for OPF due to active constraint changes
+            # 5% tolerance: switching perturbation can shift constraints near their
+            # binding threshold, causing discontinuous dual changes that amplify FD error.
             max_err = maximum(abs.(Matrix(dva_dsw)[:, e] - fd_dva_dsw_col))
             @test max_err < 0.05
         end

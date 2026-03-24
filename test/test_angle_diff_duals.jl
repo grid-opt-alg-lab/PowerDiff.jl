@@ -1,7 +1,7 @@
-# Phase angle difference dual tests for DC OPF KKT system (Issue #13)
-#
-# Verifies that gamma_lb/gamma_ub duals are correctly extracted and that
-# the KKT system produces correct sensitivities when angle limits bind.
+# Verifies phase angle difference duals (gamma_lb/gamma_ub) are near-zero when
+# angle limits are loose, nonzero when tight, and correctly reflected in KKT
+# residuals and FD-verified sensitivities. Tests both upper-limit binding
+# (forward flow) and lower-limit binding (reverse flow) scenarios.
 
 using PowerDiff
 using LinearAlgebra
@@ -25,6 +25,7 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
         0.0  1.0;   # Gen 2 at bus 2 (expensive)
         0.0  0.0    # No gen at bus 3
     ])
+    # All branches have 10 p.u. reactance (b = Im(1/z) < 0 for inductive lines)
     b = [-10.0, -10.0, -10.0]
 
     # Nonzero demand at all buses, small enough to avoid shedding
@@ -61,7 +62,8 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
     end
 
     @testset "Tight angle limits — binding duals" begin
-        # angmax = 0.025 on branch 2 (1→3): constrains angle difference
+        # angmax = 0.025 rad on branch 2 (1→3): small enough to bind under given
+        # demand pattern (0.5 MW at bus 3) but large enough for feasibility
         angmax_tight = [π, 0.025, π]
         net = DCNetwork(n, m, k, A, G_inc, b;
             fmax=fill(100.0, m), gmax=[5.0, 5.0], gmin=[0.0, 0.0],

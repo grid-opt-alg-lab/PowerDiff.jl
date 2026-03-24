@@ -149,10 +149,39 @@ export ptdf_matrix
 
 const _APF_HINT = "Load AcceleratedDCPowerFlows first: `using AcceleratedDCPowerFlows`"
 
+"""
+    to_apf_network(net::DCNetwork) → APF.Network
+
+Convert a `DCNetwork` to an AcceleratedDCPowerFlows network. Requires `using AcceleratedDCPowerFlows`.
+"""
 function to_apf_network end
+
+"""
+    apf_ptdf(net::DCNetwork) → Matrix{Float64}
+
+Compute the PTDF matrix via AcceleratedDCPowerFlows. Requires `using AcceleratedDCPowerFlows`.
+"""
 function apf_ptdf end
+
+"""
+    apf_lodf(net::DCNetwork) → Matrix{Float64}
+
+Compute the LODF matrix via AcceleratedDCPowerFlows. Requires `using AcceleratedDCPowerFlows`.
+"""
 function apf_lodf end
+
+"""
+    compare_ptdf(state::DCPowerFlowState) → NamedTuple
+
+Cross-validate PowerDiff PTDF against AcceleratedDCPowerFlows PTDF. Requires `using AcceleratedDCPowerFlows`.
+"""
 function compare_ptdf end
+
+"""
+    materialize_apf_ptdf(net::DCNetwork) → Matrix{Float64}
+
+Materialize the full PTDF matrix from AcceleratedDCPowerFlows. Requires `using AcceleratedDCPowerFlows`.
+"""
 function materialize_apf_ptdf end
 
 # Fallback methods with informative error when APF is not loaded

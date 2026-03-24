@@ -242,6 +242,9 @@ end
 Compute all branch flows given voltage state and switching state.
 Returns vectors of p_fr, q_fr, p_to, q_to indexed by branch number.
 
+Flow equations match PowerModels' `constraint_ohms_yt_from`/`constraint_ohms_yt_to`
+(polar form with `calc_branch_y`/`calc_branch_t` decomposition, `tm = tap^2`).
+
 The switching variable sw_l multiplies each flow, so sw_l=0 means the branch
 contributes zero flow (open), sw_l=1 means full flow (closed).
 """

@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# AC Power Flow Jacobian Verification Tests
+# FD verification of AC PF Jacobian blocks (∂P/∂θ, ∂P/∂|V|, ∂Q/∂θ, ∂Q/∂|V|).
+# These are exact analytical formulas (not computed via implicit function theorem),
+# so tighter tolerances are used.
 #
-# Verifies the 4 Jacobian blocks (∂P/∂θ, ∂P/∂|V|, ∂Q/∂θ, ∂Q/∂|V|) against
-# finite differences and cross-checks with PowerModels' calc_basic_jacobian_matrix.
+# Also cross-checks against PowerModels' calc_basic_jacobian_matrix.
 
 using PowerDiff
 using PowerModels
@@ -51,6 +52,9 @@ using Test
 
     delta = 1e-7
     fd_tol = 1e-5
+    # delta=1e-7 (tighter than 1e-5 used for IFT-based sensitivities) because
+    # Jacobian blocks are exact analytical formulas with no solver noise.
+    # FD error is O(delta) ≈ 1e-7; tolerance 1e-5 provides a 100x safety margin.
 
     # Compute P, Q at base operating point
     S_base = v .* conj.(Y * v)

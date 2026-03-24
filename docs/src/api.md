@@ -4,6 +4,7 @@
 
 ```@docs
 calc_sensitivity
+calc_sensitivity_column
 Sensitivity
 ```
 
@@ -51,6 +52,7 @@ update_switching!
 calc_demand_vector
 calc_susceptance_matrix
 calc_lmp
+calc_qlmp
 calc_congestion_component
 calc_energy_component
 calc_generation_participation_factors
@@ -78,6 +80,12 @@ branch_power
 calc_power_flow_jacobian
 ```
 
+## Utilities
+
+```@docs
+silence
+```
+
 ## Abstract Types
 
 ```@docs
@@ -85,4 +93,14 @@ AbstractPowerNetwork
 AbstractPowerFlowState
 AbstractOPFSolution
 AbstractOPFProblem
+```
+
+## AcceleratedDCPowerFlows Extension
+
+```@docs
+to_apf_network
+apf_ptdf
+apf_lodf
+compare_ptdf
+materialize_apf_ptdf
 ```

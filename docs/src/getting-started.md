@@ -87,6 +87,12 @@ dpsh_dd  = calc_sensitivity(prob, :psh, :d)    # dpsh/dd (n x n)
 dpsh_dsw = calc_sensitivity(prob, :psh, :sw)   # dpsh/dsw (n x m)
 ```
 
+For large networks where only one parameter element matters, avoid building the full matrix:
+
+```julia
+col = calc_sensitivity_column(prob, :lmp, :d, 3)   # dLMP/dd at bus 3, length n
+```
+
 ### Using the `Sensitivity{T}` Result
 
 ```julia

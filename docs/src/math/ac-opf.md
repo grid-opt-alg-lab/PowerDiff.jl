@@ -38,7 +38,16 @@ p_{to,l} &= \mathrm{sw}_l \left[(g_l + g_{to}^{sh}) |V_t|^2 + \frac{-g_l t_r - b
 \end{aligned}
 ```
 
-where ``g_l + jb_l`` is the branch admittance, ``t_r + jt_i`` is the complex tap ratio, ``t_m^2 = \mathrm{tap}^2``, and ``g_{fr}^{sh}``, ``b_{fr}^{sh}`` are the from-side shunt elements of the pi-model. Reactive flow equations ``q_{fr,l}`` and ``q_{to,l}`` follow the same structure.
+The reactive power flow equations follow the same structure with sine/cosine swapped:
+
+```math
+\begin{aligned}
+q_{fr,l} &= \mathrm{sw}_l \left[-\frac{b_l + b_{fr}^{sh}}{t_m^2} |V_f|^2 - \frac{-b_l t_r - g_l t_i}{t_m^2} |V_f||V_t| \cos(\theta_f - \theta_t) + \frac{-g_l t_r + b_l t_i}{t_m^2} |V_f||V_t| \sin(\theta_f - \theta_t)\right] \\
+q_{to,l} &= \mathrm{sw}_l \left[-(b_l + b_{to}^{sh}) |V_t|^2 - \frac{-b_l t_r + g_l t_i}{t_m^2} |V_t||V_f| \cos(\theta_t - \theta_f) + \frac{-g_l t_r - b_l t_i}{t_m^2} |V_t||V_f| \sin(\theta_t - \theta_f)\right]
+\end{aligned}
+```
+
+where ``g_l + jb_l`` is the branch admittance, ``t_r + jt_i`` is the complex tap ratio, ``t_m^2 = \mathrm{tap}^2``, and ``g_{fr}^{sh}``, ``b_{fr}^{sh}`` are the from-side shunt elements of the pi-model.
 
 ### Inequality Constraints
 
@@ -131,9 +140,9 @@ The `ACSensitivityCache` implements a two-level caching hierarchy:
 
 1. **KKT factorization** (shared across all parameters): One LU factorization of ``\partial K / \partial z`` is computed once and reused for all parameter types.
 
-2. **Parameter derivatives** (shared across operands): For each parameter ``p``, the full ``dz/dp`` matrix is computed once. Different operand queries (e.g., `:va`, `:vm`, `:pg`, `:qg`, `:lmp`) simply extract different row blocks from the same cached matrix.
+2. **Parameter derivatives** (shared across operands): For each parameter ``p``, the full ``dz/dp`` matrix is computed once. Different operand queries (`:va`, `:vm`, `:pg`, `:qg`, `:lmp`, `:qlmp`) simply extract different row blocks from the same cached matrix.
 
-This means that querying all 5 operands for the same parameter costs essentially the same as querying 1 operand. And querying a second parameter type only requires the ``\partial K / \partial p`` computation (the expensive KKT factorization is reused).
+This means that querying all 6 operands for the same parameter costs essentially the same as querying 1 operand. And querying a second parameter type only requires the ``\partial K / \partial p`` computation (the expensive KKT factorization is reused).
 
 ## Operand Extraction
 

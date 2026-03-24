@@ -15,7 +15,7 @@ A Julia package for differentiable power system analysis. Compute sensitivities 
 - **DC OPF**: B-theta formulation with analytical KKT sensitivities for demand, switching, cost, flow limits, and susceptances
 - **DC power flow**: Switching and demand sensitivities via matrix perturbation theory
 - **AC power flow**: Voltage and current sensitivities w.r.t. power injections
-- **AC OPF**: Switching sensitivities via implicit differentiation with ForwardDiff
+- **AC OPF**: Full sensitivity analysis (switching, demand, costs, flow limits) via implicit differentiation of KKT conditions
 - **LMP analysis**: Locational marginal prices with energy/congestion decomposition
 - **Load shedding**: Sensitivity of optimal load curtailment to network parameters
 
@@ -55,7 +55,7 @@ See the [Getting Started guide](https://samueltalkington.com/research/powerdiff/
 
 - [Getting Started](https://samueltalkington.com/research/powerdiff/getting-started/) — DC PF, DC OPF, AC PF, AC OPF walkthroughs
 - [Sensitivity API](https://samueltalkington.com/research/powerdiff/sensitivity-api/) — Operand/parameter tables, valid combinations, indexing
-- [Mathematical Background](https://samueltalkington.com/research/powerdiff/math/) — B-theta formulation, KKT implicit differentiation
+- [Mathematical Background](https://samueltalkington.com/research/powerdiff/math/dc-power-flow/) — B-theta formulation, KKT implicit differentiation
 - [Advanced Topics](https://samueltalkington.com/research/powerdiff/advanced/) — Type hierarchy, caching, solver configuration
 - [API Reference](https://samueltalkington.com/research/powerdiff/api/) — Full docstring reference
 

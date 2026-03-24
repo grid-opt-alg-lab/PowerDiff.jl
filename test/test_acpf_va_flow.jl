@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# AC Power Flow Voltage Angle and Branch Flow Sensitivity Verification
+# FD verification of AC PF voltage angle (∂θ/∂p, ∂θ/∂q) and branch active power
+# flow (∂P_flow/∂p, ∂P_flow/∂q) sensitivities. Same methodology as
+# test_ac_pf_verification.jl.
 #
 # Verifies :va and :f operands against finite-difference re-solve,
 # using the same PQ-only Newton approach as test_ac_pf_verification.jl.
@@ -67,6 +69,8 @@ using Test
 
     delta = 1e-5
     fd_tol = 0.01  # 1% relative error
+    # Forward-difference parameters: delta=1e-5 gives O(1e-5) truncation error.
+    # fd_tol=0.01 (1%); see test_ac_pf_verification.jl for the full error analysis.
 
     # Get analytical sensitivities
     dva_dp = calc_sensitivity(state, :va, :p)
@@ -92,6 +96,9 @@ using Test
             if norm(fd_dva) > 1e-10
                 rel_err = norm(analytical_col - fd_dva) / norm(fd_dva)
                 @test rel_err < fd_tol
+            else
+                @info "Skipped ∂θ/∂p FD: near-zero perturbation" bus=k_global
+                @test norm(analytical_col) < 1e-6  # analytical must also be near-zero
             end
         end
     end
@@ -114,6 +121,9 @@ using Test
             if norm(fd_dva) > 1e-10
                 rel_err = norm(analytical_col - fd_dva) / norm(fd_dva)
                 @test rel_err < fd_tol
+            else
+                @info "Skipped ∂θ/∂q FD: near-zero perturbation" bus=k_global
+                @test norm(analytical_col) < 1e-6  # analytical must also be near-zero
             end
         end
     end
@@ -147,6 +157,9 @@ using Test
             if norm(fd_df[active]) > 1e-10
                 rel_err = norm(analytical_col[active] - fd_df[active]) / norm(fd_df[active])
                 @test rel_err < fd_tol
+            else
+                @info "Skipped ∂P_flow/∂p FD: near-zero perturbation" bus=k_global
+                @test norm(analytical_col) < 1e-6  # analytical must also be near-zero
             end
         end
     end
@@ -180,6 +193,9 @@ using Test
             if norm(fd_df[active]) > 1e-10
                 rel_err = norm(analytical_col[active] - fd_df[active]) / norm(fd_df[active])
                 @test rel_err < fd_tol
+            else
+                @info "Skipped ∂P_flow/∂q FD: near-zero perturbation" bus=k_global
+                @test norm(analytical_col) < 1e-6  # analytical must also be near-zero
             end
         end
     end

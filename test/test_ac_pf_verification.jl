@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# AC Power Flow Finite-Difference Verification Tests
-#
-# Verifies analytical voltage and current sensitivities against a Newton-Raphson
-# re-solve of the AC power flow equations.
+# FD verification of AC PF sensitivities (∂|V|/∂p, ∂|V|/∂q, ∂|I|/∂p, ∂|I|/∂q,
+# ∂V/∂p, ∂V/∂q). Perturbs each injection, re-solves Newton-Raphson via
+# `solve_pf_pq`, and compares against analytical sensitivities. Uses case5 with
+# all non-slack buses treated as PQ.
 #
 # Key: the analytical formula treats ALL non-slack buses as PQ (free voltage),
 # so we cannot use PowerModels' compute_ac_pf! which enforces PV constraints.
@@ -84,6 +84,11 @@ using Test
 
     delta = 1e-5
     fd_tol = 0.01  # 1% relative error
+    # Forward-difference error model:
+    #   Truncation error: O(delta) from Taylor remainder
+    #   Cancellation error: O(eps_mach/delta) ≈ O(1e-11), negligible
+    #   Newton re-solve converges to O(1e-12), so FD accuracy is O(delta) ≈ 1e-5
+    #   fd_tol = 1% provides a generous margin; typical agreement is O(1e-4)
 
     # -----------------------------------------------------------------
     # ∂|v|/∂p — perturb active power at non-slack buses
@@ -105,6 +110,7 @@ using Test
                 @test rel_err < fd_tol
             else
                 @info "Skipped ∂|v|/∂p FD: near-zero perturbation" bus=k_global
+                @test norm(analytical_col) < 1e-6  # analytical must also be near-zero
             end
         end
     end
@@ -129,6 +135,7 @@ using Test
                 @test rel_err < fd_tol
             else
                 @info "Skipped ∂|v|/∂q FD: near-zero perturbation" bus=k_global
+                @test norm(analytical_col) < 1e-6  # analytical must also be near-zero
             end
         end
     end
@@ -163,6 +170,7 @@ using Test
                 @test rel_err < fd_tol
             else
                 @info "Skipped ∂|I|/∂p FD: near-zero perturbation" bus=k_global
+                @test norm(analytical_col) < 1e-6  # analytical must also be near-zero
             end
         end
     end
@@ -197,6 +205,7 @@ using Test
                 @test rel_err < fd_tol
             else
                 @info "Skipped ∂|I|/∂q FD: near-zero perturbation" bus=k_global
+                @test norm(analytical_col) < 1e-6  # analytical must also be near-zero
             end
         end
     end
@@ -225,6 +234,7 @@ using Test
                 @test rel_err < fd_tol
             else
                 @info "Skipped ∂v/∂p FD: near-zero perturbation" bus=k_global
+                @test norm(analytical_col) < 1e-6  # analytical must also be near-zero
             end
         end
     end
@@ -249,6 +259,7 @@ using Test
                 @test rel_err < fd_tol
             else
                 @info "Skipped ∂v/∂q FD: near-zero perturbation" bus=k_global
+                @test norm(analytical_col) < 1e-6  # analytical must also be near-zero
             end
         end
     end

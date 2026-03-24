@@ -34,6 +34,8 @@ include("common.jl")
 # DC OPF Tests
 # =============================================================================
 
+# Verify DCNetwork extracts correct dimensions, incidence matrix shape, and ref bus
+# from a PowerModels case dictionary.
 @testset "DCNetwork Construction" begin
     net = load_test_case("case5.m")
     if isnothing(net)
@@ -54,6 +56,9 @@ include("common.jl")
     end
 end
 
+# Verify DCOPFProblem builds, solves, and satisfies basic feasibility.
+# Bound tolerances are ~1e-6: Ipopt converges to ~1e-8 complementarity,
+# but bound projection adds O(1e-6) slack.
 @testset "DCOPFProblem Construction and Solve" begin
     net = load_test_case("case5.m")
     if isnothing(net)
@@ -123,7 +128,8 @@ end
         prob = DCOPFProblem(dc_net, d)
         sol = solve!(prob)
 
-        # Test dimensions
+        # KKT dimension: n(θ) + k(g) + m(f) + n(psh) + n(ν_bal) + 2m(λ_ub/lb) +
+        # 2k(ρ_ub/lb) + 2n(μ_ub/lb) + 2m(γ_ub/lb) + 1(ref_bus) = 5n + 6m + 3k + 1
         dim = kkt_dims(dc_net)
         @test dim == 5*dc_net.n + 6*dc_net.m + 3*dc_net.k + 1
 
@@ -159,8 +165,9 @@ end
         # No NaN sentinels survived (validates pre-allocated index assignment is complete)
         @test !any(isnan, K)
 
-        # KKT residuals should be near zero at the solution
-        # (interior-point solvers leave small CS residuals, so use a loose tolerance)
+        # KKT residuals should be near zero at the solution.
+        # Interior-point solvers converge to the central path, leaving O(barrier_tol)
+        # complementary slackness residuals. 1e-2 accommodates Ipopt's default tol.
         @test norm(K) < 1e-2
     end
 end
@@ -321,8 +328,10 @@ end
         @test all(our_lmps .> 0)
 
         if !any(isnan, pm_lmps)
-            # PowerModels uses opposite sign convention (negative LMPs)
-            # Compare magnitudes: relative error < 50% or absolute error < 100
+            # Generous tolerances because PowerModels uses a different formulation
+            # (no regularization term τ, different constraint encoding) and Ipopt
+            # returns duals on the central path rather than at the vertex.
+            # Compare magnitudes: relative error < 50% or absolute error < 100.
             pm_lmps_abs = abs.(pm_lmps)
             for i in eachindex(our_lmps)
                 abs_err = abs(our_lmps[i] - pm_lmps_abs[i])
@@ -337,6 +346,9 @@ end
     end
 end
 
+# FD verification: delta=1e-5 balances truncation error O(delta) against
+# solver noise O(tol_solver/delta). With Ipopt tol ~1e-8 and delta=1e-5,
+# FD accuracy is ~1e-3, so 1% relative tolerance provides adequate margin.
 @testset "Demand Sensitivity - Finite Difference Validation" begin
     net = load_test_case("case5.m")
     if isnothing(net)
@@ -376,21 +388,22 @@ end
             rel_error_g = norm(Matrix(dg_dd)[:, bus_idx] - dg_dd_numerical) / norm(dg_dd_numerical)
             @test rel_error_g < 0.01  # 1% tolerance
         else
-            @info "Skipped ∂g/∂d FD check: near-zero numerical derivative" bus=bus_idx
+            # FD is near zero — analytical should also be near zero
+            @test norm(Matrix(dg_dd)[:, bus_idx]) < 1e-6
         end
 
         if norm(dva_dd_numerical) > 1e-10
             rel_error_theta = norm(Matrix(dva_dd)[:, bus_idx] - dva_dd_numerical) / norm(dva_dd_numerical)
             @test rel_error_theta < 0.01
         else
-            @info "Skipped ∂θ/∂d FD check: near-zero numerical derivative" bus=bus_idx
+            @test norm(Matrix(dva_dd)[:, bus_idx]) < 1e-6
         end
 
         if norm(df_dd_numerical) > 1e-10
             rel_error_f = norm(Matrix(df_dd)[:, bus_idx] - df_dd_numerical) / norm(df_dd_numerical)
             @test rel_error_f < 0.01
         else
-            @info "Skipped ∂f/∂d FD check: near-zero numerical derivative" bus=bus_idx
+            @test norm(Matrix(df_dd)[:, bus_idx]) < 1e-6
         end
     end
 end
@@ -420,12 +433,13 @@ end
     end
 end
 
+# Closed-form derivation for 2-bus network:
+# B = A'*diag(-b)*A with A=[1,-1], b=[-10] → B = [10 -10; -10 10].
+# Reduced system (drop ref bus 1): B_r = [10], p_r = [g₁ - d₂] = [-1].
+# θ₂ = B_r \ p_r = -0.1. Flow f = W*A*θ = 10*(0 - (-0.1)) = 1.0.
+# LMP: uncongested, so LMP₁ = LMP₂ = marginal cost = cl = 10.
+# Sensitivities: ∂g₁/∂d₂ = 1 (only generator), ∂θ₂/∂d₂ = -1/10 = -0.1.
 @testset "2-Bus Closed-Form Validation" begin
-    # Create minimal 2-bus network
-    # With our B-θ formulation: f = W*A*θ where W = Diagonal(-b*z)
-    # For A = [1, -1] (line from bus 1 to 2) and b = -10 (negative susceptance):
-    # W = -b = 10, so f = 10 * (θ₁ - θ₂) = 10 * (-θ₂) = -10*θ₂ (since θ₁=0)
-    # For demand at bus 2, flow goes from 1→2, so f = 1 → θ₂ = -0.1
     n, m, k = 2, 1, 1
     A = sparse([1.0 -1.0])  # From bus 1 to bus 2
     G_inc = sparse(reshape([1.0, 0.0], 2, 1))  # Generator at bus 1
@@ -458,10 +472,12 @@ end
     @test abs(Matrix(dva_dd)[2, 2]) ≈ 0.1 atol=0.01
 end
 
+# Congestion economics: cheap gen at bus 1 (cl=10) can only push fmax=0.5 MW
+# through line 1→3, so the remaining 1.0 MW of the 1.5 MW load at bus 3 must
+# come from the expensive gen at bus 2 (cl=50) via unconstrained line 2→3.
+# LMP at bus 3 reflects the marginal cost of the expensive generator, while
+# LMP at bus 1 reflects the cheap generator. The difference is the congestion rent.
 @testset "3-Bus Congested - LMP Differentiation" begin
-    # Simple 2-bus with congestion: more reliable test case
-    # Bus 1: cheap generator (c=10), Bus 2: expensive generator (c=50), Bus 3: load
-    # Line 1→3 constrained, forcing expensive gen to help
     n, m, k = 3, 2, 2
     # Line topology: 1→3 (constrained), 2→3
     A = sparse([
@@ -562,8 +578,12 @@ end
     end
 end
 
+# FD verification of cost sensitivities on a 2-bus network (single generator,
+# single line). The 2-bus topology has one degree of freedom, so primal
+# sensitivities are well-determined.
+# Tolerances: 5% for ∂g/∂cl (primal, one DOF), 10% for ∂lmp/∂cl (dual,
+# sensitive to interior-point barrier position and regularization τ).
 @testset "Cost Sensitivity - Finite Difference Validation" begin
-    # Use 2-bus case for simpler validation
     n, m, k = 2, 1, 1
     A = sparse([1.0 -1.0])
     G_inc = sparse(reshape([1.0, 0.0], 2, 1))

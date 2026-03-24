@@ -12,10 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# DC OPF Finite-Difference Verification Tests
-#
-# Verifies analytical sensitivities against finite differences for DC OPF
-# parameter combinations not covered elsewhere.
+# FD verification of DC OPF sensitivities for cost (:cq, :cl), flow limit
+# (:fmax), and susceptance (:b) parameters. Uses a 2-bus network for primal
+# checks and case5 for dual (LMP) checks.
 #
 # Primal FD checks (θ, g, f) use a 2-bus network at 5% tolerance.
 # LMP FD checks use case5 where the solver gives precise duals (10% tolerance).
@@ -42,7 +41,8 @@ using Test
     τ = 0.01
 
     delta = 1e-5
-    primal_tol = 0.05   # 5% for primal variables (θ, g, f)
+    # 5%: generous for single-DOF 2-bus network; absorbs Ipopt barrier residuals
+    primal_tol = 0.05
 
     function make_net(; b=b_base, fmax=fmax_base, cl=cl_base, cq=cq_base)
         DCNetwork(n, m, k, A, G_inc, b;
@@ -163,7 +163,8 @@ end
         dc_net = DCNetwork(net)
         d = calc_demand_vector(net)
         delta = 1e-5
-        lmp_tol = 0.10  # 10% for LMP (dual variables)
+        # 10%: dual variables are sensitive to active-set changes near constraint boundaries
+        lmp_tol = 0.10
 
         # Base solve
         prob_base = DCOPFProblem(dc_net, d)
