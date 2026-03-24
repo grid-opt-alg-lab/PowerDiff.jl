@@ -50,7 +50,7 @@ Warn if any demand entries are negative, which makes shedding bounds infeasible.
 function _warn_negative_demand(d)
     neg_buses = findall(d .< 0)
     if !isempty(neg_buses)
-        @warn "Negative demand at buses $neg_buses; shedding bounds 0 ≤ psh ≤ d will be infeasible at those buses"
+        _SILENCE_WARNINGS[] || @warn "Negative demand at buses $neg_buses; shedding bounds 0 ≤ psh ≤ d will be infeasible at those buses"
     end
 end
 
@@ -119,7 +119,7 @@ function solve!(prob::DCOPFProblem)
     d = prob.d
     for i in eachindex(psh_val)
         if d[i] < -TOL
-            @warn "Negative demand at bus $i (d=$(d[i])); psh snap may be unreliable"
+            _SILENCE_WARNINGS[] || @warn "Negative demand at bus $i (d=$(d[i])); psh snap may be unreliable"
         end
         if abs(d[i]) < TOL
             # Degenerate: both bounds collapse to 0 ≤ psh ≤ 0

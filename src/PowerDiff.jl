@@ -25,6 +25,24 @@ const PM = PowerModels
 const MOI = JuMP.MOI
 
 # =============================================================================
+# Warning suppression
+# =============================================================================
+const _SILENCE_WARNINGS = Ref(false)
+
+"""
+    silence()
+
+Suppress all warning messages from PowerDiff for the rest of the session.
+
+Warnings from other packages (PowerModels, JuMP, Ipopt, etc.) are not affected.
+To suppress PowerModels output, also call `PowerModels.silence()`.
+"""
+function silence()
+    _SILENCE_WARNINGS[] = true
+    return nothing
+end
+
+# =============================================================================
 # Abstract type hierarchy
 # =============================================================================
 include("types/abstract.jl")
@@ -80,7 +98,7 @@ export IDMapping
 
 # Sensitivity Interface
 export calc_sensitivity, calc_sensitivity_column
-export Sensitivity
+export Sensitivity, silence
 export operand_symbols, parameter_symbols
 export jvp, vjp, jvp!, vjp!, dict_to_vec, vec_to_dict, kkt_dims
 
