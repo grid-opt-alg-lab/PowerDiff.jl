@@ -157,30 +157,34 @@ Convert a `DCNetwork` to an AcceleratedDCPowerFlows network. Requires `using Acc
 function to_apf_network end
 
 """
-    apf_ptdf(net::DCNetwork) → Matrix{Float64}
+    apf_ptdf(net::DCNetwork; kwargs...) → APF.FullPTDF
 
-Compute the PTDF matrix via AcceleratedDCPowerFlows. Requires `using AcceleratedDCPowerFlows`.
+Build an APF `FullPTDF` from a `DCNetwork`. Keyword arguments are forwarded to
+`APF.full_ptdf`. Requires `using AcceleratedDCPowerFlows`.
 """
 function apf_ptdf end
 
 """
-    apf_lodf(net::DCNetwork) → Matrix{Float64}
+    apf_lodf(net::DCNetwork; kwargs...) → APF.FullLODF
 
-Compute the LODF matrix via AcceleratedDCPowerFlows. Requires `using AcceleratedDCPowerFlows`.
+Build an APF `FullLODF` from a `DCNetwork`. Keyword arguments are forwarded to
+`APF.full_lodf`. Requires `using AcceleratedDCPowerFlows`.
 """
 function apf_lodf end
 
 """
-    compare_ptdf(state::DCPowerFlowState) → NamedTuple
+    compare_ptdf(state::DCPowerFlowState; atol=1e-8) → NamedTuple
 
-Cross-validate PowerDiff PTDF against AcceleratedDCPowerFlows PTDF. Requires `using AcceleratedDCPowerFlows`.
+Cross-validate PowerDiff PTDF against AcceleratedDCPowerFlows PTDF.
+Returns `(match, maxerr)` where `match` is true if all entries agree within `atol`.
+Requires `using AcceleratedDCPowerFlows`.
 """
 function compare_ptdf end
 
 """
-    materialize_apf_ptdf(net::DCNetwork) → Matrix{Float64}
+    materialize_apf_ptdf(Phi::APF.FullPTDF) → Matrix{Float64}
 
-Materialize the full PTDF matrix from AcceleratedDCPowerFlows. Requires `using AcceleratedDCPowerFlows`.
+Materialize a dense PTDF matrix from an APF `FullPTDF` object. Requires `using AcceleratedDCPowerFlows`.
 """
 function materialize_apf_ptdf end
 

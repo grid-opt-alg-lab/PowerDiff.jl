@@ -87,7 +87,7 @@ end
 
 Create a minimal 2-bus test network.
 
-b=[-10.0] gives 10 p.u. reactance (W = -b = 10), so flow = 10 * Δθ.
+b=[-10.0] gives susceptance magnitude 10 p.u. (W = -b = 10), so flow = 10 * Δθ.
 Generator at bus 1 (reference), load at bus 2.  With d=[0,1], the
 closed-form solution is g=1, θ₂=-0.1, f=1.
 """
@@ -183,7 +183,7 @@ end
 Solve AC power flow treating ALL non-slack buses as PQ (free voltage
 magnitude and angle). Uses Newton-Raphson with ForwardDiff Jacobian so
 the solver is fully independent of PowerDiff's analytical sensitivity
-code. tol=1e-12 gives machine-precision convergence, ensuring FD
+code. tol=1e-12 gives near-machine-precision convergence, ensuring FD
 perturbations dominate solver noise.
 
 Returns converged complex voltage vector.

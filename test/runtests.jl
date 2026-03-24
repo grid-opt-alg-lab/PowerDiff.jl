@@ -128,8 +128,9 @@ end
         prob = DCOPFProblem(dc_net, d)
         sol = solve!(prob)
 
-        # KKT dimension: n(θ) + k(g) + m(f) + n(psh) + n(ν_bal) + 2m(λ_ub/lb) +
-        # 2k(ρ_ub/lb) + 2n(μ_ub/lb) + 2m(γ_ub/lb) + 1(ref_bus) = 5n + 6m + 3k + 1
+        # KKT dimension: n(θ) + k(g) + m(f) + n(psh) + n(ν_bal) + m(ν_flow) +
+        # 2m(λ_ub/lb) + 2k(ρ_ub/lb) + 2n(μ_ub/lb) + 2m(γ_ub/lb) + 1(η_ref)
+        # = 5n + 6m + 3k + 1
         dim = kkt_dims(dc_net)
         @test dim == 5*dc_net.n + 6*dc_net.m + 3*dc_net.k + 1
 
@@ -619,6 +620,7 @@ end
         @test rel_error < 0.05  # 5% tolerance for finite difference
     else
         @info "Skipped ∂g/∂cl FD check: near-zero numerical derivative"
+        @test norm(Matrix(dg_dcl)[:, 1]) < 1e-6
     end
 
     # LMP sensitivity check
@@ -632,6 +634,7 @@ end
         @test rel_error_lmp < 0.1  # 10% tolerance
     else
         @info "Skipped ∂lmp/∂cl FD check: near-zero numerical derivative"
+        @test norm(Matrix(dlmp_dcl)[:, 1]) < 1e-6
     end
 end
 

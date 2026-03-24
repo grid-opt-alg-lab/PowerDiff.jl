@@ -25,7 +25,7 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
         0.0  1.0;   # Gen 2 at bus 2 (expensive)
         0.0  0.0    # No gen at bus 3
     ])
-    # All branches have 10 p.u. reactance (b = Im(1/z) < 0 for inductive lines)
+    # All branches have susceptance magnitude 10 p.u. (b = Im(1/z) < 0 for inductive lines)
     b = [-10.0, -10.0, -10.0]
 
     # Nonzero demand at all buses, small enough to avoid shedding

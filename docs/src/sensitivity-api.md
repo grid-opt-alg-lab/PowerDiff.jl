@@ -213,7 +213,7 @@ Matrix(sens)          # extract raw matrix
 
 ## Single-Column Computation
 
-For large problems, materializing the full sensitivity matrix is expensive (one KKT solve per parameter element for OPF). When only one parameter element matters, use the single-column variant:
+For large problems, materializing the full sensitivity matrix requires solving for every parameter element. When only one parameter element matters, use the single-column variant:
 
 ```julia
 calc_sensitivity_column(state, :operand, :parameter, col_id) → Vector
@@ -230,7 +230,7 @@ S = calc_sensitivity(prob, :lmp, :d)
 col ≈ Matrix(S)[:, S.id_to_col[3]]  # true
 ```
 
-This works for all formulations and all valid operand/parameter combinations.
+This works for all formulations and all valid operand/parameter combinations. For OPF problems, this avoids materializing the full matrix. For power flow states, the full matrix is computed internally (the underlying linear algebra does not decompose into independent columns).
 
 ## JVP / VJP
 

@@ -238,6 +238,7 @@ using Test
                 @test rel_err_pg < 0.05
             else
                 @info "Skipped ∂pg/∂sw FD: near-zero perturbation" branch=e
+                @test norm(Matrix(dpg_dsw)[:, e]) < 1e-6
             end
 
             # Check ∂f/∂sw
@@ -246,6 +247,7 @@ using Test
                 @test rel_err_f < 0.05
             else
                 @info "Skipped ∂f/∂sw FD: near-zero perturbation" branch=e
+                @test norm(Matrix(df_dsw)[:, e]) < 1e-6
             end
         end
     end

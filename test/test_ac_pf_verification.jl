@@ -88,7 +88,7 @@ using Test
     #   Truncation error: O(delta) from Taylor remainder
     #   Cancellation error: O(eps_mach/delta) ≈ O(1e-11), negligible
     #   Newton re-solve converges to O(1e-12), so FD accuracy is O(delta) ≈ 1e-5
-    #   fd_tol = 1% provides a generous margin; typical agreement is O(1e-4)
+    #   fd_tol = 1% provides a generous margin; typical relative error is O(1e-4) to O(1e-3)
 
     # -----------------------------------------------------------------
     # ∂|v|/∂p — perturb active power at non-slack buses

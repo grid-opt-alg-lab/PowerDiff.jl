@@ -43,8 +43,8 @@
 
         @testset "Finite-difference verification" begin
             # ε=1e-7: tighter perturbation than OPF tests because DC PF is a direct
-            # solve — no optimizer noise. Tolerance 1e-4 gives ~1000x margin over
-            # the expected FD error O(ε) ≈ 1e-7.
+            # solve — no optimizer noise. Tolerance 1e-4 (relative) provides generous
+            # margin over FD truncation error O(ε) = 1e-7.
             ε = 1e-7
             W = Diagonal(-dc_net.b .* dc_net.sw)
 
