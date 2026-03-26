@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# AC Power Flow Topology Sensitivity Tests
+# FD verification of AC PF topology sensitivities (∂vm/∂g, ∂vm/∂b, ∂va/∂g,
+# ∂va/∂b, ∂f/∂g, ∂f/∂b, ∂im/∂g, ∂im/∂b). Perturbs branch conductance/susceptance,
+# re-solves Newton-Raphson, compares against analytical chain-rule formulas.
 #
-# Verifies ∂|V|/∂g, ∂|V|/∂b, ∂θ/∂g, ∂θ/∂b, ∂f/∂g, ∂f/∂b, ∂|I|/∂g, ∂|I|/∂b
-# against finite differences using a PQ-only Newton re-solve. This matches the
-# ACPowerFlowState sensitivity formulation, which treats all non-slack buses as PQ.
+# This matches the ACPowerFlowState sensitivity formulation, which treats all
+# non-slack buses as PQ.
 
 using PowerDiff
 using PowerModels
@@ -97,6 +98,8 @@ end
         dim_db = calc_sensitivity(state, :im, :b)
 
         ε = 1e-5
+        # Spot-check first and third branches for FD agreement; full size/finiteness
+        # coverage is in the "Smoke tests — all 10 combinations" testset below.
         test_branches = [1, min(3, m)]
 
         for param in (:g, :b)

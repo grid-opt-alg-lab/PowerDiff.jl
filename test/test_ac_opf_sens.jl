@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Test AC OPF switching sensitivity
+# FD verification of AC OPF switching sensitivities. Perturbs sw_e by epsilon,
+# re-solves the full nonlinear AC OPF, and compares primal (va, vm, pg, qg) and
+# dual (lmp, qlmp) sensitivities against analytical results from KKT implicit
+# differentiation.
 
 using PowerDiff
 using PowerModels
@@ -31,7 +34,7 @@ using Test
     @testset "ACOPFProblem construction and solving" begin
         prob = ACOPFProblem(pm_data; silent=true)
 
-        @test prob.network.n == 5
+        @test prob.network.n == 5   # case5.m: 5 buses, 7 branches, 5 generators
         @test prob.network.m == 7
         @test prob.n_gen == 5
 
@@ -152,6 +155,11 @@ using Test
         sol_base = prob.cache.solution
 
         ε = 1e-5
+        # epsilon=1e-5 for switching perturbation.
+        # Primal tolerance 1e-3 (0.1%): tighter than DC OPF because Ipopt converges
+        # the AC NLP to high precision with tight complementarity.
+        # Dual tolerance 1e-2 (1%): looser because duals are less smooth near
+        # active constraint boundaries, amplifying FD truncation error.
         for e in 1:min(3, prob.network.m)
             # Build perturbed problem with sw[e] -= ε baked into JuMP model
             net_pert = ACNetwork(pm_data)

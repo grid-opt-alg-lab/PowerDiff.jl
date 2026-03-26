@@ -549,22 +549,21 @@ end
 In-place VJP for performance-critical loops (e.g., bilevel optimization).
 
 `out` must be pre-allocated to the parameter dimension. Pass `work` (a
-`Vector{Float64}` of length `kkt_dims(prob)`) to avoid internal allocation;
-if omitted, a workspace is allocated automatically.
+`Vector{Float64}` of length `kkt_dims(prob)`) to override the internal
+workspace (e.g., for thread-local buffers); if omitted, a workspace is
+lazily allocated in `prob.cache` and reused across calls.
 
 # Examples
 ```julia
 prob = DCOPFProblem(net, d); solve!(prob)
 out = zeros(net.n)
 
-# Simple (auto-allocates workspace):
+# Simple (workspace managed by cache):
 vjp!(out, prob, :lmp, :d, adj)
 
-# Hot loop (pre-allocate workspace):
+# Thread-local override:
 work = zeros(kkt_dims(prob))
-for iter in 1:max_iter
-    vjp!(out, prob, :lmp, :d, adj; work=work)
-end
+vjp!(out, prob, :lmp, :d, adj; work=work)
 ```
 """
 function vjp!(out::AbstractVector, prob::DCOPFProblem, operand::Symbol, parameter::Symbol,
@@ -572,7 +571,14 @@ function vjp!(out::AbstractVector, prob::DCOPFProblem, operand::Symbol, paramete
     op = _resolve_operand(operand)
     param = _resolve_parameter(parameter)
     (op, param) in _valid_combinations(DCOPFProblem) || _throw_invalid_combo(prob, op, param)
-    w = isnothing(work) ? Vector{Float64}(undef, kkt_dims(prob)) : work
+    w = if !isnothing(work)
+        work
+    else
+        if isnothing(prob.cache.work)
+            prob.cache.work = Vector{Float64}(undef, kkt_dims(prob))
+        end
+        prob.cache.work
+    end
     return _dcopf_vjp!(out, prob, op, param, adj, w)
 end
 
@@ -644,22 +650,21 @@ end
 In-place JVP for performance-critical loops (e.g., bilevel optimization).
 
 `out` must be pre-allocated to the operand dimension. Pass `work` (a
-`Vector{Float64}` of length `kkt_dims(prob)`) to avoid internal allocation;
-if omitted, a workspace is allocated automatically.
+`Vector{Float64}` of length `kkt_dims(prob)`) to override the internal
+workspace (e.g., for thread-local buffers); if omitted, a workspace is
+lazily allocated in `prob.cache` and reused across calls.
 
 # Examples
 ```julia
 prob = DCOPFProblem(net, d); solve!(prob)
 out = zeros(net.n)
 
-# Simple (auto-allocates workspace):
+# Simple (workspace managed by cache):
 jvp!(out, prob, :lmp, :d, tang)
 
-# Hot loop (pre-allocate workspace):
+# Thread-local override:
 work = zeros(kkt_dims(prob))
-for iter in 1:max_iter
-    jvp!(out, prob, :lmp, :d, tang; work=work)
-end
+jvp!(out, prob, :lmp, :d, tang; work=work)
 ```
 """
 function jvp!(out::AbstractVector, prob::DCOPFProblem, operand::Symbol, parameter::Symbol,
@@ -667,6 +672,13 @@ function jvp!(out::AbstractVector, prob::DCOPFProblem, operand::Symbol, paramete
     op = _resolve_operand(operand)
     param = _resolve_parameter(parameter)
     (op, param) in _valid_combinations(DCOPFProblem) || _throw_invalid_combo(prob, op, param)
-    w = isnothing(work) ? Vector{Float64}(undef, kkt_dims(prob)) : work
+    w = if !isnothing(work)
+        work
+    else
+        if isnothing(prob.cache.work)
+            prob.cache.work = Vector{Float64}(undef, kkt_dims(prob))
+        end
+        prob.cache.work
+    end
     return _dcopf_jvp!(out, prob, op, param, tang, w)
 end

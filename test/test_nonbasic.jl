@@ -16,10 +16,10 @@
 # Non-Basic Network Tests
 # =============================================================================
 #
-# Verifies that PowerDiff works correctly with non-basic networks
-# (arbitrary bus/branch/gen IDs, not sequentially renumbered).
-#
-# case5.m has bus IDs [1,2,3,4,10] — bus 10 maps to sequential index 5.
+# Verifies all features (DC PF, DC OPF, AC PF, AC OPF, sensitivities,
+# JVP/VJP, update_switching!) work with non-basic networks that have
+# arbitrary element IDs. Uses case5.m with bus IDs [1,2,3,4,10] — bus 10
+# maps to sequential index 5 via IDMapping.
 
 @testset "Non-Basic Network Support" begin
     raw = PowerModels.parse_file(joinpath(PM_DATA_DIR, "case5.m"))

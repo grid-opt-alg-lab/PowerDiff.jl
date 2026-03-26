@@ -56,7 +56,7 @@ using Test
         @test pf_state2.p == g - demand
     end
 
-    @testset "DC Power Flow Switching Sensitivity" begin
+    @testset "DC PF ∂va/∂sw — Sensitivity{T} metadata and values" begin
         net = DCNetwork(net_data)
         demand = calc_demand_vector(net_data)
         pf_state = DCPowerFlowState(net, demand)
@@ -76,7 +76,7 @@ using Test
         @test size(df_dsw) == (net.m, net.m)
     end
 
-    @testset "DC Power Flow Demand Sensitivity" begin
+    @testset "DC PF ∂va/∂d — Sensitivity{T} metadata and values" begin
         net = DCNetwork(net_data)
         demand = calc_demand_vector(net_data)
         pf_state = DCPowerFlowState(net, demand)

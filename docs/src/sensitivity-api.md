@@ -211,6 +211,27 @@ sens * v              # matrix-vector product
 Matrix(sens)          # extract raw matrix
 ```
 
+## Single-Column Computation
+
+For large problems, materializing the full sensitivity matrix requires solving for every parameter element. When only one parameter element matters, use the single-column variant:
+
+```julia
+calc_sensitivity_column(state, :operand, :parameter, col_id) → Vector
+```
+
+`col_id` is an original element ID (bus, branch, or generator) matching the parameter type. Returns a dense vector of length equal to the operand dimension.
+
+```julia
+# Sensitivity of all LMPs to demand at bus 3
+col = calc_sensitivity_column(prob, :lmp, :d, 3)
+
+# Equivalent to extracting a column from the full matrix
+S = calc_sensitivity(prob, :lmp, :d)
+col ≈ Matrix(S)[:, S.id_to_col[3]]  # true
+```
+
+This works for all formulations and all valid operand/parameter combinations. For OPF problems, this avoids materializing the full matrix. For power flow states, the full matrix is computed internally (the underlying linear algebra does not decompose into independent columns).
+
 ## JVP / VJP
 
 For ID-aware Jacobian-vector products, use [`jvp`](@ref) and [`vjp`](@ref). These accept a `Dict` keyed by original element IDs (e.g., `Dict(10 => 0.1)`) and return `Dict{Int,T}` keyed by original element IDs:

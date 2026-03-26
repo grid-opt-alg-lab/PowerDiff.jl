@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PowerDiff is a Julia package for differentiable power system analysis. It provides sensitivity analysis for power flow equations, optimal power flow (OPF) problems, and power networks. Built on PowerModels.jl.
 
+**Note**: The git repo directory is still named `PowerModelsDiff` but the Julia package/module is `PowerDiff` (alias `PD`). GitHub repo rename to `PowerDiff.jl` is pending.
+
 ## Development Commands
 
 ```bash
@@ -146,6 +148,36 @@ Fields:
 - `row_to_id`, `id_to_row`: Row index ↔ element ID
 - `col_to_id`, `id_to_col`: Column index ↔ element ID
 
+### VJP/JVP (Matrix-Free Sensitivity Products)
+
+For large networks, avoid materializing the full sensitivity matrix:
+
+```julia
+# VJP: Sᵀ · adj — "which parameters most affect this objective?"
+result = vjp(prob, :lmp, :d, adj_dict)   # Dict{Int,Float64} → Dict{Int,Float64}
+
+# JVP: S · tang — "how does this parameter perturbation propagate?"
+result = jvp(prob, :lmp, :d, tang_dict)  # Dict{Int,Float64} → Dict{Int,Float64}
+
+# In-place variants (pre-allocated output vectors)
+vjp!(out, prob, :lmp, :d, adj_vec)
+jvp!(out, prob, :lmp, :d, tang_vec)
+```
+
+Dict I/O uses original element IDs (not sequential indices). Vector I/O uses sequential indices. `dict_to_vec` and `vec_to_dict` convert between them using a `Sensitivity` object's index mappings.
+
+Supported for DC OPF (all parameters, zero-allocation for `:d`), DC PF (`:d`, `:sw`), and AC OPF (all parameters, matrix-free via KKT solve + ForwardDiff).
+
+### AC Power Flow Jacobian Blocks
+
+```julia
+J = calc_power_flow_jacobian(state::ACPowerFlowState)
+# Returns NamedTuple: J.J1 (∂P/∂θ), J.J2 (∂P/∂|V|), J.J3 (∂Q/∂θ), J.J4 (∂Q/∂|V|)
+```
+
+These are also accessible via the sensitivity API as Jacobian block operand/parameter pairs:
+`calc_sensitivity(state, :p, :va)` → J1, `calc_sensitivity(state, :q, :vm)` → J4, etc.
+
 ### Non-Basic Network Support & IDMapping
 
 All constructors (`DCNetwork`, `ACNetwork`, `DCOPFProblem`, `ACOPFProblem`, `ACPowerFlowState`) accept networks with arbitrary element IDs. Internally, IDs are translated to sequential 1-based indices via `IDMapping`:
@@ -245,9 +277,9 @@ src/
 │   ├── voltage.jl              # AC voltage-power sensitivity
 │   ├── topology_ac.jl          # AC PF topology sensitivity (:g, :b)
 │   ├── current.jl              # AC current sensitivity
+│   ├── jacobian.jl             # AC PF 4-block Jacobian (J1-J4) via ForwardDiff
+│   ├── vjp_jvp.jl             # Matrix-free VJP/JVP through KKT systems
 │   └── lmp.jl                  # LMP computation
-├── pf/                         # Power flow equations
-└── graphs/                     # Incidence matrices, Laplacian utilities
 
 ext/
 └── PowerDiffAPFExt.jl          # AcceleratedDCPowerFlows extension (PTDF/LODF, conversion)
@@ -264,6 +296,7 @@ test/
 ├── test_psh.jl                 # Load shedding sensitivity tests
 ├── test_nonbasic.jl            # Non-basic network support (arbitrary element IDs)
 ├── test_jvp_vjp.jl             # JVP/VJP with ID-aware Dict I/O
+├── test_kkt_vjp_jvp.jl         # KKT-based VJP/JVP correctness tests
 ├── test_acpf_jacobian.jl       # AC PF Jacobian block tests
 ├── test_acpf_va_flow.jl        # AC PF voltage angle and flow sensitivity tests
 ├── test_parameter_transforms.jl # AC PF parameter transform tests (d→p, qd→q)

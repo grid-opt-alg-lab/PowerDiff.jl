@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Finite-difference verification for all AC OPF sensitivities:
-# Parameters: :d, :qd, :cq, :cl, :fmax (+ existing :sw)
-# Operands: :va, :vm, :pg, :qg, :lmp
+# FD verification of ALL AC OPF parameter sensitivities (d, qd, cq, cl, fmax)
+# for primal and dual variables. Tests all 36 operand x parameter combinations
+# for size/finiteness, plus FD spot-checks on selected columns. Uses case5.
 
 using PowerDiff
 using PowerModels
@@ -42,7 +42,7 @@ end
     pm_data = PowerModels.make_basic_network(pm_data)
 
     operands = [:va, :vm, :pg, :qg, :lmp, :qlmp]
-    n, m, k = 5, 7, 5  # case5 dimensions
+    n, m, k = 5, 7, 5  # case5.m dimensions: 5 buses, 7 branches, 5 generators
 
     # Expected row sizes for each operand
     op_sizes = Dict(:va => n, :vm => n, :pg => k, :qg => k, :lmp => n, :qlmp => n)
@@ -83,6 +83,10 @@ end
     # =========================================================================
     # Finite-difference verification: active demand (:d)
     # =========================================================================
+    # epsilon=1e-5 uniform across all parameters. Tolerance 1e-2 (1%) for both
+    # primal and dual FD checks. Active-set changes from parameter perturbation
+    # are the dominant error source for congested cases.
+
     @testset "FD verification: demand (:d)" begin
         prob = ACOPFProblem(pm_data; silent=true)
         sol_base = solve!(prob)

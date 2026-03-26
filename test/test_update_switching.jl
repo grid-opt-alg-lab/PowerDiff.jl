@@ -16,8 +16,10 @@
 # Tests for update_switching! correctness
 # =============================================================================
 #
-# Validates that update_switching! + solve! produces the same result as
-# constructing a fresh problem with the perturbed switching state.
+# Verifies update_switching! correctly modifies switching states and produces
+# solutions consistent with fresh construction for both DC and AC OPF.
+# Also checks that sensitivities computed after update_switching! match
+# those from a freshly-constructed problem with the same switching state.
 
 @testset "update_switching! correctness" begin
 

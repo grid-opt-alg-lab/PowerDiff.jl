@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# DC Power Flow Susceptance Sensitivity Tests
-# Verifies ∂va/∂b and ∂f/∂b against finite differences.
+# FD verification of DC PF susceptance sensitivity (∂θ/∂b, ∂f/∂b). DC PF is
+# a direct linear solve (no optimizer), so there is no solver noise — FD
+# accuracy is limited only by floating-point cancellation.
 
 @testset "DC PF Susceptance Sensitivity" begin
     net_data = load_test_case("case14.m")
@@ -41,6 +42,9 @@
         end
 
         @testset "Finite-difference verification" begin
+            # ε=1e-7: tighter perturbation than OPF tests because DC PF is a direct
+            # solve — no optimizer noise. Tolerance 1e-4 (relative) provides generous
+            # margin over FD truncation error O(ε) = 1e-7.
             ε = 1e-7
             W = Diagonal(-dc_net.b .* dc_net.sw)
 

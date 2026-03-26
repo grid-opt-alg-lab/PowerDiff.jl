@@ -12,12 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Parameter Transform Tests
-#
-# Verifies that type-specific parameter transforms work correctly:
-# - ACPowerFlowState: ∂/∂d = -∂/∂p, ∂/∂qd = -∂/∂q
-# - DCPowerFlowState/DCOPFProblem: :d is native (no transform needed)
-# - Introspection includes transform-derived symbols
+# Verifies AC PF parameter transforms produce correct sign-flipped
+# sensitivities: ∂/∂d = -∂/∂p and ∂/∂qd = -∂/∂q. The sign flip arises
+# because increasing demand decreases net injection (p = pg - pd).
+# Also confirms DC PF/OPF treat :d as a native parameter (no transform),
+# and that introspection lists transform-derived symbols (:d, :qd).
 
 using PowerDiff
 using PowerModels

@@ -12,8 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Exhaustive sensitivity coverage test
-# Verifies that ALL valid (operand, parameter) combinations work for each formulation.
+# Exhaustive API contract test: verifies all valid (operand, parameter) combinations
+# return correctly-typed Sensitivity{T} with right dimensions and metadata, and
+# invalid combinations throw ArgumentError. Does NOT verify numerical accuracy —
+# FD verification tests (test_dc_opf_verification.jl, test_ac_pf_verification.jl,
+# etc.) handle that.
 
 using PowerDiff
 using PowerModels

@@ -16,8 +16,10 @@
 # Tests for calc_sensitivity_column
 # =============================================================================
 #
-# Verifies that calc_sensitivity_column returns the same values as the
-# corresponding column of the full calc_sensitivity matrix.
+# Verifies calc_sensitivity_column matches the corresponding column of the
+# full calc_sensitivity matrix for all formulations (DC PF, DC OPF, AC PF,
+# AC OPF), including cached and uncached paths, non-basic networks, and
+# error handling.
 
 @testset "calc_sensitivity_column" begin
 
@@ -33,8 +35,12 @@
 
         for (op, param) in [(:va, :d), (:f, :d), (:va, :sw), (:f, :sw), (:va, :b), (:f, :b)]
             S = calc_sensitivity(state, op, param)
-            # Test first and last columns
-            for j in [1, size(S, 2)]
+            # Test first, middle, and last columns
+            test_cols = [1, size(S, 2)]
+            if size(S, 2) >= 3
+                push!(test_cols, div(size(S, 2), 2) + 1)
+            end
+            for j in test_cols
                 col_id = S.col_to_id[j]
                 col = calc_sensitivity_column(state, op, param, col_id)
                 @test col ≈ Matrix(S)[:, j] atol=1e-12
@@ -57,8 +63,12 @@
             solve!(prob)
             S = calc_sensitivity(prob, op, param)
 
-            # Test first and last column with fresh (uncached) problems
-            for j in [1, size(S, 2)]
+            # Test first, middle, and last column with fresh (uncached) problems
+            test_cols = [1, size(S, 2)]
+            if size(S, 2) >= 3
+                push!(test_cols, div(size(S, 2), 2) + 1)
+            end
+            for j in test_cols
                 col_id = S.col_to_id[j]
                 net2 = DCNetwork(pm_data)
                 d2 = calc_demand_vector(pm_data)

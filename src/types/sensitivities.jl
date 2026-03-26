@@ -31,8 +31,8 @@
 
 Sensitivity matrix with symbol metadata for formulation, operand, and parameter.
 
-Implements the AbstractMatrix interface for seamless matrix operations while
-providing bidirectional index mappings between internal indices and element IDs.
+Wraps a matrix with bidirectional index mappings between internal indices
+and original element IDs. Implements the full AbstractMatrix interface.
 
 # Type Parameter
 - `T <: Number`: Element type (Float64, ComplexF64)

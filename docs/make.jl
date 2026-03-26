@@ -34,6 +34,7 @@ end
 makedocs(
     sitename = "PowerDiff.jl",
     modules = [PowerDiff],
+    checkdocs = :exports,  # only verify exported symbols have @docs entries
     format = format_opts,
     pages = [
         "Home" => "index.md",
@@ -48,7 +49,6 @@ makedocs(
         "Advanced Topics" => "advanced.md",
         "API Reference" => "api.md",
     ],
-    warnonly = [:missing_docs],
 )
 
 if site_build

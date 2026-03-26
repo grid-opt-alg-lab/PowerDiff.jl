@@ -15,6 +15,28 @@
 # =============================================================================
 # Common Test Setup and Utilities
 # =============================================================================
+#
+# Shared test infrastructure used by included test files (not runtests.jl,
+# which defines its own load_test_case inline).
+#
+# Data loaders:
+#   load_test_case  — parse MATPOWER case from PowerModels' bundled test data,
+#                     returns a basic (sequentially-renumbered) network dict
+#   load_raw_case   — same, but returns the raw (non-basic) network dict
+#
+# Programmatic networks:
+#   create_2bus_network          — minimal 2-bus DC network with known closed-form solution
+#   create_3bus_congested_network — 3-bus network where line 1→3 saturates, forcing
+#                                   dispatch of an expensive generator at bus 2
+#
+# Independent PF solver:
+#   solve_pf_pq     — PQ-only Newton-Raphson AC power flow using ForwardDiff Jacobians,
+#                     independent of PowerDiff's analytical sensitivity code
+#   pf_residual_pq  — power mismatch residual in rectangular coordinates
+#
+# Convention: when test data is unavailable, tests use `@test_skip false` to register
+# a visible "Broken" marker in test output rather than silently passing.
+# =============================================================================
 
 using Test
 using LinearAlgebra
@@ -64,6 +86,10 @@ end
     create_2bus_network(; fmax=100.0, gmax=10.0, cl=10.0, cq=0.0, tau=0.0)
 
 Create a minimal 2-bus test network.
+
+b=[-10.0] gives susceptance magnitude 10 p.u. (W = -b = 10), so flow = 10 * Δθ.
+Generator at bus 1 (reference), load at bus 2.  With d=[0,1], the
+closed-form solution is g=1, θ₂=-0.1, f=1.
 """
 function create_2bus_network(; fmax=100.0, gmax=10.0, cl=10.0, cq=0.0, tau=0.0)
     n, m, k = 2, 1, 1
@@ -80,6 +106,12 @@ end
     create_3bus_congested_network()
 
 Create a 3-bus network with congestion on line 1→3.
+
+Topology: gen at bus 1 (cheap, cl=10) and bus 2 (expensive, cl=50),
+load at bus 3. Line 1→3 saturates at fmax=0.5, forcing the expensive
+generator at bus 2 to supply the remainder via line 2→3.  This creates
+a non-trivial LMP split: bus 3 price exceeds bus 1 price by the
+congestion rent.
 """
 function create_3bus_congested_network()
     n, m, k = 3, 2, 2
@@ -148,8 +180,12 @@ end
 """
     solve_pf_pq(Y, v_base, p_target, q_target, idx_slack; max_iter=30, tol=1e-12)
 
-Solve AC power flow treating ALL non-slack buses as PQ.
-Uses Newton-Raphson with ForwardDiff Jacobian for independence from analytical code.
+Solve AC power flow treating ALL non-slack buses as PQ (free voltage
+magnitude and angle). Uses Newton-Raphson with ForwardDiff Jacobian so
+the solver is fully independent of PowerDiff's analytical sensitivity
+code. tol=1e-12 gives near-machine-precision convergence, ensuring FD
+perturbations dominate solver noise.
+
 Returns converged complex voltage vector.
 """
 function solve_pf_pq(Y, v_base, p_target, q_target, idx_slack;

@@ -12,9 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Load-shedding (:psh) operand tests
+# FD verification of load shedding (psh) sensitivities. Uses congestion-based
+# shedding (tight fmax on case14) to keep most generators interior, avoiding
+# the degenerate KKT that arises when all generators hit their upper bounds.
 
-# Local helper for the 2-bus topology used by multiple testsets
+# 2-bus helper: gmax=0.5 forces shedding because generation capacity (0.5 MW) is
+# less than demand (1.0 MW at bus 2). c_shed=1e4 is 1000x gen cost, so shedding
+# is a last resort — the optimizer exhausts generation before shedding any load.
 function _make_2bus_psh(; gmax=0.5, cq=0.0, cl=10.0, tau=0.0)
     n, m, k = 2, 1, 1
     A = sparse([1.0 -1.0])
@@ -26,15 +30,11 @@ function _make_2bus_psh(; gmax=0.5, cq=0.0, cl=10.0, tau=0.0)
         ref_bus=1, tau=tau)
 end
 
-# Helper: load case14 with tightened flow limits so congestion forces shedding.
-#
-# With original generator capacities (total 7.724 >> demand 2.59), tight flow limits
-# prevent power delivery to some buses, causing congestion-induced shedding while
-# keeping most generators interior (not at bounds). This avoids the degenerate
-# complementarity that occurs when all generators are at their upper bounds
-# (singular KKT matrix from zero diagonals in ρ_ub rows).
-#
-# fmax_scale=0.03 produces ~0.05 MW of shedding with 4 interior generators.
+# case14 shedding helper: case14 has 7.724 MW total gen capacity vs 2.59 MW demand.
+# Scaling fmax by 0.03 creates congestion-induced shedding (~0.05 MW) while keeping
+# 4 of 5 generators interior (not at bounds). This avoids degenerate complementarity:
+# when all generators hit gmax, the KKT Jacobian has zero diagonals in ρ_ub rows,
+# requiring Tikhonov regularization that amplifies sensitivity errors.
 function _make_case14_shedding(; fmax_scale=0.03)
     net_data = load_test_case("case14.m")
     isnothing(net_data) && return nothing

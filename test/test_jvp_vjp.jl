@@ -15,6 +15,11 @@
 # =============================================================================
 # JVP / VJP Tests
 # =============================================================================
+#
+# Verifies JVP/VJP with ID-aware Dict I/O against direct matrix-vector
+# multiplication for DC PF, DC OPF, and AC PF (including complex-valued
+# sensitivities). Also tests the transpose identity dot(w, S*v) = dot(S'*w, v),
+# round-trip dict_to_vec/vec_to_dict, and error handling for invalid IDs.
 
 @testset "JVP / VJP" begin
     raw = PowerModels.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
