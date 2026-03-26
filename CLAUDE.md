@@ -166,7 +166,7 @@ jvp!(out, prob, :lmp, :d, tang_vec)
 
 Dict I/O uses original element IDs (not sequential indices). Vector I/O uses sequential indices. `dict_to_vec` and `vec_to_dict` convert between them using a `Sensitivity` object's index mappings.
 
-Supported for DC OPF (all parameters, zero-allocation for `:d`) and DC PF (`:d`, `:sw`). AC OPF falls back to materializing the matrix.
+Supported for DC OPF (all parameters, zero-allocation for `:d`), DC PF (`:d`, `:sw`), and AC OPF (all parameters, matrix-free via KKT solve + ForwardDiff).
 
 ### AC Power Flow Jacobian Blocks
 
