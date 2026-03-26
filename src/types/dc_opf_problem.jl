@@ -199,6 +199,7 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     if _is_ipopt_optimizer(prob._optimizer)
         set_optimizer_attribute(model, "tol", 1e-10)
         set_optimizer_attribute(model, "acceptable_tol", 1e-8)
+        set_optimizer_attribute(model, "max_cpu_time", 30.0)
     end
 
     # Variables

@@ -31,6 +31,10 @@ Check JuMP model termination status and throw informative errors for common fail
 function _check_solve_status(model, label::String)
     status = termination_status(model)
     status in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED) && return status
+    if status == MOI.ALMOST_LOCALLY_SOLVED
+        @warn "$label converged at acceptable tolerance (ALMOST_LOCALLY_SOLVED)"
+        return status
+    end
     if status == MOI.INFEASIBLE
         error("$label is infeasible. Check that demand is feasible given generator capacities and network constraints.")
     elseif status == MOI.DUAL_INFEASIBLE
