@@ -51,6 +51,7 @@ precomputed at construction time).
 - `dz_dfmax`: Full KKT derivative w.r.t. flow limits (or nothing)
 - `dz_db`: Full KKT derivative w.r.t. susceptances (or nothing)
 - `b_r_factor`: Cached reduced susceptance factorization (topology-dependent, survives demand changes)
+- `work`: Scratch workspace for VJP/JVP KKT solves (lazily allocated on first call, survives invalidation since its size depends only on `(n, m, k)` which are fixed at construction)
 """
 mutable struct DCSensitivityCache
     solution::Union{Nothing,DCOPFSolution}
@@ -62,6 +63,7 @@ mutable struct DCSensitivityCache
     dz_dfmax::Union{Nothing,Matrix{Float64}}
     dz_db::Union{Nothing,Matrix{Float64}}
     b_r_factor::Union{Nothing,Factorization{Float64}}
+    work::Union{Nothing,Vector{Float64}}
 end
 
 """
@@ -70,7 +72,7 @@ end
 Create an empty sensitivity cache with all fields set to nothing.
 """
 function DCSensitivityCache()
-    return DCSensitivityCache(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
+    return DCSensitivityCache(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
 """

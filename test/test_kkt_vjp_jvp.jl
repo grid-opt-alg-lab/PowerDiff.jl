@@ -331,4 +331,46 @@
         @test_throws ArgumentError vjp(ac_state, :vm, :p, randn(5))
         @test_throws ArgumentError jvp(ac_state, :vm, :p, randn(5))
     end
+
+    # =================================================================
+    # Cache-managed workspace (issue #38)
+    # =================================================================
+    @testset "Cache-managed workspace" begin
+        prob = DCOPFProblem(basic); solve!(prob)
+        S = calc_sensitivity(prob, :lmp, :d)
+        adj = randn(size(S, 1))
+        tang = randn(size(S, 2))
+
+        # Workspace starts as nothing
+        invalidate!(prob.cache)
+        solve!(prob)
+        @test isnothing(prob.cache.work)
+
+        # vjp! without explicit work → lazy-allocates into cache
+        out = zeros(size(S, 2))
+        vjp!(out, prob, :lmp, :d, adj)
+        @test !isnothing(prob.cache.work)
+        @test out ≈ S.matrix' * adj atol=1e-10
+        w_ref = prob.cache.work
+
+        # Second call reuses the same buffer (pointer identity)
+        vjp!(out, prob, :lmp, :d, adj)
+        @test prob.cache.work === w_ref
+
+        # jvp! also reuses the same cached workspace
+        out_jvp = zeros(size(S, 1))
+        jvp!(out_jvp, prob, :lmp, :d, tang)
+        @test prob.cache.work === w_ref
+        @test out_jvp ≈ S.matrix * tang atol=1e-10
+
+        # Explicit work kwarg overrides cache (cache workspace unchanged)
+        ext_work = zeros(kkt_dims(prob))
+        vjp!(out, prob, :lmp, :d, adj; work=ext_work)
+        @test prob.cache.work === w_ref
+        @test out ≈ S.matrix' * adj atol=1e-10
+
+        # Workspace survives invalidate! (size-invariant scratch buffer)
+        invalidate!(prob.cache)
+        @test prob.cache.work === w_ref
+    end
 end
