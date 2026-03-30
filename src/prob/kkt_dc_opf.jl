@@ -71,6 +71,8 @@ function _ensure_kkt_factor!(prob::DCOPFProblem)
     return prob.cache.kkt_factor
 end
 
+@inline _is_fixed_zero_shed(d::Real) = iszero(d)
+
 # =============================================================================
 # Cached Derivative Computation Functions
 # =============================================================================
@@ -230,7 +232,7 @@ const _DC_CACHE_FIELD = Dict{Symbol, Symbol}(
 # Map parameter symbols to single-column Jacobian builder functions.
 # Each returns Vector{Float64} of size kkt_dims — O(1) nonzeros per column.
 const _DC_PARAM_COL_FN = Dict{Symbol, Function}(
-    :d    => (prob, sol, j) -> calc_kkt_jacobian_demand_column(prob.network, sol, j),
+    :d    => (prob, sol, j) -> calc_kkt_jacobian_demand_column(prob.network, prob.d, sol, j),
     :sw   => (prob, sol, e) -> calc_kkt_jacobian_switching_column(prob, sol, e),
     :cq   => (prob, sol, j) -> calc_kkt_jacobian_cost_quadratic_column(prob.network, sol, j),
     :cl   => (prob, _, j)   -> calc_kkt_jacobian_cost_linear_column(prob.network, j),
@@ -485,9 +487,21 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     K_ρ_lb = ρ_lb .* (g - net.gmin)
     K_ρ_ub = ρ_ub .* (net.gmax - g)
 
-    # 8. Complementary slackness: load shedding bounds
-    K_μ_lb = μ_lb .* psh
-    K_μ_ub = μ_ub .* (d - psh)
+    # 8. Load shedding bounds
+    # If d[i] == 0, psh[i] is structurally fixed to zero and the upper-bound
+    # dual is redundant. Replace the degenerate complementarity pair by
+    # psh[i] = 0 and μ_ub[i] = 0 to avoid an exactly singular KKT block.
+    K_μ_lb = similar(psh)
+    K_μ_ub = similar(psh)
+    @inbounds for i in 1:n
+        if _is_fixed_zero_shed(d[i])
+            K_μ_lb[i] = psh[i]
+            K_μ_ub[i] = μ_ub[i]
+        else
+            K_μ_lb[i] = μ_lb[i] * psh[i]
+            K_μ_ub[i] = μ_ub[i] * (d[i] - psh[i])
+        end
+    end
 
     # 9. Primal feasibility: power balance (G_inc * g + psh - d = B * θ)
     K_power_bal = net.G_inc * g + psh - d - B_mat * θ
@@ -617,15 +631,22 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     J[idx.rho_ub, idx.pg] = -sparse(Diagonal(vars.rho_ub))
     J[idx.rho_ub, idx.rho_ub] = sparse(Diagonal(net.gmax .- vars.pg))
 
-    # ∂K_μ_lb/∂... (complementary slackness for lower shedding bound)
-    # K_μ_lb = μ_lb .* psh
-    J[idx.mu_lb, idx.psh] = sparse(Diagonal(vars.mu_lb))
-    J[idx.mu_lb, idx.mu_lb] = sparse(Diagonal(vars.psh))
-
-    # ∂K_μ_ub/∂... (complementary slackness for upper shedding bound)
-    # K_μ_ub = μ_ub .* (d - psh)
-    J[idx.mu_ub, idx.psh] = -sparse(Diagonal(vars.mu_ub))
-    J[idx.mu_ub, idx.mu_ub] = sparse(Diagonal(d .- vars.psh))
+    # ∂K_μ_lb/∂..., ∂K_μ_ub/∂... (shedding bounds)
+    @inbounds for i in 1:n
+        if _is_fixed_zero_shed(d[i])
+            # K_μ_lb[i] = psh[i]
+            J[idx.mu_lb[i], idx.psh[i]] = 1.0
+            # K_μ_ub[i] = μ_ub[i]
+            J[idx.mu_ub[i], idx.mu_ub[i]] = 1.0
+        else
+            # K_μ_lb[i] = μ_lb[i] * psh[i]
+            J[idx.mu_lb[i], idx.psh[i]] = vars.mu_lb[i]
+            J[idx.mu_lb[i], idx.mu_lb[i]] = vars.psh[i]
+            # K_μ_ub[i] = μ_ub[i] * (d[i] - psh[i])
+            J[idx.mu_ub[i], idx.psh[i]] = -vars.mu_ub[i]
+            J[idx.mu_ub[i], idx.mu_ub[i]] = d[i] - vars.psh[i]
+        end
+    end
 
     # ∂K_power_bal/∂... (primal feasibility: power balance)
     # K_power_bal = G_inc * g + psh - d - B * θ
@@ -662,8 +683,11 @@ function calc_kkt_jacobian_demand(net::DCNetwork, d::AbstractVector, sol::DCOPFS
     # ∂K_power_bal/∂d = -I (from K_power_bal = G_inc * g + psh - d - B * θ)
     J_d[idx.nu_bal, :] = -sparse(I, n, n)
 
-    # ∂K_μ_ub/∂d = Diag(μ_ub) (from K_μ_ub = μ_ub .* (d - psh))
-    J_d[idx.mu_ub, :] = sparse(Diagonal(sol.mu_ub))
+    # ∂K_μ_ub/∂d = Diag(μ_ub) for positive-demand buses only.
+    @inbounds for i in 1:n
+        _is_fixed_zero_shed(d[i]) && continue
+        J_d[idx.mu_ub[i], i] = sol.mu_ub[i]
+    end
 
     return J_d
 end
@@ -672,13 +696,13 @@ end
     calc_kkt_jacobian_demand_column(net, sol, j::Int) → Vector{Float64}
 
 Compute column `j` of the KKT parameter Jacobian ∂K/∂d.
-Only 2 nonzeros: `nu_bal[j]` and `mu_ub[j]`.
+Only 1-2 nonzeros: always `nu_bal[j]`, plus `mu_ub[j]` if `d[j] > 0`.
 """
-function calc_kkt_jacobian_demand_column(net::DCNetwork, sol::DCOPFSolution, j::Int)
+function calc_kkt_jacobian_demand_column(net::DCNetwork, d::AbstractVector, sol::DCOPFSolution, j::Int)
     col = zeros(kkt_dims(net))
     idx = kkt_indices(net)
     col[idx.nu_bal[j]] = -1.0
-    col[idx.mu_ub[j]] = sol.mu_ub[j]
+    _is_fixed_zero_shed(d[j]) || (col[idx.mu_ub[j]] = sol.mu_ub[j])
     return col
 end
 
