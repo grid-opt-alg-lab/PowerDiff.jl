@@ -18,7 +18,6 @@ using LinearAlgebra
 using SparseArrays
 using JuMP
 using Ipopt
-using ForwardDiff
 import PowerModels
 const PM = PowerModels
 

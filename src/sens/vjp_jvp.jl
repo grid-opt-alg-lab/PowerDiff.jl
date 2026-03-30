@@ -283,15 +283,21 @@ function _param_dim(prob::DCOPFProblem, param::Symbol)
     error("Unknown DC OPF parameter: $param")
 end
 
+function _param_dim(prob::ACOPFProblem, param::Symbol)
+    net = prob.network
+    param in (:d, :qd) && return net.n
+    param in (:sw, :fmax) && return net.m
+    param in (:cq, :cl) && return prob.n_gen
+    error("Unknown AC OPF parameter: $param")
+end
+
 # =============================================================================
-# AC OPF: ForwardDiff Context Setup
+# AC OPF: Analytical Parameter Actions
 # =============================================================================
 
-"""Pre-extract all AC OPF parameters for ForwardDiff closures."""
+"""Pre-extract all AC OPF parameter/state data needed by the analytical slow path."""
 function _ac_kkt_context(prob::ACOPFProblem)
     sol = _ensure_ac_solved!(prob)
-    z0 = flatten_variables(sol, prob)
-    sw = prob.network.sw
     idx = kkt_indices(prob)
     constants = prob.cache.kkt_constants
     if isnothing(constants)
@@ -303,58 +309,166 @@ function _ac_kkt_context(prob::ACOPFProblem)
     cq0 = _extract_gen_cq(prob)
     cl0 = _extract_gen_cl(prob)
     fmax0 = _extract_branch_fmax(prob)
-    return (; sol, z0, sw, idx, constants, pd0, qd0, cq0, cl0, fmax0)
+    return (; sol, idx, constants, pd0, qd0, cq0, cl0, fmax0)
 end
 
-"""Build kwargs for KKT with one parameter varying and the rest fixed."""
-function _ac_fixed_kwargs(prob::ACOPFProblem, ctx, param::Symbol)
-    kw = _PARAM_KWARG_MAP[param]
-    p0 = _AC_PARAM_EXTRACT[param](prob)
-    all_fixed = Dict{Symbol,Any}(
-        :pd => ctx.pd0, :qd => ctx.qd0, :cq => ctx.cq0,
-        :cl => ctx.cl0, :fmax => ctx.fmax0)
-    delete!(all_fixed, kw)
-    fixed_nt = (; (k => v for (k, v) in all_fixed)...)
-    return kw, p0, fixed_nt
-end
+function _ac_param_vjp!(out::AbstractVector, prob::ACOPFProblem, ctx, param::Symbol, u::AbstractVector)
+    sol = ctx.sol
+    idx = ctx.idx
+    vars = unflatten_variables(flatten_variables(sol, prob), idx)
 
-function _ac_kkt_call(prob::ACOPFProblem, ctx, sw, param_nt, fixed_nt)
-    kkt(ctx.z0, prob, sw; param_nt..., fixed_nt...,
-        idx=ctx.idx, constants=ctx.constants)
-end
-
-"""
-Compute (dK/dp)ᵀ · u via ForwardDiff.gradient of dot(u, kkt(...)).
-"""
-function _ac_param_vjp_grad(prob::ACOPFProblem, ctx, param::Symbol, u::AbstractVector)
-    if param === :sw
-        return ForwardDiff.gradient(
-            s -> dot(u, _ac_kkt_call(prob, ctx, s,
-                (pd=ctx.pd0, qd=ctx.qd0, cq=ctx.cq0, cl=ctx.cl0, fmax=ctx.fmax0), (;))),
-            ctx.sw)
-    else
-        kw, p0, fixed_nt = _ac_fixed_kwargs(prob, ctx, param)
-        return ForwardDiff.gradient(
-            x -> dot(u, _ac_kkt_call(prob, ctx, ctx.sw, NamedTuple{(kw,)}((x,)), fixed_nt)),
-            p0)
+    if param === :d
+        copyto!(out, @view(u[idx.nu_p_bal]))
+        return out
+    elseif param === :qd
+        copyto!(out, @view(u[idx.nu_q_bal]))
+        return out
+    elseif param === :cl
+        copyto!(out, @view(u[idx.pg]))
+        return out
+    elseif param === :cq
+        @inbounds for i in eachindex(sol.pg)
+            out[i] = 2 * sol.pg[i] * u[idx.pg[i]]
+        end
+        return out
+    elseif param === :fmax
+        @inbounds for l in eachindex(ctx.fmax0)
+            out[l] = -2 * ctx.fmax0[l] * (
+                sol.lam_thermal_fr[l] * u[idx.lam_thermal_fr[l]] +
+                sol.lam_thermal_to[l] * u[idx.lam_thermal_to[l]]
+            ) +
+            sol.sig_p_fr_lb[l] * u[idx.sig_p_fr_lb[l]] +
+            sol.sig_p_fr_ub[l] * u[idx.sig_p_fr_ub[l]] +
+            sol.sig_q_fr_lb[l] * u[idx.sig_q_fr_lb[l]] +
+            sol.sig_q_fr_ub[l] * u[idx.sig_q_fr_ub[l]] +
+            sol.sig_p_to_lb[l] * u[idx.sig_p_to_lb[l]] +
+            sol.sig_p_to_ub[l] * u[idx.sig_p_to_ub[l]] +
+            sol.sig_q_to_lb[l] * u[idx.sig_q_to_lb[l]] +
+            sol.sig_q_to_ub[l] * u[idx.sig_q_to_ub[l]]
+        end
+        return out
     end
+
+    @inbounds for l in 1:prob.network.m
+        prim = _branch_flow_primitives(sol.va, sol.vm, prob.network.sw, ctx.constants, l)
+        fb = prim.fb
+        tb = prim.tb
+
+        coeff_p_fr = -sol.nu_p_bal[fb] - 4 * sol.lam_thermal_fr[l] * prim.p_fr -
+                     sol.sig_p_fr_lb[l] - sol.sig_p_fr_ub[l]
+        coeff_q_fr = -sol.nu_q_bal[fb] - 4 * sol.lam_thermal_fr[l] * prim.q_fr -
+                     sol.sig_q_fr_lb[l] - sol.sig_q_fr_ub[l]
+        coeff_p_to = -sol.nu_p_bal[tb] - 4 * sol.lam_thermal_to[l] * prim.p_to -
+                     sol.sig_p_to_lb[l] - sol.sig_p_to_ub[l]
+        coeff_q_to = -sol.nu_q_bal[tb] - 4 * sol.lam_thermal_to[l] * prim.q_to -
+                     sol.sig_q_to_lb[l] - sol.sig_q_to_ub[l]
+
+        out[l] =
+            u[idx.va[fb]] * (coeff_p_fr * prim.dp_fr_hat[1] + coeff_q_fr * prim.dq_fr_hat[1] +
+                             coeff_p_to * prim.dp_to_hat[1] + coeff_q_to * prim.dq_to_hat[1]) +
+            u[idx.va[tb]] * (coeff_p_fr * prim.dp_fr_hat[2] + coeff_q_fr * prim.dq_fr_hat[2] +
+                             coeff_p_to * prim.dp_to_hat[2] + coeff_q_to * prim.dq_to_hat[2]) +
+            u[idx.vm[fb]] * (coeff_p_fr * prim.dp_fr_hat[3] + coeff_q_fr * prim.dq_fr_hat[3] +
+                             coeff_p_to * prim.dp_to_hat[3] + coeff_q_to * prim.dq_to_hat[3]) +
+            u[idx.vm[tb]] * (coeff_p_fr * prim.dp_fr_hat[4] + coeff_q_fr * prim.dq_fr_hat[4] +
+                             coeff_p_to * prim.dp_to_hat[4] + coeff_q_to * prim.dq_to_hat[4]) +
+            u[idx.nu_p_bal[fb]] * prim.p_fr_hat +
+            u[idx.nu_p_bal[tb]] * prim.p_to_hat +
+            u[idx.nu_q_bal[fb]] * prim.q_fr_hat +
+            u[idx.nu_q_bal[tb]] * prim.q_to_hat +
+            u[idx.lam_thermal_fr[l]] * (2 * sol.lam_thermal_fr[l] * (prim.p_fr * prim.p_fr_hat + prim.q_fr * prim.q_fr_hat)) +
+            u[idx.lam_thermal_to[l]] * (2 * sol.lam_thermal_to[l] * (prim.p_to * prim.p_to_hat + prim.q_to * prim.q_to_hat)) +
+            u[idx.sig_p_fr_lb[l]] * (sol.sig_p_fr_lb[l] * prim.p_fr_hat) +
+            u[idx.sig_p_fr_ub[l]] * (-sol.sig_p_fr_ub[l] * prim.p_fr_hat) +
+            u[idx.sig_q_fr_lb[l]] * (sol.sig_q_fr_lb[l] * prim.q_fr_hat) +
+            u[idx.sig_q_fr_ub[l]] * (-sol.sig_q_fr_ub[l] * prim.q_fr_hat) +
+            u[idx.sig_p_to_lb[l]] * (sol.sig_p_to_lb[l] * prim.p_to_hat) +
+            u[idx.sig_p_to_ub[l]] * (-sol.sig_p_to_ub[l] * prim.p_to_hat) +
+            u[idx.sig_q_to_lb[l]] * (sol.sig_q_to_lb[l] * prim.q_to_hat) +
+            u[idx.sig_q_to_ub[l]] * (-sol.sig_q_to_ub[l] * prim.q_to_hat)
+    end
+    return out
 end
 
-"""
-Compute dK/dp · tang via ForwardDiff.derivative (directional derivative).
-"""
-function _ac_param_jvp_deriv(prob::ACOPFProblem, ctx, param::Symbol, tang::AbstractVector)
-    if param === :sw
-        return ForwardDiff.derivative(
-            t -> _ac_kkt_call(prob, ctx, ctx.sw .+ t .* tang,
-                (pd=ctx.pd0, qd=ctx.qd0, cq=ctx.cq0, cl=ctx.cl0, fmax=ctx.fmax0), (;)),
-            0.0)
-    else
-        kw, p0, fixed_nt = _ac_fixed_kwargs(prob, ctx, param)
-        return ForwardDiff.derivative(
-            t -> _ac_kkt_call(prob, ctx, ctx.sw, NamedTuple{(kw,)}((p0 .+ t .* tang,)), fixed_nt),
-            0.0)
+function _ac_param_jvp!(v::AbstractVector, prob::ACOPFProblem, ctx, param::Symbol,
+                        tang::AbstractVector)
+    sol = ctx.sol
+    idx = ctx.idx
+
+    if param === :d
+        @views v[idx.nu_p_bal] .+= tang
+        return v
+    elseif param === :qd
+        @views v[idx.nu_q_bal] .+= tang
+        return v
+    elseif param === :cl
+        @views v[idx.pg] .+= tang
+        return v
+    elseif param === :cq
+        @inbounds for i in eachindex(sol.pg)
+            v[idx.pg[i]] += 2 * sol.pg[i] * tang[i]
+        end
+        return v
+    elseif param === :fmax
+        @inbounds for l in eachindex(ctx.fmax0)
+            t = tang[l]
+            v[idx.lam_thermal_fr[l]] += -2 * sol.lam_thermal_fr[l] * ctx.fmax0[l] * t
+            v[idx.lam_thermal_to[l]] += -2 * sol.lam_thermal_to[l] * ctx.fmax0[l] * t
+            v[idx.sig_p_fr_lb[l]] += sol.sig_p_fr_lb[l] * t
+            v[idx.sig_p_fr_ub[l]] += sol.sig_p_fr_ub[l] * t
+            v[idx.sig_q_fr_lb[l]] += sol.sig_q_fr_lb[l] * t
+            v[idx.sig_q_fr_ub[l]] += sol.sig_q_fr_ub[l] * t
+            v[idx.sig_p_to_lb[l]] += sol.sig_p_to_lb[l] * t
+            v[idx.sig_p_to_ub[l]] += sol.sig_p_to_ub[l] * t
+            v[idx.sig_q_to_lb[l]] += sol.sig_q_to_lb[l] * t
+            v[idx.sig_q_to_ub[l]] += sol.sig_q_to_ub[l] * t
+        end
+        return v
     end
+
+    @inbounds for l in 1:prob.network.m
+        t = tang[l]
+        t == 0.0 && continue
+        prim = _branch_flow_primitives(sol.va, sol.vm, prob.network.sw, ctx.constants, l)
+        fb = prim.fb
+        tb = prim.tb
+
+        coeff_p_fr = -sol.nu_p_bal[fb] - 4 * sol.lam_thermal_fr[l] * prim.p_fr -
+                     sol.sig_p_fr_lb[l] - sol.sig_p_fr_ub[l]
+        coeff_q_fr = -sol.nu_q_bal[fb] - 4 * sol.lam_thermal_fr[l] * prim.q_fr -
+                     sol.sig_q_fr_lb[l] - sol.sig_q_fr_ub[l]
+        coeff_p_to = -sol.nu_p_bal[tb] - 4 * sol.lam_thermal_to[l] * prim.p_to -
+                     sol.sig_p_to_lb[l] - sol.sig_p_to_ub[l]
+        coeff_q_to = -sol.nu_q_bal[tb] - 4 * sol.lam_thermal_to[l] * prim.q_to -
+                     sol.sig_q_to_lb[l] - sol.sig_q_to_ub[l]
+
+        v[idx.va[fb]] += t * (coeff_p_fr * prim.dp_fr_hat[1] + coeff_q_fr * prim.dq_fr_hat[1] +
+                              coeff_p_to * prim.dp_to_hat[1] + coeff_q_to * prim.dq_to_hat[1])
+        v[idx.va[tb]] += t * (coeff_p_fr * prim.dp_fr_hat[2] + coeff_q_fr * prim.dq_fr_hat[2] +
+                              coeff_p_to * prim.dp_to_hat[2] + coeff_q_to * prim.dq_to_hat[2])
+        v[idx.vm[fb]] += t * (coeff_p_fr * prim.dp_fr_hat[3] + coeff_q_fr * prim.dq_fr_hat[3] +
+                              coeff_p_to * prim.dp_to_hat[3] + coeff_q_to * prim.dq_to_hat[3])
+        v[idx.vm[tb]] += t * (coeff_p_fr * prim.dp_fr_hat[4] + coeff_q_fr * prim.dq_fr_hat[4] +
+                              coeff_p_to * prim.dp_to_hat[4] + coeff_q_to * prim.dq_to_hat[4])
+
+        v[idx.nu_p_bal[fb]] += t * prim.p_fr_hat
+        v[idx.nu_p_bal[tb]] += t * prim.p_to_hat
+        v[idx.nu_q_bal[fb]] += t * prim.q_fr_hat
+        v[idx.nu_q_bal[tb]] += t * prim.q_to_hat
+
+        v[idx.lam_thermal_fr[l]] += t * 2 * sol.lam_thermal_fr[l] * (prim.p_fr * prim.p_fr_hat + prim.q_fr * prim.q_fr_hat)
+        v[idx.lam_thermal_to[l]] += t * 2 * sol.lam_thermal_to[l] * (prim.p_to * prim.p_to_hat + prim.q_to * prim.q_to_hat)
+
+        v[idx.sig_p_fr_lb[l]] += t * sol.sig_p_fr_lb[l] * prim.p_fr_hat
+        v[idx.sig_p_fr_ub[l]] += -t * sol.sig_p_fr_ub[l] * prim.p_fr_hat
+        v[idx.sig_q_fr_lb[l]] += t * sol.sig_q_fr_lb[l] * prim.q_fr_hat
+        v[idx.sig_q_fr_ub[l]] += -t * sol.sig_q_fr_ub[l] * prim.q_fr_hat
+        v[idx.sig_p_to_lb[l]] += t * sol.sig_p_to_lb[l] * prim.p_to_hat
+        v[idx.sig_p_to_ub[l]] += -t * sol.sig_p_to_ub[l] * prim.p_to_hat
+        v[idx.sig_q_to_lb[l]] += t * sol.sig_q_to_lb[l] * prim.q_to_hat
+        v[idx.sig_q_to_ub[l]] += -t * sol.sig_q_to_ub[l] * prim.q_to_hat
+    end
+    return v
 end
 
 # =============================================================================
@@ -373,7 +487,7 @@ function _acopf_vjp(prob::ACOPFProblem, op::Symbol, param::Symbol, adj::Abstract
         return Vector((sign .* cached[op_rows, :])' * adj)
     end
 
-    # Slow path: one transpose solve + one ForwardDiff gradient
+    # Slow path: one transpose solve + one analytical parameter VJP
     kkt_lu = _ensure_ac_kkt_factor!(prob)
     ctx = _ac_kkt_context(prob)
 
@@ -381,7 +495,10 @@ function _acopf_vjp(prob::ACOPFProblem, op::Symbol, param::Symbol, adj::Abstract
     w[op_rows] .= sign .* adj
     u = kkt_lu' \ w
 
-    return -_ac_param_vjp_grad(prob, ctx, param, u)
+    out = Vector{Float64}(undef, _param_dim(prob, param))
+    _ac_param_vjp!(out, prob, ctx, param, u)
+    lmul!(-1, out)
+    return out
 end
 
 function _acopf_jvp(prob::ACOPFProblem, op::Symbol, param::Symbol, tang::AbstractVector)
@@ -396,11 +513,12 @@ function _acopf_jvp(prob::ACOPFProblem, op::Symbol, param::Symbol, tang::Abstrac
         return Vector(sign .* (cached[op_rows, :] * tang))
     end
 
-    # Slow path: one ForwardDiff derivative + one forward solve
+    # Slow path: one analytical parameter JVP + one forward solve
     kkt_lu = _ensure_ac_kkt_factor!(prob)
     ctx = _ac_kkt_context(prob)
 
-    v = _ac_param_jvp_deriv(prob, ctx, param, tang)
+    v = zeros(kkt_dims(prob))
+    _ac_param_jvp!(v, prob, ctx, param, tang)
     u = kkt_lu \ v
 
     return sign .* (-u[op_rows])
