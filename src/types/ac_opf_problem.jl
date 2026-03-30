@@ -485,8 +485,8 @@ function _rebuild_jump_model!(prob::ACOPFProblem)
 
         # Angle difference limits
         angle_diff_cons[l] = [
-            @constraint(model, va_fr - va_to >= branch["angmin"]),
-            @constraint(model, va_fr - va_to <= branch["angmax"])
+            @constraint(model, sw_l * (va_fr - va_to) >= sw_l * branch["angmin"]),
+            @constraint(model, sw_l * (va_fr - va_to) <= sw_l * branch["angmax"])
         ]
 
         # Thermal limits (apparent power)

@@ -239,9 +239,9 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     # Reference bus
     ref_con = @constraint(model, va[network.ref_bus] == 0.0)
 
-    # Phase angle difference limits
-    phase_diff_lb = @constraint(model, network.A * va .>= network.angmin)
-    phase_diff_ub = @constraint(model, network.A * va .<= network.angmax)
+    # Open lines should not constrain angle differences.
+    phase_diff_lb = @constraint(model, network.sw .* (network.A * va) .>= network.sw .* network.angmin)
+    phase_diff_ub = @constraint(model, network.sw .* (network.A * va) .<= network.sw .* network.angmax)
 
     prob.model = model
     prob.va = va
