@@ -19,8 +19,8 @@
 # Computes the standard 4-block power flow Jacobian:
 #   J1 = ∂P/∂θ, J2 = ∂P/∂|V|, J3 = ∂Q/∂θ, J4 = ∂Q/∂|V|
 #
-# Uses ForwardDiff on polar power flow equations with full Y matrix
-# (includes shunts and transformer models).
+# Uses the standard closed-form polar Jacobian formulas on the full Y matrix
+# (including shunts and transformer models).
 
 """
     calc_power_flow_jacobian(state::ACPowerFlowState; bus_types=nothing)
@@ -44,37 +44,68 @@ bus-type column modifications matching PowerModels' `calc_basic_jacobian_matrix`
 function calc_power_flow_jacobian(state::ACPowerFlowState;
                                   bus_types::Union{Vector{Int}, Nothing}=nothing)
     Y_dense = Matrix(state.Y)
+    G = real.(Y_dense)
+    B = imag.(Y_dense)
     va0 = angle.(state.v)
     vm0 = abs.(state.v)
     n = state.n
+    S = state.v .* conj.(state.Y * state.v)
+    P = real.(S)
+    Q = imag.(S)
 
-    function pq_polar(x)
-        va = x[1:n]
-        vm = x[n+1:2n]
-        v = vm .* cis.(va)
-        S = v .* conj.(Y_dense * v)
-        return vcat(real.(S), imag.(S))
+    dp_dva = spzeros(Float64, n, n)
+    dp_dvm = spzeros(Float64, n, n)
+    dq_dva = spzeros(Float64, n, n)
+    dq_dvm = spzeros(Float64, n, n)
+
+    @inbounds for i in 1:n
+        Vi = vm0[i]
+        θi = va0[i]
+
+        dp_dva[i, i] = -Q[i] - B[i, i] * Vi^2
+        dq_dva[i, i] = P[i] - G[i, i] * Vi^2
+        dp_dvm_i = 2.0 * G[i, i] * Vi
+        dq_dvm_i = -2.0 * B[i, i] * Vi
+
+        for j in 1:n
+            i == j && continue
+            Vj = vm0[j]
+            θij = θi - va0[j]
+            cosθ = cos(θij)
+            sinθ = sin(θij)
+            Gij = G[i, j]
+            Bij = B[i, j]
+            Vij = Vi * Vj
+
+            dp_dva[i, j] = Vij * (Gij * sinθ - Bij * cosθ)
+            dq_dva[i, j] = -Vij * (Gij * cosθ + Bij * sinθ)
+            dp_dvm[i, j] = Vi * (Gij * cosθ + Bij * sinθ)
+            dq_dvm[i, j] = Vi * (Gij * sinθ - Bij * cosθ)
+
+            dp_dvm_i += Vj * (Gij * cosθ + Bij * sinθ)
+            dq_dvm_i += Vj * (Gij * sinθ - Bij * cosθ)
+        end
+
+        dp_dvm[i, i] = dp_dvm_i
+        dq_dvm[i, i] = dq_dvm_i
     end
-
-    J = ForwardDiff.jacobian(pq_polar, vcat(va0, vm0))
-
-    dp_dva = J[1:n, 1:n]
-    dp_dvm = J[1:n, n+1:2n]
-    dq_dva = J[n+1:2n, 1:n]
-    dq_dvm = J[n+1:2n, n+1:2n]
 
     if bus_types !== nothing
         for j in 1:n
             if bus_types[j] == 2  # PV bus
-                dp_dvm[:, j] .= 0.0
-                dq_dvm[:, j] .= 0.0
+                for i in 1:n
+                    dp_dvm[i, j] = 0.0
+                    dq_dvm[i, j] = 0.0
+                end
                 dq_dvm[j, j] = 1.0
             elseif bus_types[j] == 3  # Slack bus
-                dp_dva[:, j] .= 0.0
+                for i in 1:n
+                    dp_dva[i, j] = 0.0
+                    dp_dvm[i, j] = 0.0
+                    dq_dva[i, j] = 0.0
+                    dq_dvm[i, j] = 0.0
+                end
                 dp_dva[j, j] = 1.0
-                dp_dvm[:, j] .= 0.0
-                dq_dva[:, j] .= 0.0
-                dq_dvm[:, j] .= 0.0
                 dq_dvm[j, j] = 1.0
             end
         end

@@ -120,7 +120,7 @@ end
     ACSensitivityCache
 
 Mutable cache for storing computed AC OPF sensitivity data to avoid redundant
-KKT solves and ForwardDiff Jacobian evaluations.
+KKT solves and KKT Jacobian evaluations.
 
 AC OPF supports 6 parameter types (`:sw`, `:d`, `:qd`, `:cq`, `:cl`, `:fmax`),
 each producing a separate `dz_d*` full-derivative matrix. All share one KKT LU
