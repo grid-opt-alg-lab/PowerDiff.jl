@@ -95,6 +95,28 @@
     end
 
     # =========================================================================
+    @testset "DC OPF: open lines do not enforce angle bounds" begin
+        dc_data = deepcopy(net_data)
+        # case5 has parallel lines 5 and 6 between the same buses
+        dc_data["branch"]["5"]["angmin"] = 1.0
+        dc_data["branch"]["5"]["angmax"] = 2.0
+        dc_data["branch"]["6"]["angmin"] = -2.0
+        dc_data["branch"]["6"]["angmax"] = -1.0
+
+        dc_net = DCNetwork(dc_data)
+        sw_new = copy(dc_net.sw)
+        sw_new[5] = 0.0
+        sw_new[6] = 0.0
+        dc_net.sw .= sw_new
+
+        prob = DCOPFProblem(dc_net, calc_demand_vector(dc_data))
+        sol = solve!(prob)
+
+        @test all(isfinite, sol.va)
+        @test all(isfinite, sol.f)
+    end
+
+    # =========================================================================
     @testset "AC OPF: solve! after update_switching! matches fresh construction" begin
         # Build and solve base AC OPF
         prob = ACOPFProblem(deepcopy(net_data))
@@ -144,6 +166,28 @@
         dvm_dsw_fresh = Matrix(calc_sensitivity(prob_fresh, :vm, :sw))
 
         @test dvm_dsw_updated ≈ dvm_dsw_fresh atol=1e-5
+    end
+
+    # =========================================================================
+    @testset "AC OPF: open lines do not enforce angle bounds" begin
+        ac_data = deepcopy(net_data)
+        # case5 has parallel lines 5 and 6 between the same buses
+        ac_data["branch"]["5"]["angmin"] = 1.0
+        ac_data["branch"]["5"]["angmax"] = 2.0
+        ac_data["branch"]["6"]["angmin"] = -2.0
+        ac_data["branch"]["6"]["angmax"] = -1.0
+
+        prob = ACOPFProblem(ac_data)
+        sw_new = copy(prob.network.sw)
+        sw_new[5] = 0.0
+        sw_new[6] = 0.0
+        update_switching!(prob, sw_new)
+
+        sol = solve!(prob)
+
+        @test all(isfinite, sol.va)
+        @test all(isfinite, sol.vm)
+        @test all(isfinite, sol.pg)
     end
 
     end  # if isnothing(net_data)
