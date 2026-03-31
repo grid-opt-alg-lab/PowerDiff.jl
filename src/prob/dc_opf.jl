@@ -28,7 +28,7 @@ const COMPLEMENTARITY_SNAP_TOL = 1e-6
 
 Check JuMP model termination status and throw informative errors for common failure modes.
 """
-function _check_solve_status(model, label::String)
+function _check_solve_status(model::JuMP.Model, label::String)
     status = termination_status(model)
     status in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED) && return status
     if status == MOI.ALMOST_LOCALLY_SOLVED
@@ -98,6 +98,7 @@ function solve!(prob::DCOPFProblem)
     μ_ub = -dual.(prob.cons.shed_ub)
     γ_lb = dual.(prob.cons.phase_diff_lb)
     γ_ub = -dual.(prob.cons.phase_diff_ub)
+    η_ref = dual(prob.cons.ref)
 
     # Post-process phase angle difference duals for strict complementarity.
     # Interior-point solvers leave gamma ≈ 1e-8 for non-binding constraints.
@@ -155,7 +156,7 @@ function solve!(prob::DCOPFProblem)
     end
     B_r_factor = prob.cache.b_r_factor
 
-    sol = DCOPFSolution(θ_val, g_val, f_val, psh_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, μ_lb, μ_ub, γ_lb, γ_ub, obj, B_r_factor)
+    sol = DCOPFSolution(θ_val, g_val, f_val, psh_val, ν_bal, ν_flow, λ_ub, λ_lb, ρ_ub, ρ_lb, μ_lb, μ_ub, γ_lb, γ_ub, η_ref, obj, B_r_factor)
 
     # Cache the solution for sensitivity computations
     prob.cache.solution = sol

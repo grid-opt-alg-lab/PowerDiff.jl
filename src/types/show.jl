@@ -253,6 +253,9 @@ function _problem_status_str(model::JuMP.Model)
     end
 end
 
+_problem_status_str(model::ExaModels.AbstractExaModel) = "ExaModel"
+_problem_status_str(model) = "unknown"
+
 function _dc_cache_list(cache::DCSensitivityCache)
     [string(f) for f in _DC_CACHE_FIELDS if !isnothing(getfield(cache, f))]
 end

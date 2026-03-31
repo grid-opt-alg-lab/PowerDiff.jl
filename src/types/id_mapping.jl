@@ -104,6 +104,40 @@ function IDMapping(ref::Dict)
                      bus_to_idx, branch_to_idx, gen_to_idx, load_to_idx, shunt_to_idx)
 end
 
+@inline _sorted_int_keys(tbl::AbstractDict) = sort(parse.(Int, collect(keys(tbl))))
+
+function IDMapping(net::Dict{String,<:Any})
+    haskey(net, "bus") || throw(ArgumentError("network missing required key \"bus\""))
+    haskey(net, "branch") || throw(ArgumentError("network missing required key \"branch\""))
+    haskey(net, "gen") || throw(ArgumentError("network missing required key \"gen\""))
+    isempty(net["bus"]) && throw(ArgumentError("Network has no buses"))
+
+    bus_ids = _sorted_int_keys(net["bus"])
+    branch_ids = sort([parse(Int, id) for (id, br) in net["branch"] if get(br, "br_status", 1) != 0])
+    gen_ids = sort([parse(Int, id) for (id, gen) in net["gen"] if get(gen, "gen_status", 1) != 0])
+    if haskey(net, "load")
+        load_ids = sort([parse(Int, id) for (id, load) in net["load"] if get(load, "status", 1) != 0])
+    else
+        load_ids = sort([parse(Int, id) for (id, bus) in net["bus"]
+                         if !iszero(get(bus, "pd", 0.0)) || !iszero(get(bus, "qd", 0.0))])
+    end
+    if haskey(net, "shunt")
+        shunt_ids = sort([parse(Int, id) for (id, shunt) in net["shunt"] if get(shunt, "status", 1) != 0])
+    else
+        shunt_ids = sort([parse(Int, id) for (id, bus) in net["bus"]
+                          if !iszero(get(bus, "gs", 0.0)) || !iszero(get(bus, "bs", 0.0))])
+    end
+
+    bus_to_idx = Dict(id => i for (i, id) in enumerate(bus_ids))
+    branch_to_idx = Dict(id => i for (i, id) in enumerate(branch_ids))
+    gen_to_idx = Dict(id => i for (i, id) in enumerate(gen_ids))
+    load_to_idx = Dict(id => i for (i, id) in enumerate(load_ids))
+    shunt_to_idx = Dict(id => i for (i, id) in enumerate(shunt_ids))
+
+    return IDMapping(bus_ids, branch_ids, gen_ids, load_ids, shunt_ids,
+                     bus_to_idx, branch_to_idx, gen_to_idx, load_to_idx, shunt_to_idx)
+end
+
 """
     IDMapping(n::Int, m::Int, k::Int, n_load::Int; n_shunt::Int=0)
 
@@ -137,17 +171,15 @@ end
 # =============================================================================
 
 """
-    _prepare_network_data(net::Dict) → (pm_data, ref, id_map)
+    _prepare_network_data(net::Dict) → (pm_data, id_map)
 
 Preprocess a PowerModels network dictionary exactly once.
-Returns a deepcopy with standardized costs/thermal limits, the build_ref result,
-and the IDMapping.
+Returns a deepcopy with standardized costs/thermal limits and the IDMapping.
 """
 function _prepare_network_data(net::Dict)
     pm_data = deepcopy(net)
     PM.standardize_cost_terms!(pm_data, order=2)
     PM.calc_thermal_limits!(pm_data)
-    ref = PM.build_ref(pm_data)[:it][:pm][:nw][0]
-    id_map = IDMapping(ref)
-    return (pm_data, ref, id_map)
+    id_map = IDMapping(pm_data)
+    return (pm_data, id_map)
 end

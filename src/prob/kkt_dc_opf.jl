@@ -349,9 +349,6 @@ Flatten solution primal and dual variables into a single vector for KKT evaluati
 where eta is the dual for the reference bus constraint (set to 0).
 """
 function flatten_variables(sol::DCOPFSolution, prob::DCOPFProblem)
-    # Reference bus dual (typically not needed, set to 0)
-    η_ref = dual(prob.cons.ref)
-
     return vcat(
         sol.va,
         sol.pg,
@@ -367,7 +364,7 @@ function flatten_variables(sol::DCOPFSolution, prob::DCOPFProblem)
         sol.mu_ub,
         sol.nu_bal,
         sol.nu_flow,
-        [η_ref]
+        [sol.eta_ref]
     )
 end
 

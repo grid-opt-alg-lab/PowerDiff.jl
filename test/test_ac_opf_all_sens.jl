@@ -300,7 +300,7 @@ end
     end
 
     # =========================================================================
-    # Invalidation clears all cached data
+    # Invalidation clears derived cached data but preserves static KKT constants
     # =========================================================================
     @testset "Invalidation clears cache" begin
         prob = ACOPFProblem(pm_data; silent=true)
@@ -317,6 +317,6 @@ end
         @test isnothing(prob.cache.dz_dcq)
         @test isnothing(prob.cache.dz_dcl)
         @test isnothing(prob.cache.dz_dfmax)
-        @test isnothing(prob.cache.kkt_constants)
+        @test !isnothing(prob.cache.kkt_constants)
     end
 end

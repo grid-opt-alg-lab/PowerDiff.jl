@@ -29,7 +29,7 @@
 # =============================================================================
 
 """Return sorted reference bus indices for the problem."""
-_ref_bus_indices(prob::ACOPFProblem) = sort(collect(keys(prob.ref[:ref_buses])))
+_ref_bus_indices(prob::ACOPFProblem) = prob.data.ref_bus_keys
 
 # =============================================================================
 # Dimension Calculations
@@ -54,7 +54,7 @@ Total: 6n + 12m + 6k + n_ref
 """
 function kkt_dims(prob::ACOPFProblem)
     n, m, k = prob.network.n, prob.network.m, prob.n_gen
-    n_ref = length(prob.ref[:ref_buses])
+    n_ref = length(prob.data.ref_bus_keys)
     return 6n + 12m + 6k + n_ref
 end
 
@@ -131,7 +131,7 @@ function kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
 end
 
 function kkt_indices(prob::ACOPFProblem)
-    n_ref = length(prob.ref[:ref_buses])
+    n_ref = length(prob.data.ref_bus_keys)
     kkt_indices(prob.network.n, prob.network.m, prob.n_gen, n_ref)
 end
 
@@ -204,7 +204,7 @@ Flow equations match PowerModels' `constraint_ohms_yt_from`/`constraint_ohms_yt_
 The switching variable sw_l multiplies each flow, so sw_l=0 means the branch
 contributes zero flow (open), sw_l=1 means full flow (closed).
 """
-function _compute_branch_flows(va, vm, net::ACNetwork, ref, sw; constants=nothing)
+function _compute_branch_flows(va, vm, net::ACNetwork, sw; constants)
     m = net.m
     T = promote_type(eltype(va), eltype(vm), eltype(sw))
     p_fr = zeros(T, m)
@@ -213,30 +213,17 @@ function _compute_branch_flows(va, vm, net::ACNetwork, ref, sw; constants=nothin
     q_to = zeros(T, m)
 
     for l in 1:m
-        if isnothing(constants)
-            branch = ref[:branch][l]
-            f_bus = branch["f_bus"]
-            t_bus = branch["t_bus"]
-            g_br, b_br = PM.calc_branch_y(branch)
-            tr, ti = PM.calc_branch_t(branch)
-            g_fr_shunt = branch["g_fr"]
-            b_fr_shunt = branch["b_fr"]
-            g_to_shunt = branch["g_to"]
-            b_to_shunt = branch["b_to"]
-            tm = branch["tap"]^2
-        else
-            f_bus = constants.f_bus[l]
-            t_bus = constants.t_bus[l]
-            g_br = constants.g_br[l]
-            b_br = constants.b_br[l]
-            tr = constants.tr[l]
-            ti = constants.ti[l]
-            g_fr_shunt = constants.g_fr[l]
-            b_fr_shunt = constants.b_fr[l]
-            g_to_shunt = constants.g_to[l]
-            b_to_shunt = constants.b_to[l]
-            tm = constants.tm[l]
-        end
+        f_bus = constants.f_bus[l]
+        t_bus = constants.t_bus[l]
+        g_br = constants.g_br[l]
+        b_br = constants.b_br[l]
+        tr = constants.tr[l]
+        ti = constants.ti[l]
+        g_fr_shunt = constants.g_fr[l]
+        b_fr_shunt = constants.b_fr[l]
+        g_to_shunt = constants.g_to[l]
+        b_to_shunt = constants.b_to[l]
+        tm = constants.tm[l]
 
         sw_l = sw[l]
 
@@ -430,8 +417,8 @@ end
 Power balance residuals.
 """
 function _power_balance_residuals(va, vm, pg, qg, p_fr, q_fr, p_to, q_to,
-                                  net::ACNetwork, ref, prob::ACOPFProblem;
-                                  pd=nothing, qd=nothing, constants=nothing)
+                                  net::ACNetwork, prob::ACOPFProblem;
+                                  pd=nothing, qd=nothing, constants)
     n = net.n
     m = net.m
     _et(x) = isnothing(x) ? Float64 : eltype(x)
@@ -444,8 +431,8 @@ function _power_balance_residuals(va, vm, pg, qg, p_fr, q_fr, p_to, q_to,
     q_flow_sum = zeros(T, n)
 
     for l in 1:m
-        fb = isnothing(constants) ? ref[:branch][l]["f_bus"] : constants.f_bus[l]
-        tb = isnothing(constants) ? ref[:branch][l]["t_bus"] : constants.t_bus[l]
+        fb = constants.f_bus[l]
+        tb = constants.t_bus[l]
         p_flow_sum[fb] += p_fr[l]
         p_flow_sum[tb] += p_to[l]
         q_flow_sum[fb] += q_fr[l]
@@ -456,17 +443,16 @@ function _power_balance_residuals(va, vm, pg, qg, p_fr, q_fr, p_to, q_to,
     pg_sum = zeros(T, n)
     qg_sum = zeros(T, n)
     for i in 1:prob.n_gen
-        bus_idx = isnothing(constants) ? ref[:gen][i]["gen_bus"] : constants.gen_bus[i]
+        bus_idx = constants.gen_bus[i]
         pg_sum[bus_idx] += pg[i]
         qg_sum[bus_idx] += qg[i]
     end
 
     for i in 1:n
-        gs_i = isnothing(constants) ? sum(ref[:shunt][s]["gs"] for s in ref[:bus_shunts][i]; init=0.0) : constants.gs[i]
-        bs_i = isnothing(constants) ? sum(ref[:shunt][s]["bs"] for s in ref[:bus_shunts][i]; init=0.0) : constants.bs[i]
-
-        pd_i = isnothing(pd) ? sum(ref[:load][l]["pd"] for l in ref[:bus_loads][i]; init=0.0) : pd[i]
-        qd_i = isnothing(qd) ? sum(ref[:load][l]["qd"] for l in ref[:bus_loads][i]; init=0.0) : qd[i]
+        gs_i = constants.gs[i]
+        bs_i = constants.bs[i]
+        pd_i = isnothing(pd) ? constants.pd[i] : pd[i]
+        qd_i = isnothing(qd) ? constants.qd[i] : qd[i]
 
         K_p_bal[i] = p_flow_sum[i] + gs_i * vm[i]^2 - pg_sum[i] + pd_i
         K_q_bal[i] = q_flow_sum[i] - bs_i * vm[i]^2 - qg_sum[i] + qd_i
@@ -742,7 +728,6 @@ function kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     end
     vars = unflatten_variables(z, idx)
     net = prob.network
-    ref = prob.ref
     n, m, k = net.n, net.m, prob.n_gen
 
     va, vm = vars.va, vars.vm
@@ -752,12 +737,11 @@ function kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     T = promote_type(eltype(z), eltype(sw), _et(pd), _et(qd), _et(cq), _et(cl), _et(fmax))
 
     # Compute branch flows as functions of voltages
-    p_fr, q_fr, p_to, q_to = _compute_branch_flows(va, vm, net, ref, sw; constants=constants)
+    p_fr, q_fr, p_to, q_to = _compute_branch_flows(va, vm, net, sw; constants=constants)
 
-    # Materialize rate_a vector once to avoid repeated isnothing checks
-    rate_a = isnothing(fmax) ? T[ref[:branch][l]["rate_a"] for l in 1:m] : fmax
-    cq_vec = isnothing(cq) ? T[ref[:gen][i]["cost"][1] for i in 1:k] : cq
-    cl_vec = isnothing(cl) ? T[ref[:gen][i]["cost"][2] for i in 1:k] : cl
+    rate_a = isnothing(fmax) ? T.(constants.fmax) : fmax
+    cq_vec = isnothing(cq) ? T.(constants.cq) : cq
+    cl_vec = isnothing(cl) ? T.(constants.cl) : cl
 
     # Pre-allocate KKT residual vector
     K = fill(T(NaN), last(idx.sig_q_to_ub))
@@ -773,13 +757,12 @@ function kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
 
     # Power balance
     K_p_bal, K_q_bal = _power_balance_residuals(va, vm, pg, qg, p_fr, q_fr, p_to, q_to,
-                                                 net, ref, prob; pd=pd, qd=qd,
-                                                 constants=constants)
+                                                 net, prob; pd=pd, qd=qd, constants=constants)
     K[idx.nu_p_bal] = K_p_bal
     K[idx.nu_q_bal] = K_q_bal
 
     # Reference bus: va[ref_bus] == 0
-    rbk = isnothing(constants) ? _ref_bus_indices(prob) : constants.ref_bus_keys
+    rbk = constants.ref_bus_keys
     for (j, ref_bus_idx) in enumerate(rbk)
         K[idx.nu_ref_bus[j]] = va[ref_bus_idx]
     end
@@ -791,30 +774,16 @@ function kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     # Upper bounds: L -= λ*(x - ub),  CS = λ*(ub - x) = 0  (negated residual)
     # Both are valid; the sign flip cancels in implicit differentiation.
 
-    # Use pre-extracted bounds when available to avoid repeated ref lookups
-    if isnothing(constants)
-        vmin = T[ref[:bus][i]["vmin"] for i in 1:n]
-        vmax = T[ref[:bus][i]["vmax"] for i in 1:n]
-        pmin = T[ref[:gen][i]["pmin"] for i in 1:k]
-        pmax = T[ref[:gen][i]["pmax"] for i in 1:k]
-        qmin = T[ref[:gen][i]["qmin"] for i in 1:k]
-        qmax = T[ref[:gen][i]["qmax"] for i in 1:k]
-        f_bus_idx = [ref[:branch][l]["f_bus"] for l in 1:m]
-        t_bus_idx = [ref[:branch][l]["t_bus"] for l in 1:m]
-        angmin = T[ref[:branch][l]["angmin"] for l in 1:m]
-        angmax = T[ref[:branch][l]["angmax"] for l in 1:m]
-    else
-        vmin = constants.vmin
-        vmax = constants.vmax
-        pmin = constants.pmin
-        pmax = constants.pmax
-        qmin = constants.qmin
-        qmax = constants.qmax
-        f_bus_idx = constants.f_bus
-        t_bus_idx = constants.t_bus
-        angmin = constants.angmin
-        angmax = constants.angmax
-    end
+    vmin = constants.vmin
+    vmax = constants.vmax
+    pmin = constants.pmin
+    pmax = constants.pmax
+    qmin = constants.qmin
+    qmax = constants.qmax
+    f_bus_idx = constants.f_bus
+    t_bus_idx = constants.t_bus
+    angmin = constants.angmin
+    angmax = constants.angmax
 
     # Thermal limits
     K[idx.lam_thermal_fr] .= vars.lam_thermal_fr .* (p_fr.^2 .+ q_fr.^2 .- rate_a.^2)
@@ -854,27 +823,25 @@ kkt(z::AbstractVector, prob::ACOPFProblem) = kkt(z, prob, prob.network.sw)
 # Parameter Extraction Functions
 # =============================================================================
 
+@inline function _require_kkt_constants(prob::ACOPFProblem)
+    constants = prob.cache.kkt_constants
+    isnothing(constants) && error(
+        "ACOPFProblem cache invariant violated: kkt_constants are missing. " *
+        "ACOPFProblem constructors and rebuilds should populate prob.cache.kkt_constants."
+    )
+    return constants
+end
+
 """Extract per-bus aggregated load values for a given key ("pd" or "qd")."""
 function _extract_bus_load(prob::ACOPFProblem, key::String)
-    ref = prob.ref
-    n = prob.network.n
-    vals = zeros(n)
-    for i in 1:n
-        for lid in ref[:bus_loads][i]
-            vals[i] += ref[:load][lid][key]
-        end
-    end
-    return vals
+    constants = _require_kkt_constants(prob)
+    return key == "pd" ? copy(constants.pd) : copy(constants.qd)
 end
 
 """Extract per-generator cost coefficient at a given index (1=quadratic, 2=linear)."""
 function _extract_gen_cost(prob::ACOPFProblem, cost_idx::Int)
-    k = prob.n_gen
-    vals = zeros(k)
-    for i in 1:k
-        vals[i] = prob.ref[:gen][i]["cost"][cost_idx]
-    end
-    return vals
+    constants = _require_kkt_constants(prob)
+    return cost_idx == 1 ? copy(constants.cq) : copy(constants.cl)
 end
 
 _extract_bus_pd(prob::ACOPFProblem) = _extract_bus_load(prob, "pd")
@@ -884,12 +851,7 @@ _extract_gen_cl(prob::ACOPFProblem) = _extract_gen_cost(prob, 2)
 
 """Extract per-branch flow limits (rate_a) from the problem's ref."""
 function _extract_branch_fmax(prob::ACOPFProblem)
-    m = prob.network.m
-    fmax = zeros(m)
-    for l in 1:m
-        fmax[l] = prob.ref[:branch][l]["rate_a"]
-    end
-    return fmax
+    return copy(_require_kkt_constants(prob).fmax)
 end
 
 """
@@ -897,60 +859,7 @@ Pre-extract all constant data from the problem's ref for efficient analytical
 KKT assembly and repeated sensitivity evaluation.
 """
 function _extract_kkt_constants(prob::ACOPFProblem)
-    ref = prob.ref
-    n, m, k = prob.network.n, prob.network.m, prob.n_gen
-
-    # Branch electrical parameters
-    bp_g = Vector{Float64}(undef, m)
-    bp_b = Vector{Float64}(undef, m)
-    bp_tr = Vector{Float64}(undef, m)
-    bp_ti = Vector{Float64}(undef, m)
-    bp_g_fr = Vector{Float64}(undef, m)
-    bp_b_fr = Vector{Float64}(undef, m)
-    bp_g_to = Vector{Float64}(undef, m)
-    bp_b_to = Vector{Float64}(undef, m)
-    bp_tm = Vector{Float64}(undef, m)
-    bp_f_bus = Vector{Int}(undef, m)
-    bp_t_bus = Vector{Int}(undef, m)
-    bp_angmin = Vector{Float64}(undef, m)
-    bp_angmax = Vector{Float64}(undef, m)
-    for l in 1:m
-        branch = ref[:branch][l]
-        bp_g[l], bp_b[l] = PM.calc_branch_y(branch)
-        bp_tr[l], bp_ti[l] = PM.calc_branch_t(branch)
-        bp_g_fr[l] = branch["g_fr"]
-        bp_b_fr[l] = branch["b_fr"]
-        bp_g_to[l] = branch["g_to"]
-        bp_b_to[l] = branch["b_to"]
-        bp_tm[l] = branch["tap"]^2
-        bp_f_bus[l] = branch["f_bus"]
-        bp_t_bus[l] = branch["t_bus"]
-        bp_angmin[l] = branch["angmin"]
-        bp_angmax[l] = branch["angmax"]
-    end
-
-    return (
-        # Branch parameters
-        g_br = bp_g, b_br = bp_b, tr = bp_tr, ti = bp_ti,
-        g_fr = bp_g_fr, b_fr = bp_b_fr, g_to = bp_g_to, b_to = bp_b_to,
-        tm = bp_tm, f_bus = bp_f_bus, t_bus = bp_t_bus,
-        angmin = bp_angmin, angmax = bp_angmax,
-        # Bus bounds
-        vmin = Float64[ref[:bus][i]["vmin"] for i in 1:n],
-        vmax = Float64[ref[:bus][i]["vmax"] for i in 1:n],
-        # Gen bounds and parameters
-        pmin = Float64[ref[:gen][i]["pmin"] for i in 1:k],
-        pmax = Float64[ref[:gen][i]["pmax"] for i in 1:k],
-        qmin = Float64[ref[:gen][i]["qmin"] for i in 1:k],
-        qmax = Float64[ref[:gen][i]["qmax"] for i in 1:k],
-        gen_bus = Int[ref[:gen][i]["gen_bus"] for i in 1:k],
-        cc = Float64[ref[:gen][i]["cost"][3] for i in 1:k],
-        # Shunt parameters (aggregated per bus)
-        gs = Float64[sum(ref[:shunt][s]["gs"] for s in ref[:bus_shunts][i]; init=0.0) for i in 1:n],
-        bs = Float64[sum(ref[:shunt][s]["bs"] for s in ref[:bus_shunts][i]; init=0.0) for i in 1:n],
-        # Reference bus
-        ref_bus_keys = sort(collect(keys(ref[:ref_buses]))),
-    )
+    return prob.data.constants
 end
 
 # =============================================================================
@@ -1097,11 +1006,7 @@ function calc_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::
     p0 = _AC_PARAM_EXTRACT[param](prob)
     Jp = zeros(Float64, kkt_dims(prob), length(p0))
 
-    constants = prob.cache.kkt_constants
-    if isnothing(constants)
-        constants = _extract_kkt_constants(prob)
-        prob.cache.kkt_constants = constants
-    end
+    constants = _require_kkt_constants(prob)
 
     if param === :sw
         return _fill_ac_param_jacobian_sw!(Jp, prob, sol, idx, constants)
@@ -1259,11 +1164,7 @@ function _calc_ac_kkt_param_column(prob::ACOPFProblem, sol::ACOPFSolution, param
     p0 = _AC_PARAM_EXTRACT[param](prob)
     Kcol = zeros(Float64, kkt_dims(prob))
 
-    constants = prob.cache.kkt_constants
-    if isnothing(constants)
-        constants = _extract_kkt_constants(prob)
-        prob.cache.kkt_constants = constants
-    end
+    constants = _require_kkt_constants(prob)
 
     if param === :sw
         prim = _branch_flow_primitives(vars.va, vars.vm, prob.network.sw, constants, col_idx)

@@ -351,24 +351,24 @@
     end
 
     # =================================================================
-    # Stored ref on network types
+    # Typed cached network data
     # =================================================================
-    @testset "Stored ref field" begin
+    @testset "Typed cached network data" begin
         dc_nb = DCNetwork(raw)
-        @test !isnothing(dc_nb.ref)
-        @test haskey(dc_nb.ref, :bus)
+        @test length(dc_nb.demand) == dc_nb.n
+        @test length(dc_nb.pg_init) == dc_nb.n
 
         ac_nb = ACNetwork(raw)
-        @test !isnothing(ac_nb.ref)
-        @test haskey(ac_nb.ref, :bus)
+        @test length(ac_nb.pd) == ac_nb.n
+        @test length(ac_nb.gen_bus) == length(ac_nb.pmin)
 
-        # Programmatic constructor has ref=nothing
+        # Programmatic constructor carries typed zero vectors
         n, m, k = 2, 1, 1
         A = sparse([1.0 -1.0])
         G_inc = sparse(reshape([1.0, 0.0], 2, 1))
         b = [-10.0]
         dc_prog = DCNetwork(n, m, k, A, G_inc, b)
-        @test isnothing(dc_prog.ref)
+        @test dc_prog.demand == zeros(n)
     end
 
     # =================================================================
@@ -484,64 +484,5 @@
             Dict(1=>1, 5=>2, 10=>3), Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict{Int,Int}())
         @test id_map.bus_ids == [1, 5, 10]
         @test id_map.bus_to_idx[10] == 3
-    end
-
-    # =================================================================
-    # _remap_ref_to_sequential
-    # =================================================================
-    @testset "_remap_ref_to_sequential" begin
-        # Build ref from non-basic network
-        pm_data = deepcopy(raw)
-        PowerModels.standardize_cost_terms!(pm_data, order=2)
-        PowerModels.calc_thermal_limits!(pm_data)
-        ref = PowerModels.build_ref(pm_data)[:it][:pm][:nw][0]
-        id_map = IDMapping(ref)
-
-        seq_ref = PowerDiff._remap_ref_to_sequential(ref, id_map)
-
-        # Sequential ref should have keys 1:n for buses
-        n = length(id_map.bus_ids)
-        @test sort(collect(keys(seq_ref[:bus]))) == collect(1:n)
-
-        # Sequential ref should have keys 1:m for branches
-        m = length(id_map.branch_ids)
-        @test sort(collect(keys(seq_ref[:branch]))) == collect(1:m)
-
-        # Sequential ref should have keys 1:k for generators
-        k = length(id_map.gen_ids)
-        @test sort(collect(keys(seq_ref[:gen]))) == collect(1:k)
-
-        # Bus-level fields should be remapped
-        for (seq_idx, bus_data) in seq_ref[:bus]
-            @test bus_data["bus_i"] == seq_idx
-        end
-
-        # Branch f_bus / t_bus should be sequential
-        for (seq_idx, br_data) in seq_ref[:branch]
-            @test 1 <= br_data["f_bus"] <= n
-            @test 1 <= br_data["t_bus"] <= n
-        end
-
-        # Generator gen_bus should be sequential
-        for (seq_idx, gen_data) in seq_ref[:gen]
-            @test 1 <= gen_data["gen_bus"] <= n
-        end
-
-        # Arcs should all use sequential IDs
-        for (l, i, j) in seq_ref[:arcs]
-            @test 1 <= l <= m
-            @test 1 <= i <= n
-            @test 1 <= j <= n
-        end
-
-        # bus_gens keys should be sequential bus IDs
-        for bus_idx in keys(seq_ref[:bus_gens])
-            @test 1 <= bus_idx <= n
-        end
-
-        # ref_buses should be remapped
-        for ref_bus in keys(seq_ref[:ref_buses])
-            @test 1 <= ref_bus <= n
-        end
     end
 end

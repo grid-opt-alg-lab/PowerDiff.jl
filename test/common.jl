@@ -48,8 +48,9 @@ using ForwardDiff
 using Ipopt
 using JuMP: MOI
 
-# PowerModels test data directory
+# PowerModels test data directory and PowerDiff-owned PGLib artifact handle
 const PM_DATA_DIR = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
+const PD_PGLIB_DIR = PowerDiff.get_path(:pglib)
 
 """
     load_test_case(case_name::String)
