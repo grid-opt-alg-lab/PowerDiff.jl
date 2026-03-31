@@ -39,7 +39,8 @@ topology sensitivity analysis.
 - `ref_bus`: Reference bus index (phase angle = 0)
 - `tau`: Regularization parameter for strong convexity
 - `id_map`: Bidirectional mapping between original and sequential element IDs
-- `ref`: PowerModels build_ref dictionary (nothing for programmatic constructors)
+- `demand`: Real power demand aggregated per bus
+- `pg_init`: Initial real generation aggregated per bus
 """
 struct DCNetwork <: AbstractPowerNetwork
     n::Int
@@ -57,10 +58,11 @@ struct DCNetwork <: AbstractPowerNetwork
     cq::Vector{Float64}
     cl::Vector{Float64}
     c_shed::Vector{Float64}
+    demand::Vector{Float64}
+    pg_init::Vector{Float64}
     ref_bus::Int
     tau::Float64
     id_map::IDMapping
-    ref::Union{Nothing,Dict}
 end
 
 # =============================================================================
@@ -101,6 +103,7 @@ struct DCOPFSolution{F<:Factorization{Float64}} <: AbstractOPFSolution
     mu_ub::Vector{Float64}
     gamma_lb::Vector{Float64}
     gamma_ub::Vector{Float64}
+    eta_ref::Float64
     objective::Float64
     B_r_factor::F
 end
@@ -161,10 +164,6 @@ Accepts both basic and non-basic networks. Non-basic networks (with arbitrary
 bus/branch/gen IDs) are automatically translated to sequential indices internally.
 The original IDs are preserved in `id_map` for result interpretation.
 
-The `build_ref` result is stored on the network for reuse by downstream
-constructors (e.g. `DCOPFProblem`, `DCPowerFlowState`), avoiding redundant
-`deepcopy` + `build_ref` calls.
-
 # Example
 ```julia
 raw = PowerModels.parse_file("case14.m")
@@ -175,15 +174,18 @@ dc_net = DCNetwork(net)  # basic also OK
 ```
 """
 function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
-    pm_data, ref, id_map = _prepare_network_data(net)
+    pm_data, id_map = _prepare_network_data(net)
 
     n = length(id_map.bus_ids)
     m = length(id_map.branch_ids)
     k = length(id_map.gen_ids)
+    branch_tbl = pm_data["branch"]
+    gen_tbl = pm_data["gen"]
 
-    # Incidence matrix A (m × n) from ref[:branch] using id_map translation
+    # Incidence matrix A (m × n) from active branches using id_map translation
     A = spzeros(m, n)
-    for (orig_id, br) in ref[:branch]
+    for orig_id in id_map.branch_ids
+        br = branch_tbl[string(orig_id)]
         row = id_map.branch_to_idx[orig_id]
         f_col = id_map.bus_to_idx[br["f_bus"]]
         t_col = id_map.bus_to_idx[br["t_bus"]]
@@ -193,7 +195,8 @@ function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,I
 
     # Generator-bus incidence matrix G_inc (n × k)
     G_inc = spzeros(n, k)
-    for (orig_id, gen) in ref[:gen]
+    for orig_id in id_map.gen_ids
+        gen = gen_tbl[string(orig_id)]
         col = id_map.gen_to_idx[orig_id]
         row = id_map.bus_to_idx[gen["gen_bus"]]
         G_inc[row, col] = 1.0
@@ -201,7 +204,8 @@ function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,I
 
     # Branch susceptances: b = imag(1/z)
     b = zeros(m)
-    for (orig_id, br) in ref[:branch]
+    for orig_id in id_map.branch_ids
+        br = branch_tbl[string(orig_id)]
         idx = id_map.branch_to_idx[orig_id]
         r = br["br_r"]
         x = br["br_x"]
@@ -217,17 +221,19 @@ function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,I
     sw = ones(m)
 
     # Limits (iterate in sequential order via sorted IDs)
-    fmax = [ref[:branch][id_map.branch_ids[i]]["rate_a"] for i in 1:m]
-    gmax = [ref[:gen][id_map.gen_ids[i]]["pmax"] for i in 1:k]
-    gmin = [ref[:gen][id_map.gen_ids[i]]["pmin"] for i in 1:k]
+    fmax = [branch_tbl[string(id_map.branch_ids[i])]["rate_a"] for i in 1:m]
+    gmax = [gen_tbl[string(id_map.gen_ids[i])]["pmax"] for i in 1:k]
+    gmin = [gen_tbl[string(id_map.gen_ids[i])]["pmin"] for i in 1:k]
 
     # Phase angle difference limits
-    angmax = [ref[:branch][id_map.branch_ids[i]]["angmax"] for i in 1:m]
-    angmin = [ref[:branch][id_map.branch_ids[i]]["angmin"] for i in 1:m]
+    angmax = [branch_tbl[string(id_map.branch_ids[i])]["angmax"] for i in 1:m]
+    angmin = [branch_tbl[string(id_map.branch_ids[i])]["angmin"] for i in 1:m]
 
     # Cost coefficients (assumes polynomial cost with at least 2 terms)
-    cq = [ref[:gen][id_map.gen_ids[i]]["cost"][1] for i in 1:k]
-    cl = [ref[:gen][id_map.gen_ids[i]]["cost"][2] for i in 1:k]
+    cq = [gen_tbl[string(id_map.gen_ids[i])]["cost"][1] for i in 1:k]
+    cl = [gen_tbl[string(id_map.gen_ids[i])]["cost"][2] for i in 1:k]
+    demand = _calc_demand_vector(pm_data, id_map)
+    pg_init = _calc_generation_vector(pm_data, id_map)
 
     # Load-shedding cost: high penalty to discourage shedding when feasible
     marginal_cost_ub = max(maximum(2cq .* gmax .+ cl), 1.0)
@@ -235,7 +241,8 @@ function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,I
 
     # Reference bus (translate original ID to sequential index)
     if isnothing(ref_bus)
-        orig_ref = first(keys(ref[:ref_buses]))
+        ref_candidates = [id for id in id_map.bus_ids if get(pm_data["bus"][string(id)], "bus_type", 1) == 3]
+        orig_ref = isempty(ref_candidates) ? id_map.bus_ids[1] : ref_candidates[1]
         ref_bus = id_map.bus_to_idx[orig_ref]
     else
         # If user provided an original bus ID, translate it; validate the result
@@ -248,7 +255,11 @@ function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,I
     end
 
     return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, angmax, angmin,
-                     cq, cl, c_shed, ref_bus, tau, id_map, ref)
+                     cq, cl, c_shed, demand, pg_init, ref_bus, tau, id_map)
+end
+
+function DCNetwork(data::ParsedCase; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
+    return DCNetwork(_parsedcase_to_pm_data(data); tau=tau, ref_bus=ref_bus)
 end
 
 """
@@ -269,10 +280,14 @@ function DCNetwork(
     cq::AbstractVector=zeros(k),
     cl::AbstractVector=zeros(k),
     c_shed::AbstractVector=fill(1e4, n),
+    demand::AbstractVector=zeros(n),
+    pg_init::AbstractVector=zeros(n),
     ref_bus::Int=1,
     tau::Float64=DEFAULT_TAU
 )
     length(c_shed) == n || throw(DimensionMismatch("c_shed length $(length(c_shed)) must match number of buses $n"))
+    length(demand) == n || throw(DimensionMismatch("demand length $(length(demand)) must match number of buses $n"))
+    length(pg_init) == n || throw(DimensionMismatch("pg_init length $(length(pg_init)) must match number of buses $n"))
     all(c_shed .> 0) || throw(ArgumentError("c_shed must be strictly positive at all buses"))
     return DCNetwork(
         n, m, k,
@@ -282,9 +297,9 @@ function DCNetwork(
         Float64.(angmax), Float64.(angmin),
         Float64.(cq), Float64.(cl),
         Float64.(c_shed),
+        Float64.(demand), Float64.(pg_init),
         ref_bus, tau,
-        IDMapping(n, m, k, 0),
-        nothing
+        IDMapping(n, m, k, 0)
     )
 end
 
@@ -297,39 +312,47 @@ end
 
 Extract demand vector from PowerModels network dictionary.
 
-Works with both basic and non-basic networks. For non-basic networks,
-uses `PM.build_ref` to resolve load-bus mappings and returns a vector
-in sequential bus order (matching `IDMapping` from `DCNetwork(net)`).
+Works with both basic and non-basic networks.
 """
 function calc_demand_vector(net::Dict)
-    _, ref, id_map = _prepare_network_data(net)
-    return _calc_demand_vector(ref, id_map)
+    pm_data, id_map = _prepare_network_data(net)
+    return _calc_demand_vector(pm_data, id_map)
 end
 
 """
     calc_demand_vector(network::DCNetwork)
 
-Extract demand vector from a DCNetwork that was constructed from a PowerModels dict.
-
-Uses the stored `ref` to avoid redundant `build_ref` calls.
+Extract demand vector from a DCNetwork.
 """
 function calc_demand_vector(network::DCNetwork)
-    isnothing(network.ref) && error(
-        "DCNetwork was not constructed from a PowerModels dict; cannot extract demand. " *
-        "Provide the demand vector explicitly.")
-    return _calc_demand_vector(network.ref, network.id_map)
+    return copy(network.demand)
+end
+
+calc_demand_vector(data::ParsedCase) = begin
+    bus_to_idx = Dict(b.bus_i => i for (i, b) in enumerate(data.bus))
+    d = zeros(length(data.bus))
+    for load in data.load
+        load.status != 0 || continue
+        d[bus_to_idx[load.load_bus]] += load.pd
+    end
+    d
 end
 
 """
-Internal demand vector extraction from ref + id_map (avoids redundant build_ref).
+Internal demand vector extraction from standardized network data.
 """
-function _calc_demand_vector(ref::Dict, id_map::IDMapping)
+function _calc_demand_vector(pm_data::Dict, id_map::IDMapping)
     n = length(id_map.bus_ids)
     d = zeros(n)
-    for (bus_orig_id, load_ids) in ref[:bus_loads]
-        bus_idx = id_map.bus_to_idx[bus_orig_id]
-        for load_id in load_ids
-            d[bus_idx] += ref[:load][load_id]["pd"]
+    if haskey(pm_data, "load")
+        for load_orig_id in id_map.load_ids
+            load = pm_data["load"][string(load_orig_id)]
+            bus_idx = id_map.bus_to_idx[load["load_bus"]]
+            d[bus_idx] += get(load, "pd", 0.0)
+        end
+    else
+        for (i, bus_orig_id) in enumerate(id_map.bus_ids)
+            d[i] = get(pm_data["bus"][string(bus_orig_id)], "pd", 0.0)
         end
     end
     return d
@@ -377,18 +400,16 @@ function _factorize_B_r(net::DCNetwork)
 end
 
 """
-Aggregate generation to bus-level vector (uses ref + id_map).
+Aggregate generation to bus-level vector.
 """
-function _calc_generation_vector(ref::Dict, id_map::IDMapping)
+function _calc_generation_vector(pm_data::Dict, id_map::IDMapping)
     n = length(id_map.bus_ids)
     g = zeros(n)
-    for (bus_orig_id, gen_ids) in ref[:bus_gens]
-        bus_idx = id_map.bus_to_idx[bus_orig_id]
-        for gen_id in gen_ids
-            gen_data = ref[:gen][gen_id]
-            pg = get(gen_data, "pg", (gen_data["pmin"] + gen_data["pmax"]) / 2)
-            g[bus_idx] += pg
-        end
+    for gen_orig_id in id_map.gen_ids
+        gen_data = pm_data["gen"][string(gen_orig_id)]
+        bus_idx = id_map.bus_to_idx[gen_data["gen_bus"]]
+        pg = get(gen_data, "pg", (gen_data["pmin"] + gen_data["pmax"]) / 2)
+        g[bus_idx] += pg
     end
     return g
 end
@@ -485,14 +506,13 @@ If `g` is not provided, aggregates generation from gen data to buses.
 function DCPowerFlowState(pm_net::Dict; g::Union{Nothing,AbstractVector}=nothing, d::Union{Nothing,AbstractVector}=nothing)
     net = DCNetwork(pm_net)
 
-    # Extract demand if not provided (reuses stored ref — no extra build_ref)
     if isnothing(d)
-        d = _calc_demand_vector(net.ref, net.id_map)
+        d = net.demand
     end
 
     # Aggregate generation to buses if not provided
     if isnothing(g)
-        g = _calc_generation_vector(net.ref, net.id_map)
+        g = net.pg_init
     end
 
     return DCPowerFlowState(net, g, d)

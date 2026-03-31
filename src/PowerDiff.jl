@@ -18,6 +18,8 @@ using LinearAlgebra
 using SparseArrays
 using JuMP
 using Ipopt
+using ExaModels
+using NLPModelsIpopt
 import PowerModels
 const PM = PowerModels
 
@@ -27,6 +29,8 @@ const MOI = JuMP.MOI
 # Warning suppression
 # =============================================================================
 const _SILENCE_WARNINGS = Ref(false)
+
+include("parser.jl")
 
 """
     silence()
@@ -100,6 +104,7 @@ export calc_sensitivity, calc_sensitivity_column
 export Sensitivity, silence
 export operand_symbols, parameter_symbols
 export jvp, vjp, jvp!, vjp!, dict_to_vec, vec_to_dict, kkt_dims
+export parse_file, parse_matpower, parse_matpower_struct, get_path
 
 # DC Power Flow Types
 export DCNetwork, DCPowerFlowState

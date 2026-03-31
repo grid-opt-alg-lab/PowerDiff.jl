@@ -299,11 +299,7 @@ end
 function _ac_kkt_context(prob::ACOPFProblem)
     sol = _ensure_ac_solved!(prob)
     idx = kkt_indices(prob)
-    constants = prob.cache.kkt_constants
-    if isnothing(constants)
-        constants = _extract_kkt_constants(prob)
-        prob.cache.kkt_constants = constants
-    end
+    constants = _require_kkt_constants(prob)
     fmax = _extract_branch_fmax(prob)
     return (; sol, idx, constants, fmax)
 end
