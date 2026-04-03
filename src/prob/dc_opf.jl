@@ -128,7 +128,10 @@ function solve!(prob::DCOPFProblem)
         if abs(d[i]) < TOL
             # Degenerate: both bounds collapse to 0 ≤ psh ≤ 0
             psh_val[i] = 0.0
-            # Keep both duals from solver (both bounds active)
+            # Canonicalize the duplicate dual pair so the sensitivity KKT sees
+            # one effective lower-bound multiplier and a zero upper-bound dual.
+            μ_lb[i] -= μ_ub[i]
+            μ_ub[i] = 0.0
         elseif psh_val[i] < TOL
             # Lower bound active: psh = 0
             psh_val[i] = 0.0
