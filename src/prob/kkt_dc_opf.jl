@@ -461,7 +461,7 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
 
     # KKT conditions
     # 1. Stationarity w.r.t. θ
-    K_θ = B_mat' * ν_bal + WA' * ν_flow + e_ref * η_ref + net.A' * (γ_ub - γ_lb)
+    K_θ = B_mat' * ν_bal + WA' * ν_flow + e_ref * η_ref + net.A' * (net.sw .* (γ_ub - γ_lb))
 
     # 2. Stationarity w.r.t. g
     K_g = 2 * Diagonal(net.cq) * g + net.cl - net.G_inc' * ν_bal - ρ_lb + ρ_ub
@@ -478,8 +478,8 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
 
     # 6. Complementary slackness: phase angle difference bounds
     Aθ = net.A * θ
-    K_γ_lb = γ_lb .* (Aθ - net.angmin)
-    K_γ_ub = γ_ub .* (net.angmax - Aθ)
+    K_γ_lb = γ_lb .* net.sw .* (Aθ - net.angmin)
+    K_γ_ub = γ_ub .* net.sw .* (net.angmax - Aθ)
 
     # 7. Complementary slackness: generation bounds
     K_ρ_lb = ρ_lb .* (g - net.gmin)
@@ -563,8 +563,8 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     J[idx.va, idx.nu_bal] = B_mat'
     J[idx.va, idx.nu_flow] = WA'
     J[idx.va, idx.η] = e_ref
-    J[idx.va, idx.gamma_lb] = -net.A'
-    J[idx.va, idx.gamma_ub] = net.A'
+    J[idx.va, idx.gamma_lb] = -net.A' * Diagonal(net.sw)
+    J[idx.va, idx.gamma_ub] = net.A' * Diagonal(net.sw)
 
     # ∂K_g/∂...
     # K_g = 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub
@@ -597,15 +597,15 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     J[idx.lam_ub, idx.lam_ub] = sparse(Diagonal(net.fmax .- vars.f))
 
     # ∂K_γ_lb/∂... (complementary slackness for lower angle bound)
-    # K_γ_lb = γ_lb .* (A*θ - angmin)
+    # K_γ_lb = γ_lb .* sw .* (A*θ - angmin)
     Aθ = net.A * sol.va
-    J[idx.gamma_lb, idx.va] = Diagonal(vars.gamma_lb) * net.A
-    J[idx.gamma_lb, idx.gamma_lb] = sparse(Diagonal(Aθ .- net.angmin))
+    J[idx.gamma_lb, idx.va] = Diagonal(vars.gamma_lb .* net.sw) * net.A
+    J[idx.gamma_lb, idx.gamma_lb] = sparse(Diagonal(net.sw .* (Aθ .- net.angmin)))
 
     # ∂K_γ_ub/∂... (complementary slackness for upper angle bound)
-    # K_γ_ub = γ_ub .* (angmax - A*θ)
-    J[idx.gamma_ub, idx.va] = -Diagonal(vars.gamma_ub) * net.A
-    J[idx.gamma_ub, idx.gamma_ub] = sparse(Diagonal(net.angmax .- Aθ))
+    # K_γ_ub = γ_ub .* sw .* (angmax - A*θ)
+    J[idx.gamma_ub, idx.va] = -Diagonal(vars.gamma_ub .* net.sw) * net.A
+    J[idx.gamma_ub, idx.gamma_ub] = sparse(Diagonal(net.sw .* (net.angmax .- Aθ)))
 
     # ∂K_ρ_lb/∂... (complementary slackness for lower gen bound)
     # K_ρ_lb = ρ_lb .* (g - gmin)
@@ -743,6 +743,13 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
         # ∂K_θ/∂s_e = ∂B'/∂s_e * ν_bal + ∂(WA')/∂s_e * ν_flow
         Ae_dot_ν = dot(A_e_vec, ν_bal)
         J_s[idx.va, e] = -b[e] * A_e_vec * (Ae_dot_ν + ν_flow[e])
+
+        # ∂K_θ/∂s_e from gated angle-difference bounds
+        J_s[idx.va, e] += A_e_vec * (sol.gamma_ub[e] - sol.gamma_lb[e])
+
+        # ∂K_γ/∂s_e from gated complementary slackness
+        J_s[idx.gamma_lb[e], e] = sol.gamma_lb[e] * (Aθ_e - net.angmin[e])
+        J_s[idx.gamma_ub[e], e] = sol.gamma_ub[e] * (net.angmax[e] - Aθ_e)
     end
 
     return J_s
@@ -785,6 +792,13 @@ function calc_kkt_jacobian_switching_column(prob::DCOPFProblem, sol::DCOPFSoluti
     coeff = -b[e] * (sol.nu_bal[f_bus] - sol.nu_bal[t_bus] + sol.nu_flow[e])
     col[idx.va[f_bus]] += coeff
     col[idx.va[t_bus]] -= coeff
+    # gated angle-difference stationarity contribution
+    coeff_ang = sol.gamma_ub[e] - sol.gamma_lb[e]
+    col[idx.va[f_bus]] += coeff_ang
+    col[idx.va[t_bus]] -= coeff_ang
+    # gated angle-difference complementary slackness
+    col[idx.gamma_lb[e]] = sol.gamma_lb[e] * (Aθ_e - net.angmin[e])
+    col[idx.gamma_ub[e]] = sol.gamma_ub[e] * (net.angmax[e] - Aθ_e)
     return col
 end
 

@@ -413,8 +413,9 @@ function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw;
         tb = isnothing(constants) ? ref[:branch][l]["t_bus"] : constants.t_bus[l]
         amin = isnothing(constants) ? ref[:branch][l]["angmin"] : constants.angmin[l]
         amax = isnothing(constants) ? ref[:branch][l]["angmax"] : constants.angmax[l]
-        L -= vars.lam_angle_lb[l] * (va[fb] - va[tb] - amin)
-        L -= vars.lam_angle_ub[l] * (va[fb] - va[tb] - amax)
+        sw_l = sw[l]
+        L -= vars.lam_angle_lb[l] * sw_l * (va[fb] - va[tb] - amin)
+        L -= vars.lam_angle_ub[l] * sw_l * (va[fb] - va[tb] - amax)
     end
 
     # ----- Voltage bounds (inequality) -----
@@ -620,8 +621,8 @@ function kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     K[idx.lam_thermal_to] .= vars.lam_thermal_to .* (p_to.^2 .+ q_to.^2 .- rate_a.^2)
 
     # Angle difference limits
-    K[idx.lam_angle_lb] .= vars.lam_angle_lb .* (va[f_bus_idx] .- va[t_bus_idx] .- angmin)
-    K[idx.lam_angle_ub] .= vars.lam_angle_ub .* (angmax .- va[f_bus_idx] .+ va[t_bus_idx])
+    K[idx.lam_angle_lb] .= vars.lam_angle_lb .* sw .* (va[f_bus_idx] .- va[t_bus_idx] .- angmin)
+    K[idx.lam_angle_ub] .= vars.lam_angle_ub .* sw .* (angmax .- va[f_bus_idx] .+ va[t_bus_idx])
 
     # Voltage bounds
     K[idx.mu_vm_lb] .= vars.mu_vm_lb .* (vm .- vmin)
