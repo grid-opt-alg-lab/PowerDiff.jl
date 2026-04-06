@@ -22,7 +22,27 @@ using PowerDiff
 using PowerModels
 using ForwardDiff
 using LinearAlgebra
+using SparseArrays
 using Test
+
+function _pq_polar_jacobian(Y, va, vm)
+    n = length(vm)
+    pq_polar(x) = begin
+        va_x = x[1:n]
+        vm_x = x[n+1:2n]
+        v_x = vm_x .* cis.(va_x)
+        S_x = v_x .* conj.(Y * v_x)
+        return vcat(real.(S_x), imag.(S_x))
+    end
+
+    J = ForwardDiff.jacobian(pq_polar, vcat(va, vm))
+    return (
+        dp_dva = J[1:n, 1:n],
+        dp_dvm = J[1:n, n+1:2n],
+        dq_dva = J[n+1:2n, 1:n],
+        dq_dvm = J[n+1:2n, n+1:2n],
+    )
+end
 
 @testset "AC PF Jacobian Verification" begin
     pm_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
@@ -148,5 +168,55 @@ using Test
         @test J1.operand == :p
         @test J1.parameter == :va
         @test size(J1) == (n, n)
+    end
+
+    # =========================================================================
+    # Adversarial states: compare closed-form formulas to ForwardDiff
+    # =========================================================================
+
+    @testset "Adversarial states vs ForwardDiff" begin
+        cases = [
+            (
+                name = "zero voltage bus",
+                Y = Y_pm,
+                va = copy(va_base),
+                vm = [vm_base[1], 0.0, vm_base[3], vm_base[4], vm_base[5]],
+            ),
+            (
+                name = "tiny voltages and large angles",
+                Y = Y_pm,
+                va = [3π, -4π / 3, 7π / 5, -9π / 4, 11π / 6],
+                vm = [1e-12, 0.37, 1.4, 1e-9, 0.82],
+            ),
+            (
+                name = "disconnected bus",
+                Y = let Y_disc = Matrix(Y_pm)
+                    Y_disc[5, :] .= 0.0
+                    Y_disc[:, 5] .= 0.0
+                    sparse(Y_disc)
+                end,
+                va = [0.0, 0.4, -1.1, 2.2, -0.7],
+                vm = [1.0, 0.55, 1e-10, 1.3, 0.9],
+            ),
+        ]
+
+        for case in cases
+            @testset "$(case.name)" begin
+                v_case = case.vm .* cis.(case.va)
+                state_case = ACPowerFlowState(v_case, case.Y; idx_slack=slack)
+                jac = calc_power_flow_jacobian(state_case)
+                fd = _pq_polar_jacobian(case.Y, angle.(state_case.v), abs.(state_case.v))
+
+                @test all(isfinite, jac.dp_dva)
+                @test all(isfinite, jac.dp_dvm)
+                @test all(isfinite, jac.dq_dva)
+                @test all(isfinite, jac.dq_dvm)
+
+                @test jac.dp_dva ≈ fd.dp_dva atol=1e-10 rtol=1e-10
+                @test jac.dp_dvm ≈ fd.dp_dvm atol=1e-10 rtol=1e-10
+                @test jac.dq_dva ≈ fd.dq_dva atol=1e-10 rtol=1e-10
+                @test jac.dq_dvm ≈ fd.dq_dvm atol=1e-10 rtol=1e-10
+            end
+        end
     end
 end

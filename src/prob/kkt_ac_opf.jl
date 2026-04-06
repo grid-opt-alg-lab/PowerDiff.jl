@@ -22,8 +22,7 @@
 # Uses a reduced-space formulation where branch flows p_fr, q_fr, p_to, q_to
 # are functions of voltage state (va, vm), not separate primal variables.
 #
-# Stationarity conditions are computed via ForwardDiff on the reduced-space
-# Lagrangian, eliminating manual derivative errors.
+# Stationarity conditions are assembled analytically in reduced space.
 
 # =============================================================================
 # Helpers
@@ -188,51 +187,8 @@ function unflatten_variables(z::AbstractVector, idx::NamedTuple)
 end
 
 # =============================================================================
-# KKT Jacobian via ForwardDiff
+# KKT Jacobian (analytical)
 # =============================================================================
-
-"""
-    calc_kkt_jacobian(prob::ACOPFProblem; sol=nothing)
-
-Compute the Jacobian of the KKT operator using ForwardDiff.
-
-# Arguments
-- `prob`: ACOPFProblem
-- `sol`: Optional pre-computed solution. If not provided, ensures the problem is solved (reusing cached solution if available).
-
-# Returns
-Matrix ∂K/∂z where z is the flattened variable vector.
-"""
-function calc_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothing}=nothing)
-    if isnothing(sol)
-        sol = _ensure_ac_solved!(prob)
-    end
-
-    z0 = flatten_variables(sol, prob)
-    sw = prob.network.sw
-
-    # Pre-extract all parameters so ForwardDiff closure avoids Dict lookups
-    # and temporary allocations on every evaluation.
-    pd0 = _extract_bus_pd(prob)
-    qd0 = _extract_bus_qd(prob)
-    cq0 = _extract_gen_cq(prob)
-    cl0 = _extract_gen_cl(prob)
-    fmax0 = _extract_branch_fmax(prob)
-
-    # Pre-compute indices and constants so kkt() doesn't recompute them
-    # on every ForwardDiff evaluation
-    idx = kkt_indices(prob)
-    constants = _extract_kkt_constants(prob)
-    prob.cache.kkt_constants = constants
-
-    J = ForwardDiff.jacobian(
-        z -> kkt(z, prob, sw; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0,
-                    idx=idx, constants=constants),
-        z0
-    )
-
-    return J
-end
 
 # =============================================================================
 # Branch Flow Calculations
@@ -311,146 +267,159 @@ function _compute_branch_flows(va, vm, net::ACNetwork, ref, sw; constants=nothin
     return p_fr, q_fr, p_to, q_to
 end
 
-# =============================================================================
-# Reduced-Space Lagrangian (for stationarity via ForwardDiff)
-# =============================================================================
+"""
+Return branch-flow coefficients in the form
+
+    F = sw * (a * s^2 + b * vm_f * vm_t * cos(δ) + c * vm_f * vm_t * sin(δ))
+
+with `δ = va_f - va_t`, for each of `p_fr`, `q_fr`, `p_to`, `q_to`.
+"""
+function _branch_flow_coefficients(constants, l::Int)
+    g_br = constants.g_br[l]
+    b_br = constants.b_br[l]
+    tr = constants.tr[l]
+    ti = constants.ti[l]
+    g_fr = constants.g_fr[l]
+    b_fr = constants.b_fr[l]
+    g_to = constants.g_to[l]
+    b_to = constants.b_to[l]
+    tm = constants.tm[l]
+
+    return (
+        p_fr = (
+            a = (g_br + g_fr) / tm,
+            b = (-g_br * tr + b_br * ti) / tm,
+            c = (-b_br * tr - g_br * ti) / tm,
+        ),
+        q_fr = (
+            a = -(b_br + b_fr) / tm,
+            b = (b_br * tr + g_br * ti) / tm,
+            c = (-g_br * tr + b_br * ti) / tm,
+        ),
+        p_to = (
+            a = g_br + g_to,
+            b = (-g_br * tr - b_br * ti) / tm,
+            c = (b_br * tr - g_br * ti) / tm,
+        ),
+        q_to = (
+            a = -(b_br + b_to),
+            b = (b_br * tr - g_br * ti) / tm,
+            c = (g_br * tr + b_br * ti) / tm,
+        ),
+    )
+end
+
+@inline function _branch_flow_base(coeffs, self_vm, other_vm, cosδ, sinδ)
+    return coeffs.a * self_vm^2 + self_vm * other_vm * (coeffs.b * cosδ + coeffs.c * sinδ)
+end
+
+@inline function _branch_flow_local_partials(coeffs, self_vm, other_vm, cosδ, sinδ)
+    mix = coeffs.b * cosδ + coeffs.c * sinδ
+    dδ = self_vm * other_vm * (-coeffs.b * sinδ + coeffs.c * cosδ)
+    dself = 2 * coeffs.a * self_vm + other_vm * mix
+    dother = self_vm * mix
+    return dδ, dself, dother
+end
+
+@inline function _branch_flow_local_second_partials(coeffs, self_vm, other_vm, cosδ, sinδ)
+    mix = coeffs.b * cosδ + coeffs.c * sinδ
+    dδδ = -self_vm * other_vm * mix
+    dδ_self = other_vm * (-coeffs.b * sinδ + coeffs.c * cosδ)
+    dδ_other = self_vm * (-coeffs.b * sinδ + coeffs.c * cosδ)
+    dself_self = 2 * coeffs.a
+    dself_other = mix
+    return dδδ, dδ_self, dδ_other, dself_self, dself_other
+end
+
+@inline function _global_hessian_from_fr(dδδ, dδ_self, dδ_other, dself_self, dself_other)
+    return (
+        va_f_va_f = dδδ,
+        va_f_va_t = -dδδ,
+        va_f_vm_f = dδ_self,
+        va_f_vm_t = dδ_other,
+        va_t_va_t = dδδ,
+        va_t_vm_f = -dδ_self,
+        va_t_vm_t = -dδ_other,
+        vm_f_vm_f = dself_self,
+        vm_f_vm_t = dself_other,
+        vm_t_vm_t = zero(dself_self),
+    )
+end
+
+@inline function _global_hessian_from_to(dδδ, dδ_self, dδ_other, dself_self, dself_other)
+    return (
+        va_f_va_f = dδδ,
+        va_f_va_t = -dδδ,
+        va_f_vm_f = dδ_other,
+        va_f_vm_t = dδ_self,
+        va_t_va_t = dδδ,
+        va_t_vm_f = -dδ_other,
+        va_t_vm_t = -dδ_self,
+        vm_f_vm_f = zero(dself_self),
+        vm_f_vm_t = dself_other,
+        vm_t_vm_t = dself_self,
+    )
+end
 
 """
-Compute the reduced-space Lagrangian L(va, vm, pg, qg; duals, sw).
-
-In the reduced space, flows are functions of (va, vm), not separate variables.
-ForwardDiff.gradient of this function w.r.t. [va; vm; pg; qg] gives the
-stationarity conditions, automatically handling all chain-rule terms including
-power balance, thermal limits, flow bounds, angle diffs, and shunt terms.
-
-Uses the JuMP/MOI dual sign convention:
-    L = f(x) - Σ dual_i * normalized_residual_i
-where normalized_residual = constraint_function - set_value.
+Return branch-flow bases (with `sw = 1`) and local first derivatives with
+respect to `(va_f, va_t, vm_f, vm_t)`.
 """
-function _reduced_lagrangian(x_primal, vars, prob::ACOPFProblem, sw;
-                             pd=nothing, qd=nothing, cq=nothing, cl=nothing, fmax=nothing,
-                             constants=nothing)
-    net = prob.network
-    ref = prob.ref
-    n, m, k = net.n, net.m, prob.n_gen
+function _branch_flow_primitives(va, vm, sw, constants, l::Int)
+    fb = constants.f_bus[l]
+    tb = constants.t_bus[l]
+    vf = vm[fb]
+    vt = vm[tb]
+    δ = va[fb] - va[tb]
+    cosδ = cos(δ)
+    sinδ = sin(δ)
+    sw_l = sw[l]
+    coeffs = _branch_flow_coefficients(constants, l)
 
-    va = x_primal[1:n]
-    vm = x_primal[n+1:2n]
-    pg = x_primal[2n+1:2n+k]
-    qg = x_primal[2n+k+1:2n+2k]
+    p_fr_hat = _branch_flow_base(coeffs.p_fr, vf, vt, cosδ, sinδ)
+    q_fr_hat = _branch_flow_base(coeffs.q_fr, vf, vt, cosδ, sinδ)
+    p_to_hat = _branch_flow_base(coeffs.p_to, vt, vf, cosδ, sinδ)
+    q_to_hat = _branch_flow_base(coeffs.q_to, vt, vf, cosδ, sinδ)
 
-    # Compute reduced-space flows
-    p_fr, q_fr, p_to, q_to = _compute_branch_flows(va, vm, net, ref, sw; constants=constants)
+    dp_fr_dδ_hat, dp_fr_dvf_hat, dp_fr_dvt_hat =
+        _branch_flow_local_partials(coeffs.p_fr, vf, vt, cosδ, sinδ)
+    dq_fr_dδ_hat, dq_fr_dvf_hat, dq_fr_dvt_hat =
+        _branch_flow_local_partials(coeffs.q_fr, vf, vt, cosδ, sinδ)
+    dp_to_dδ_hat, dp_to_dvt_hat, dp_to_dvf_hat =
+        _branch_flow_local_partials(coeffs.p_to, vt, vf, cosδ, sinδ)
+    dq_to_dδ_hat, dq_to_dvt_hat, dq_to_dvf_hat =
+        _branch_flow_local_partials(coeffs.q_to, vt, vf, cosδ, sinδ)
 
-    # Use widest type from computed flows and override vectors, which captures
-    # ForwardDiff dual types in nested differentiation.
-    _et(x) = isnothing(x) ? Float64 : eltype(x)
-    T = promote_type(eltype(p_fr), _et(pd), _et(qd), _et(cq), _et(cl), _et(fmax))
-    L = zero(T)
+    d2p_fr = _global_hessian_from_fr(
+        _branch_flow_local_second_partials(coeffs.p_fr, vf, vt, cosδ, sinδ)...)
+    d2q_fr = _global_hessian_from_fr(
+        _branch_flow_local_second_partials(coeffs.q_fr, vf, vt, cosδ, sinδ)...)
+    d2p_to = _global_hessian_from_to(
+        _branch_flow_local_second_partials(coeffs.p_to, vt, vf, cosδ, sinδ)...)
+    d2q_to = _global_hessian_from_to(
+        _branch_flow_local_second_partials(coeffs.q_to, vt, vf, cosδ, sinδ)...)
 
-    # Materialize rate_a vector once to avoid repeated isnothing checks
-    rate_a = isnothing(fmax) ? T[ref[:branch][l]["rate_a"] for l in 1:m] : fmax
-
-    # ----- Objective -----
-    for i in 1:k
-        cq_i = isnothing(cq) ? ref[:gen][i]["cost"][1] : cq[i]
-        cl_i = isnothing(cl) ? ref[:gen][i]["cost"][2] : cl[i]
-        cc_i = isnothing(constants) ? ref[:gen][i]["cost"][3] : constants.cc[i]
-        L += cq_i * pg[i]^2 + cl_i * pg[i] + cc_i
-    end
-
-    # ----- Power balance (equality): h = 0 -----
-    # h_P[i] = Σ p_flow + gs*vm² - pg_sum + pd
-    # h_Q[i] = Σ q_flow - bs*vm² - qg_sum + qd
-    p_flow_sum = zeros(T, n)
-    q_flow_sum = zeros(T, n)
-    for l in 1:m
-        fb = isnothing(constants) ? ref[:branch][l]["f_bus"] : constants.f_bus[l]
-        tb = isnothing(constants) ? ref[:branch][l]["t_bus"] : constants.t_bus[l]
-        p_flow_sum[fb] += p_fr[l]
-        p_flow_sum[tb] += p_to[l]
-        q_flow_sum[fb] += q_fr[l]
-        q_flow_sum[tb] += q_to[l]
-    end
-
-    pg_sum = zeros(T, n)
-    qg_sum = zeros(T, n)
-    for i in 1:k
-        bus_idx = isnothing(constants) ? ref[:gen][i]["gen_bus"] : constants.gen_bus[i]
-        pg_sum[bus_idx] += pg[i]
-        qg_sum[bus_idx] += qg[i]
-    end
-
-    for i in 1:n
-        gs_i = isnothing(constants) ? sum(ref[:shunt][s]["gs"] for s in ref[:bus_shunts][i]; init=0.0) : constants.gs[i]
-        bs_i = isnothing(constants) ? sum(ref[:shunt][s]["bs"] for s in ref[:bus_shunts][i]; init=0.0) : constants.bs[i]
-
-        pd_i = isnothing(pd) ? sum(ref[:load][l]["pd"] for l in ref[:bus_loads][i]; init=0.0) : pd[i]
-        qd_i = isnothing(qd) ? sum(ref[:load][l]["qd"] for l in ref[:bus_loads][i]; init=0.0) : qd[i]
-
-        h_P = p_flow_sum[i] + gs_i * vm[i]^2 - pg_sum[i] + pd_i
-        h_Q = q_flow_sum[i] - bs_i * vm[i]^2 - qg_sum[i] + qd_i
-
-        L -= vars.nu_p_bal[i] * h_P
-        L -= vars.nu_q_bal[i] * h_Q
-    end
-
-    # ----- Reference bus (equality): va[ref] - 0 = 0 -----
-    rbk = isnothing(constants) ? _ref_bus_indices(prob) : constants.ref_bus_keys
-    for (j, ref_bus_idx) in enumerate(rbk)
-        L -= vars.nu_ref_bus[j] * va[ref_bus_idx]
-    end
-
-    # ----- Thermal limits (inequality): p²+q²-r² ≤ 0 -----
-    for l in 1:m
-        L -= vars.lam_thermal_fr[l] * (p_fr[l]^2 + q_fr[l]^2 - rate_a[l]^2)
-        L -= vars.lam_thermal_to[l] * (p_to[l]^2 + q_to[l]^2 - rate_a[l]^2)
-    end
-
-    # ----- Angle difference limits (inequality) -----
-    for l in 1:m
-        fb = isnothing(constants) ? ref[:branch][l]["f_bus"] : constants.f_bus[l]
-        tb = isnothing(constants) ? ref[:branch][l]["t_bus"] : constants.t_bus[l]
-        amin = isnothing(constants) ? ref[:branch][l]["angmin"] : constants.angmin[l]
-        amax = isnothing(constants) ? ref[:branch][l]["angmax"] : constants.angmax[l]
-        sw_l = sw[l]
-        L -= vars.lam_angle_lb[l] * sw_l * (va[fb] - va[tb] - amin)
-        L -= vars.lam_angle_ub[l] * sw_l * (va[fb] - va[tb] - amax)
-    end
-
-    # ----- Voltage bounds (inequality) -----
-    for i in 1:n
-        vmin_i = isnothing(constants) ? ref[:bus][i]["vmin"] : constants.vmin[i]
-        vmax_i = isnothing(constants) ? ref[:bus][i]["vmax"] : constants.vmax[i]
-        L -= vars.mu_vm_lb[i] * (vm[i] - vmin_i)
-        L -= vars.mu_vm_ub[i] * (vm[i] - vmax_i)
-    end
-
-    # ----- Generation bounds (inequality) -----
-    for i in 1:k
-        pmin_i = isnothing(constants) ? ref[:gen][i]["pmin"] : constants.pmin[i]
-        pmax_i = isnothing(constants) ? ref[:gen][i]["pmax"] : constants.pmax[i]
-        qmin_i = isnothing(constants) ? ref[:gen][i]["qmin"] : constants.qmin[i]
-        qmax_i = isnothing(constants) ? ref[:gen][i]["qmax"] : constants.qmax[i]
-        L -= vars.rho_pg_lb[i] * (pg[i] - pmin_i)
-        L -= vars.rho_pg_ub[i] * (pg[i] - pmax_i)
-        L -= vars.rho_qg_lb[i] * (qg[i] - qmin_i)
-        L -= vars.rho_qg_ub[i] * (qg[i] - qmax_i)
-    end
-
-    # ----- Flow variable bounds (inequality, reduced-space) -----
-    for l in 1:m
-        L -= vars.sig_p_fr_lb[l] * (p_fr[l] + rate_a[l])
-        L -= vars.sig_p_fr_ub[l] * (p_fr[l] - rate_a[l])
-        L -= vars.sig_q_fr_lb[l] * (q_fr[l] + rate_a[l])
-        L -= vars.sig_q_fr_ub[l] * (q_fr[l] - rate_a[l])
-        L -= vars.sig_p_to_lb[l] * (p_to[l] + rate_a[l])
-        L -= vars.sig_p_to_ub[l] * (p_to[l] - rate_a[l])
-        L -= vars.sig_q_to_lb[l] * (q_to[l] + rate_a[l])
-        L -= vars.sig_q_to_ub[l] * (q_to[l] - rate_a[l])
-    end
-
-    return L
+    return (
+        fb = fb,
+        tb = tb,
+        sw = sw_l,
+        p_fr_hat = p_fr_hat,
+        q_fr_hat = q_fr_hat,
+        p_to_hat = p_to_hat,
+        q_to_hat = q_to_hat,
+        p_fr = sw_l * p_fr_hat,
+        q_fr = sw_l * q_fr_hat,
+        p_to = sw_l * p_to_hat,
+        q_to = sw_l * q_to_hat,
+        dp_fr_hat = (dp_fr_dδ_hat, -dp_fr_dδ_hat, dp_fr_dvf_hat, dp_fr_dvt_hat),
+        dq_fr_hat = (dq_fr_dδ_hat, -dq_fr_dδ_hat, dq_fr_dvf_hat, dq_fr_dvt_hat),
+        dp_to_hat = (dp_to_dδ_hat, -dp_to_dδ_hat, dp_to_dvf_hat, dp_to_dvt_hat),
+        dq_to_hat = (dq_to_dδ_hat, -dq_to_dδ_hat, dq_to_dvf_hat, dq_to_dvt_hat),
+        d2p_fr_hat = d2p_fr,
+        d2q_fr_hat = d2q_fr,
+        d2p_to_hat = d2p_to,
+        d2q_to_hat = d2q_to,
+    )
 end
 
 # =============================================================================
@@ -506,6 +475,243 @@ function _power_balance_residuals(va, vm, pg, qg, p_fr, q_fr, p_to, q_to,
     return K_p_bal, K_q_bal
 end
 
+@inline function _add_symmetric_local_hessian!(J::AbstractMatrix, rows::NTuple{4,Int},
+                                               H, coeff, outer, grad::NTuple{4})
+    i1, i2, i3, i4 = rows
+    g1, g2, g3, g4 = grad
+    J[i1, i1] += coeff * H.va_f_va_f + outer * g1 * g1
+    J[i1, i2] += coeff * H.va_f_va_t + outer * g1 * g2
+    J[i2, i1] = J[i1, i2]
+    J[i1, i3] += coeff * H.va_f_vm_f + outer * g1 * g3
+    J[i3, i1] = J[i1, i3]
+    J[i1, i4] += coeff * H.va_f_vm_t + outer * g1 * g4
+    J[i4, i1] = J[i1, i4]
+    J[i2, i2] += coeff * H.va_t_va_t + outer * g2 * g2
+    J[i2, i3] += coeff * H.va_t_vm_f + outer * g2 * g3
+    J[i3, i2] = J[i2, i3]
+    J[i2, i4] += coeff * H.va_t_vm_t + outer * g2 * g4
+    J[i4, i2] = J[i2, i4]
+    J[i3, i3] += coeff * H.vm_f_vm_f + outer * g3 * g3
+    J[i3, i4] += coeff * H.vm_f_vm_t + outer * g3 * g4
+    J[i4, i3] = J[i3, i4]
+    J[i4, i4] += coeff * H.vm_t_vm_t + outer * g4 * g4
+    return nothing
+end
+
+function _stationarity_residual!(K::AbstractVector, vars, prob::ACOPFProblem, sw;
+                                 cq, cl, fmax, constants)
+    idx = kkt_indices(prob)
+    n, m, k = prob.network.n, prob.network.m, prob.n_gen
+
+    fill!(@view(K[idx.va]), 0)
+    fill!(@view(K[idx.vm]), 0)
+
+    @inbounds for i in 1:n
+        K[idx.vm[i]] += -2 * vars.nu_p_bal[i] * constants.gs[i] * vars.vm[i] +
+                        2 * vars.nu_q_bal[i] * constants.bs[i] * vars.vm[i] -
+                        vars.mu_vm_lb[i] - vars.mu_vm_ub[i]
+    end
+
+    @inbounds for i in 1:k
+        bus = constants.gen_bus[i]
+        K[idx.pg[i]] = 2 * cq[i] * vars.pg[i] + cl[i] + vars.nu_p_bal[bus] -
+                       vars.rho_pg_lb[i] - vars.rho_pg_ub[i]
+        K[idx.qg[i]] = vars.nu_q_bal[bus] - vars.rho_qg_lb[i] - vars.rho_qg_ub[i]
+    end
+
+    rbk = constants.ref_bus_keys
+    @inbounds for (j, ref_bus_idx) in enumerate(rbk)
+        K[idx.va[ref_bus_idx]] -= vars.nu_ref_bus[j]
+    end
+
+    @inbounds for l in 1:m
+        prim = _branch_flow_primitives(vars.va, vars.vm, sw, constants, l)
+        fb = prim.fb
+        tb = prim.tb
+
+        coeff_p_fr = -vars.nu_p_bal[fb] - 2 * vars.lam_thermal_fr[l] * prim.p_fr -
+                     vars.sig_p_fr_lb[l] - vars.sig_p_fr_ub[l]
+        coeff_q_fr = -vars.nu_q_bal[fb] - 2 * vars.lam_thermal_fr[l] * prim.q_fr -
+                     vars.sig_q_fr_lb[l] - vars.sig_q_fr_ub[l]
+        coeff_p_to = -vars.nu_p_bal[tb] - 2 * vars.lam_thermal_to[l] * prim.p_to -
+                     vars.sig_p_to_lb[l] - vars.sig_p_to_ub[l]
+        coeff_q_to = -vars.nu_q_bal[tb] - 2 * vars.lam_thermal_to[l] * prim.q_to -
+                     vars.sig_q_to_lb[l] - vars.sig_q_to_ub[l]
+
+        K[idx.va[fb]] += coeff_p_fr * prim.dp_fr_hat[1] + coeff_q_fr * prim.dq_fr_hat[1] +
+                         coeff_p_to * prim.dp_to_hat[1] + coeff_q_to * prim.dq_to_hat[1] -
+                         prim.sw * (vars.lam_angle_lb[l] + vars.lam_angle_ub[l])
+        K[idx.va[tb]] += coeff_p_fr * prim.dp_fr_hat[2] + coeff_q_fr * prim.dq_fr_hat[2] +
+                         coeff_p_to * prim.dp_to_hat[2] + coeff_q_to * prim.dq_to_hat[2] +
+                         prim.sw * (vars.lam_angle_lb[l] + vars.lam_angle_ub[l])
+        K[idx.vm[fb]] += coeff_p_fr * prim.dp_fr_hat[3] + coeff_q_fr * prim.dq_fr_hat[3] +
+                         coeff_p_to * prim.dp_to_hat[3] + coeff_q_to * prim.dq_to_hat[3]
+        K[idx.vm[tb]] += coeff_p_fr * prim.dp_fr_hat[4] + coeff_q_fr * prim.dq_fr_hat[4] +
+                         coeff_p_to * prim.dp_to_hat[4] + coeff_q_to * prim.dq_to_hat[4]
+    end
+
+    return K
+end
+
+"""
+    calc_kkt_jacobian(prob::ACOPFProblem; sol=nothing)
+
+Compute the analytical Jacobian of the AC OPF KKT operator.
+"""
+function calc_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothing}=nothing)
+    if isnothing(sol)
+        sol = _ensure_ac_solved!(prob)
+    end
+
+    idx = kkt_indices(prob)
+    constants = _extract_kkt_constants(prob)
+    prob.cache.kkt_constants = constants
+    cq = _extract_gen_cq(prob)
+    cl = _extract_gen_cl(prob)
+    fmax = _extract_branch_fmax(prob)
+    sw = prob.network.sw
+    vars = unflatten_variables(flatten_variables(sol, prob), idx)
+    n, m, k = prob.network.n, prob.network.m, prob.n_gen
+
+    J = spzeros(Float64, kkt_dims(prob), kkt_dims(prob))
+
+    @inbounds for i in 1:k
+        J[idx.pg[i], idx.pg[i]] = 2 * cq[i]
+    end
+    @inbounds for i in 1:n
+        J[idx.vm[i], idx.vm[i]] += -2 * vars.nu_p_bal[i] * constants.gs[i] +
+                                   2 * vars.nu_q_bal[i] * constants.bs[i]
+    end
+
+    @inbounds for i in 1:k
+        bus = constants.gen_bus[i]
+        J[idx.pg[i], idx.nu_p_bal[bus]] = 1.0
+        J[idx.pg[i], idx.rho_pg_lb[i]] = -1.0
+        J[idx.pg[i], idx.rho_pg_ub[i]] = -1.0
+        J[idx.qg[i], idx.nu_q_bal[bus]] = 1.0
+        J[idx.qg[i], idx.rho_qg_lb[i]] = -1.0
+        J[idx.qg[i], idx.rho_qg_ub[i]] = -1.0
+    end
+    @inbounds for i in 1:n
+        J[idx.vm[i], idx.mu_vm_lb[i]] = -1.0
+        J[idx.vm[i], idx.mu_vm_ub[i]] = -1.0
+    end
+    @inbounds for (j, ref_bus_idx) in enumerate(constants.ref_bus_keys)
+        J[idx.va[ref_bus_idx], idx.nu_ref_bus[j]] = -1.0
+    end
+
+    @inbounds for l in 1:m
+        prim = _branch_flow_primitives(vars.va, vars.vm, sw, constants, l)
+        fb = prim.fb
+        tb = prim.tb
+        local_idx = (idx.va[fb], idx.va[tb], idx.vm[fb], idx.vm[tb])
+
+        coeff_p_fr = -vars.nu_p_bal[fb] - 2 * vars.lam_thermal_fr[l] * prim.p_fr -
+                     vars.sig_p_fr_lb[l] - vars.sig_p_fr_ub[l]
+        coeff_q_fr = -vars.nu_q_bal[fb] - 2 * vars.lam_thermal_fr[l] * prim.q_fr -
+                     vars.sig_q_fr_lb[l] - vars.sig_q_fr_ub[l]
+        coeff_p_to = -vars.nu_p_bal[tb] - 2 * vars.lam_thermal_to[l] * prim.p_to -
+                     vars.sig_p_to_lb[l] - vars.sig_p_to_ub[l]
+        coeff_q_to = -vars.nu_q_bal[tb] - 2 * vars.lam_thermal_to[l] * prim.q_to -
+                     vars.sig_q_to_lb[l] - vars.sig_q_to_ub[l]
+
+        _add_symmetric_local_hessian!(J, local_idx, prim.d2p_fr_hat, coeff_p_fr, -2 * vars.lam_thermal_fr[l], prim.dp_fr_hat)
+        _add_symmetric_local_hessian!(J, local_idx, prim.d2q_fr_hat, coeff_q_fr, -2 * vars.lam_thermal_fr[l], prim.dq_fr_hat)
+        _add_symmetric_local_hessian!(J, local_idx, prim.d2p_to_hat, coeff_p_to, -2 * vars.lam_thermal_to[l], prim.dp_to_hat)
+        _add_symmetric_local_hessian!(J, local_idx, prim.d2q_to_hat, coeff_q_to, -2 * vars.lam_thermal_to[l], prim.dq_to_hat)
+
+        for t in 1:4
+            row = local_idx[t]
+            J[row, idx.nu_p_bal[fb]] += -prim.dp_fr_hat[t]
+            J[row, idx.nu_q_bal[fb]] += -prim.dq_fr_hat[t]
+            J[row, idx.nu_p_bal[tb]] += -prim.dp_to_hat[t]
+            J[row, idx.nu_q_bal[tb]] += -prim.dq_to_hat[t]
+            J[row, idx.lam_thermal_fr[l]] += -2 * (prim.p_fr * prim.dp_fr_hat[t] + prim.q_fr * prim.dq_fr_hat[t])
+            J[row, idx.lam_thermal_to[l]] += -2 * (prim.p_to * prim.dp_to_hat[t] + prim.q_to * prim.dq_to_hat[t])
+            J[row, idx.sig_p_fr_lb[l]] += -prim.dp_fr_hat[t]
+            J[row, idx.sig_p_fr_ub[l]] += -prim.dp_fr_hat[t]
+            J[row, idx.sig_q_fr_lb[l]] += -prim.dq_fr_hat[t]
+            J[row, idx.sig_q_fr_ub[l]] += -prim.dq_fr_hat[t]
+            J[row, idx.sig_p_to_lb[l]] += -prim.dp_to_hat[t]
+            J[row, idx.sig_p_to_ub[l]] += -prim.dp_to_hat[t]
+            J[row, idx.sig_q_to_lb[l]] += -prim.dq_to_hat[t]
+            J[row, idx.sig_q_to_ub[l]] += -prim.dq_to_hat[t]
+        end
+        J[idx.va[fb], idx.lam_angle_lb[l]] += -sw[l]
+        J[idx.va[tb], idx.lam_angle_lb[l]] += sw[l]
+        J[idx.va[fb], idx.lam_angle_ub[l]] += -sw[l]
+        J[idx.va[tb], idx.lam_angle_ub[l]] += sw[l]
+
+        for t in 1:4
+            col = local_idx[t]
+            J[idx.nu_p_bal[fb], col] += prim.dp_fr_hat[t]
+            J[idx.nu_q_bal[fb], col] += prim.dq_fr_hat[t]
+            J[idx.nu_p_bal[tb], col] += prim.dp_to_hat[t]
+            J[idx.nu_q_bal[tb], col] += prim.dq_to_hat[t]
+            J[idx.lam_thermal_fr[l], col] += vars.lam_thermal_fr[l] *
+                                             2 * (prim.p_fr * prim.dp_fr_hat[t] + prim.q_fr * prim.dq_fr_hat[t])
+            J[idx.lam_thermal_to[l], col] += vars.lam_thermal_to[l] *
+                                             2 * (prim.p_to * prim.dp_to_hat[t] + prim.q_to * prim.dq_to_hat[t])
+            J[idx.sig_p_fr_lb[l], col] += vars.sig_p_fr_lb[l] * prim.dp_fr_hat[t]
+            J[idx.sig_p_fr_ub[l], col] += -vars.sig_p_fr_ub[l] * prim.dp_fr_hat[t]
+            J[idx.sig_q_fr_lb[l], col] += vars.sig_q_fr_lb[l] * prim.dq_fr_hat[t]
+            J[idx.sig_q_fr_ub[l], col] += -vars.sig_q_fr_ub[l] * prim.dq_fr_hat[t]
+            J[idx.sig_p_to_lb[l], col] += vars.sig_p_to_lb[l] * prim.dp_to_hat[t]
+            J[idx.sig_p_to_ub[l], col] += -vars.sig_p_to_ub[l] * prim.dp_to_hat[t]
+            J[idx.sig_q_to_lb[l], col] += vars.sig_q_to_lb[l] * prim.dq_to_hat[t]
+            J[idx.sig_q_to_ub[l], col] += -vars.sig_q_to_ub[l] * prim.dq_to_hat[t]
+        end
+
+        J[idx.lam_angle_lb[l], idx.va[fb]] = vars.lam_angle_lb[l] * sw[l]
+        J[idx.lam_angle_lb[l], idx.va[tb]] = -vars.lam_angle_lb[l] * sw[l]
+        J[idx.lam_angle_lb[l], idx.lam_angle_lb[l]] = sw[l] * (vars.va[fb] - vars.va[tb] - constants.angmin[l])
+        J[idx.lam_angle_ub[l], idx.va[fb]] = -vars.lam_angle_ub[l] * sw[l]
+        J[idx.lam_angle_ub[l], idx.va[tb]] = vars.lam_angle_ub[l] * sw[l]
+        J[idx.lam_angle_ub[l], idx.lam_angle_ub[l]] = sw[l] * (constants.angmax[l] - vars.va[fb] + vars.va[tb])
+
+        J[idx.lam_thermal_fr[l], idx.lam_thermal_fr[l]] = prim.p_fr^2 + prim.q_fr^2 - fmax[l]^2
+        J[idx.lam_thermal_to[l], idx.lam_thermal_to[l]] = prim.p_to^2 + prim.q_to^2 - fmax[l]^2
+    end
+
+    @inbounds for i in 1:n
+        J[idx.nu_p_bal[i], idx.vm[i]] += 2 * constants.gs[i] * vars.vm[i]
+        J[idx.nu_q_bal[i], idx.vm[i]] += -2 * constants.bs[i] * vars.vm[i]
+        J[idx.mu_vm_lb[i], idx.vm[i]] = vars.mu_vm_lb[i]
+        J[idx.mu_vm_lb[i], idx.mu_vm_lb[i]] = vars.vm[i] - constants.vmin[i]
+        J[idx.mu_vm_ub[i], idx.vm[i]] = -vars.mu_vm_ub[i]
+        J[idx.mu_vm_ub[i], idx.mu_vm_ub[i]] = constants.vmax[i] - vars.vm[i]
+    end
+    @inbounds for (j, ref_bus_idx) in enumerate(constants.ref_bus_keys)
+        J[idx.nu_ref_bus[j], idx.va[ref_bus_idx]] = 1.0
+    end
+    @inbounds for i in 1:k
+        J[idx.nu_p_bal[constants.gen_bus[i]], idx.pg[i]] += -1.0
+        J[idx.nu_q_bal[constants.gen_bus[i]], idx.qg[i]] += -1.0
+        J[idx.rho_pg_lb[i], idx.pg[i]] = vars.rho_pg_lb[i]
+        J[idx.rho_pg_lb[i], idx.rho_pg_lb[i]] = vars.pg[i] - constants.pmin[i]
+        J[idx.rho_pg_ub[i], idx.pg[i]] = -vars.rho_pg_ub[i]
+        J[idx.rho_pg_ub[i], idx.rho_pg_ub[i]] = constants.pmax[i] - vars.pg[i]
+        J[idx.rho_qg_lb[i], idx.qg[i]] = vars.rho_qg_lb[i]
+        J[idx.rho_qg_lb[i], idx.rho_qg_lb[i]] = vars.qg[i] - constants.qmin[i]
+        J[idx.rho_qg_ub[i], idx.qg[i]] = -vars.rho_qg_ub[i]
+        J[idx.rho_qg_ub[i], idx.rho_qg_ub[i]] = constants.qmax[i] - vars.qg[i]
+    end
+
+    @inbounds for l in 1:m
+        prim = _branch_flow_primitives(vars.va, vars.vm, sw, constants, l)
+        J[idx.sig_p_fr_lb[l], idx.sig_p_fr_lb[l]] = prim.p_fr + fmax[l]
+        J[idx.sig_p_fr_ub[l], idx.sig_p_fr_ub[l]] = fmax[l] - prim.p_fr
+        J[idx.sig_q_fr_lb[l], idx.sig_q_fr_lb[l]] = prim.q_fr + fmax[l]
+        J[idx.sig_q_fr_ub[l], idx.sig_q_fr_ub[l]] = fmax[l] - prim.q_fr
+        J[idx.sig_p_to_lb[l], idx.sig_p_to_lb[l]] = prim.p_to + fmax[l]
+        J[idx.sig_p_to_ub[l], idx.sig_p_to_ub[l]] = fmax[l] - prim.p_to
+        J[idx.sig_q_to_lb[l], idx.sig_q_to_lb[l]] = prim.q_to + fmax[l]
+        J[idx.sig_q_to_ub[l], idx.sig_q_to_ub[l]] = fmax[l] - prim.q_to
+    end
+
+    return J
+end
+
 # =============================================================================
 # KKT Operator
 # =============================================================================
@@ -515,13 +721,13 @@ end
 
 Evaluate the KKT conditions for AC OPF at the given variable vector.
 
-The switching state sw is passed as a separate parameter to enable
-differentiation with respect to switching using ForwardDiff.
+The switching state `sw` is passed separately so the same KKT operator can be
+reused for switching sensitivities.
 
 Returns a vector of KKT residuals (should be zero at optimum).
 
 # KKT Conditions (reduced-space formulation)
-1. Stationarity w.r.t. va, vm, pg, qg (via ForwardDiff on Lagrangian)
+1. Stationarity w.r.t. va, vm, pg, qg
 2. Primal feasibility: power balance, reference bus
 3. Complementary slackness for all inequality constraints
 """
@@ -530,6 +736,9 @@ function kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
                 idx=nothing, constants=nothing)
     if isnothing(idx)
         idx = kkt_indices(prob)
+    end
+    if isnothing(constants)
+        constants = _extract_kkt_constants(prob)
     end
     vars = unflatten_variables(z, idx)
     net = prob.network
@@ -547,25 +756,16 @@ function kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
 
     # Materialize rate_a vector once to avoid repeated isnothing checks
     rate_a = isnothing(fmax) ? T[ref[:branch][l]["rate_a"] for l in 1:m] : fmax
+    cq_vec = isnothing(cq) ? T[ref[:gen][i]["cost"][1] for i in 1:k] : cq
+    cl_vec = isnothing(cl) ? T[ref[:gen][i]["cost"][2] for i in 1:k] : cl
 
     # Pre-allocate KKT residual vector
     K = fill(T(NaN), last(idx.sig_q_to_ub))
 
     # =========================================================================
-    # 1. Stationarity conditions via ForwardDiff on the Lagrangian
+    # 1. Stationarity conditions
     # =========================================================================
-    x_primal = vcat(va, vm, pg, qg)
-    grad = ForwardDiff.gradient(
-        x -> _reduced_lagrangian(x, vars, prob, sw;
-                                 pd=pd, qd=qd, cq=cq, cl=cl, fmax=fmax,
-                                 constants=constants),
-        x_primal
-    )
-    # grad = [∂L/∂va; ∂L/∂vm; ∂L/∂pg; ∂L/∂qg]
-    K[idx.va] = grad[idx.va]
-    K[idx.vm] = grad[idx.vm]
-    K[idx.pg] = grad[idx.pg]
-    K[idx.qg] = grad[idx.qg]
+    _stationarity_residual!(K, vars, prob, sw; cq=cq_vec, cl=cl_vec, fmax=rate_a, constants=constants)
 
     # =========================================================================
     # 2. Primal feasibility
@@ -591,7 +791,7 @@ function kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     # Upper bounds: L -= λ*(x - ub),  CS = λ*(ub - x) = 0  (negated residual)
     # Both are valid; the sign flip cancels in implicit differentiation.
 
-    # Use pre-extracted bounds when available to avoid allocations in ForwardDiff
+    # Use pre-extracted bounds when available to avoid repeated ref lookups
     if isnothing(constants)
         vmin = T[ref[:bus][i]["vmin"] for i in 1:n]
         vmax = T[ref[:bus][i]["vmax"] for i in 1:n]
@@ -693,8 +893,8 @@ function _extract_branch_fmax(prob::ACOPFProblem)
 end
 
 """
-Pre-extract all constant data from the problem's ref for efficient ForwardDiff evaluation.
-Avoids repeated Dict lookups and PM.calc_branch_y/t calls inside ForwardDiff closures.
+Pre-extract all constant data from the problem's ref for efficient analytical
+KKT assembly and repeated sensitivity evaluation.
 """
 function _extract_kkt_constants(prob::ACOPFProblem)
     ref = prob.ref
@@ -754,7 +954,7 @@ function _extract_kkt_constants(prob::ACOPFProblem)
 end
 
 # =============================================================================
-# Parameter Jacobian (via ForwardDiff)
+# Parameter Jacobian (analytical)
 # =============================================================================
 
 # Map parameter symbols to extraction functions
@@ -767,54 +967,163 @@ const _AC_PARAM_EXTRACT = Dict{Symbol, Function}(
     :fmax => _extract_branch_fmax,
 )
 
-# Maps external parameter symbols to kkt() keyword argument names
-# (e.g., user-facing :d becomes the internal :pd kwarg for active demand)
-const _PARAM_KWARG_MAP = Dict{Symbol, Symbol}(
-    :d => :pd, :qd => :qd, :cq => :cq, :cl => :cl, :fmax => :fmax,
-)
+@inline function _add_stationarity_sw_flow_terms!(
+    Jp::AbstractMatrix, idx::NamedTuple, vars, prim, l::Int,
+    coeff_p_fr, coeff_q_fr, coeff_p_to, coeff_q_to)
+    fb = prim.fb
+    tb = prim.tb
+
+    @inbounds begin
+        Jp[idx.va[fb], l] += coeff_p_fr * prim.dp_fr_hat[1] +
+                             coeff_q_fr * prim.dq_fr_hat[1] +
+                             coeff_p_to * prim.dp_to_hat[1] +
+                             coeff_q_to * prim.dq_to_hat[1]
+        Jp[idx.va[tb], l] += coeff_p_fr * prim.dp_fr_hat[2] +
+                             coeff_q_fr * prim.dq_fr_hat[2] +
+                             coeff_p_to * prim.dp_to_hat[2] +
+                             coeff_q_to * prim.dq_to_hat[2]
+
+        Jp[idx.vm[fb], l] += coeff_p_fr * prim.dp_fr_hat[3] +
+                             coeff_q_fr * prim.dq_fr_hat[3] +
+                             coeff_p_to * prim.dp_to_hat[3] +
+                             coeff_q_to * prim.dq_to_hat[3]
+        Jp[idx.vm[tb], l] += coeff_p_fr * prim.dp_fr_hat[4] +
+                             coeff_q_fr * prim.dq_fr_hat[4] +
+                             coeff_p_to * prim.dp_to_hat[4] +
+                             coeff_q_to * prim.dq_to_hat[4]
+    end
+    return nothing
+end
+
+function _fill_ac_param_jacobian_sw!(Jp::AbstractMatrix, prob::ACOPFProblem,
+                                     sol::ACOPFSolution, idx::NamedTuple, constants)
+    vars = unflatten_variables(flatten_variables(sol, prob), idx)
+    va = vars.va
+    vm = vars.vm
+    sw = prob.network.sw
+
+    @inbounds for l in 1:prob.network.m
+        prim = _branch_flow_primitives(va, vm, sw, constants, l)
+        fb = prim.fb
+        tb = prim.tb
+
+        coeff_p_fr = -vars.nu_p_bal[fb] - 4 * vars.lam_thermal_fr[l] * prim.p_fr -
+                     vars.sig_p_fr_lb[l] - vars.sig_p_fr_ub[l]
+        coeff_q_fr = -vars.nu_q_bal[fb] - 4 * vars.lam_thermal_fr[l] * prim.q_fr -
+                     vars.sig_q_fr_lb[l] - vars.sig_q_fr_ub[l]
+        coeff_p_to = -vars.nu_p_bal[tb] - 4 * vars.lam_thermal_to[l] * prim.p_to -
+                     vars.sig_p_to_lb[l] - vars.sig_p_to_ub[l]
+        coeff_q_to = -vars.nu_q_bal[tb] - 4 * vars.lam_thermal_to[l] * prim.q_to -
+                     vars.sig_q_to_lb[l] - vars.sig_q_to_ub[l]
+
+        _add_stationarity_sw_flow_terms!(
+            Jp, idx, vars, prim, l, coeff_p_fr, coeff_q_fr, coeff_p_to, coeff_q_to)
+
+        Jp[idx.nu_p_bal[fb], l] += prim.p_fr_hat
+        Jp[idx.nu_p_bal[tb], l] += prim.p_to_hat
+        Jp[idx.nu_q_bal[fb], l] += prim.q_fr_hat
+        Jp[idx.nu_q_bal[tb], l] += prim.q_to_hat
+
+        Jp[idx.lam_thermal_fr[l], l] = vars.lam_thermal_fr[l] *
+                                       2 * (prim.p_fr * prim.p_fr_hat + prim.q_fr * prim.q_fr_hat)
+        Jp[idx.lam_thermal_to[l], l] = vars.lam_thermal_to[l] *
+                                       2 * (prim.p_to * prim.p_to_hat + prim.q_to * prim.q_to_hat)
+
+        Jp[idx.sig_p_fr_lb[l], l] = vars.sig_p_fr_lb[l] * prim.p_fr_hat
+        Jp[idx.sig_p_fr_ub[l], l] = -vars.sig_p_fr_ub[l] * prim.p_fr_hat
+        Jp[idx.sig_q_fr_lb[l], l] = vars.sig_q_fr_lb[l] * prim.q_fr_hat
+        Jp[idx.sig_q_fr_ub[l], l] = -vars.sig_q_fr_ub[l] * prim.q_fr_hat
+        Jp[idx.sig_p_to_lb[l], l] = vars.sig_p_to_lb[l] * prim.p_to_hat
+        Jp[idx.sig_p_to_ub[l], l] = -vars.sig_p_to_ub[l] * prim.p_to_hat
+        Jp[idx.sig_q_to_lb[l], l] = vars.sig_q_to_lb[l] * prim.q_to_hat
+        Jp[idx.sig_q_to_ub[l], l] = -vars.sig_q_to_ub[l] * prim.q_to_hat
+
+        # Angle difference constraint terms (∂K/∂sw)
+        Jp[idx.va[fb], l] += -(vars.lam_angle_lb[l] + vars.lam_angle_ub[l])
+        Jp[idx.va[tb], l] += (vars.lam_angle_lb[l] + vars.lam_angle_ub[l])
+        Jp[idx.lam_angle_lb[l], l] = vars.lam_angle_lb[l] * (va[fb] - va[tb] - constants.angmin[l])
+        Jp[idx.lam_angle_ub[l], l] = vars.lam_angle_ub[l] * (constants.angmax[l] - va[fb] + va[tb])
+    end
+    return Jp
+end
+
+function _fill_ac_param_jacobian_demand!(Jp::AbstractMatrix, idx::NamedTuple, n::Int, rows)
+    @inbounds for i in 1:n
+        Jp[rows[i], i] = 1.0
+    end
+    return Jp
+end
+
+function _fill_ac_param_jacobian_cost_linear!(Jp::AbstractMatrix, idx::NamedTuple, k::Int)
+    @inbounds for i in 1:k
+        Jp[idx.pg[i], i] = 1.0
+    end
+    return Jp
+end
+
+function _fill_ac_param_jacobian_cost_quadratic!(Jp::AbstractMatrix, idx::NamedTuple,
+                                                 pg::AbstractVector, k::Int)
+    @inbounds for i in 1:k
+        Jp[idx.pg[i], i] = 2 * pg[i]
+    end
+    return Jp
+end
+
+function _fill_ac_param_jacobian_fmax!(Jp::AbstractMatrix, idx::NamedTuple,
+                                       vars, fmax::AbstractVector, m::Int)
+    @inbounds for l in 1:m
+        Jp[idx.lam_thermal_fr[l], l] = -2 * vars.lam_thermal_fr[l] * fmax[l]
+        Jp[idx.lam_thermal_to[l], l] = -2 * vars.lam_thermal_to[l] * fmax[l]
+
+        Jp[idx.sig_p_fr_lb[l], l] = vars.sig_p_fr_lb[l]
+        Jp[idx.sig_p_fr_ub[l], l] = vars.sig_p_fr_ub[l]
+        Jp[idx.sig_q_fr_lb[l], l] = vars.sig_q_fr_lb[l]
+        Jp[idx.sig_q_fr_ub[l], l] = vars.sig_q_fr_ub[l]
+        Jp[idx.sig_p_to_lb[l], l] = vars.sig_p_to_lb[l]
+        Jp[idx.sig_p_to_ub[l], l] = vars.sig_p_to_ub[l]
+        Jp[idx.sig_q_to_lb[l], l] = vars.sig_q_to_lb[l]
+        Jp[idx.sig_q_to_ub[l], l] = vars.sig_q_to_ub[l]
+    end
+    return Jp
+end
 
 """
     calc_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol)
 
-Compute ∂K/∂param via ForwardDiff for any supported parameter symbol.
-Returns matrix of size (kkt_dims × param_dims).
+Compute the analytical parameter Jacobian ∂K/∂param for AC OPF.
+Returns a dense matrix of size `(kkt_dims(prob), length(param))`.
 """
 function calc_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol)
     haskey(_AC_PARAM_EXTRACT, param) || throw(ArgumentError(
         "Unknown AC OPF parameter: $param. Valid: $(keys(_AC_PARAM_EXTRACT))"))
-    z0 = flatten_variables(sol, prob)
-    sw = prob.network.sw
-    p0 = _AC_PARAM_EXTRACT[param](prob)
+
     idx = kkt_indices(prob)
+    z0 = flatten_variables(sol, prob)
+    vars = unflatten_variables(z0, idx)
+    p0 = _AC_PARAM_EXTRACT[param](prob)
+    Jp = zeros(Float64, kkt_dims(prob), length(p0))
+
     constants = prob.cache.kkt_constants
     if isnothing(constants)
         constants = _extract_kkt_constants(prob)
         prob.cache.kkt_constants = constants
     end
 
-    # Pre-extract all fixed parameters so the ForwardDiff closure avoids Dict lookups.
-    # Only the differentiated parameter is passed as the ForwardDiff variable;
-    # all others are passed as fixed keyword arguments.
-    pd0 = _extract_bus_pd(prob)
-    qd0 = _extract_bus_qd(prob)
-    cq0 = _extract_gen_cq(prob)
-    cl0 = _extract_gen_cl(prob)
-    fmax0 = _extract_branch_fmax(prob)
-
     if param === :sw
-        return ForwardDiff.jacobian(
-            s -> kkt(z0, prob, s; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0,
-                        idx=idx, constants=constants), p0)
-    else
-        kw = _PARAM_KWARG_MAP[param]
-        # Build fixed kwargs with all parameters except the one being differentiated
-        all_params = Dict{Symbol,Any}(:pd => pd0, :qd => qd0, :cq => cq0, :cl => cl0, :fmax => fmax0)
-        delete!(all_params, kw)
-        fixed_nt = (; (k => v for (k, v) in all_params)...)
-        return ForwardDiff.jacobian(
-            x -> kkt(z0, prob, sw; NamedTuple{(kw,)}((x,))..., fixed_nt...,
-                        idx=idx, constants=constants), p0)
+        return _fill_ac_param_jacobian_sw!(Jp, prob, sol, idx, constants)
+    elseif param === :d
+        return _fill_ac_param_jacobian_demand!(Jp, idx, prob.network.n, idx.nu_p_bal)
+    elseif param === :qd
+        return _fill_ac_param_jacobian_demand!(Jp, idx, prob.network.n, idx.nu_q_bal)
+    elseif param === :cl
+        return _fill_ac_param_jacobian_cost_linear!(Jp, idx, prob.n_gen)
+    elseif param === :cq
+        return _fill_ac_param_jacobian_cost_quadratic!(Jp, idx, vars.pg, prob.n_gen)
+    elseif param === :fmax
+        return _fill_ac_param_jacobian_fmax!(Jp, idx, vars, p0, prob.network.m)
     end
+
+    error("Unhandled AC OPF parameter: $param")
 end
 
 # =============================================================================
@@ -946,47 +1255,96 @@ end
 """
     _calc_ac_kkt_param_column(prob, sol, param, col_idx) → Vector{Float64}
 
-Compute a single column of ∂K/∂param via ForwardDiff.derivative (scalar → vector).
-Much cheaper than the full Jacobian when only one column is needed.
+Compute a single analytical column of ∂K/∂param without materializing the full
+parameter Jacobian.
 """
 function _calc_ac_kkt_param_column(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol, col_idx::Int)
-    z0 = flatten_variables(sol, prob)
-    sw = prob.network.sw
-    p0 = _AC_PARAM_EXTRACT[param](prob)
     idx = kkt_indices(prob)
+    z0 = flatten_variables(sol, prob)
+    vars = unflatten_variables(z0, idx)
+    p0 = _AC_PARAM_EXTRACT[param](prob)
+    Kcol = zeros(Float64, kkt_dims(prob))
+
     constants = prob.cache.kkt_constants
     if isnothing(constants)
         constants = _extract_kkt_constants(prob)
         prob.cache.kkt_constants = constants
     end
 
-    pd0 = _extract_bus_pd(prob)
-    qd0 = _extract_bus_qd(prob)
-    cq0 = _extract_gen_cq(prob)
-    cl0 = _extract_gen_cl(prob)
-    fmax0 = _extract_branch_fmax(prob)
-
     if param === :sw
-        f_col = t -> begin
-            # Promote to Dual-compatible type so ForwardDiff can track derivatives
-            sw_t = typeof(t).(sw)
-            sw_t[col_idx] = t
-            kkt(z0, prob, sw_t; pd=pd0, qd=qd0, cq=cq0, cl=cl0, fmax=fmax0,
-                idx=idx, constants=constants)
-        end
-        return ForwardDiff.derivative(f_col, sw[col_idx])
-    else
-        kw = _PARAM_KWARG_MAP[param]
-        all_fixed = Dict{Symbol,Any}(:pd => pd0, :qd => qd0, :cq => cq0, :cl => cl0, :fmax => fmax0)
-        delete!(all_fixed, kw)
-        fixed_nt = (; (k => v for (k, v) in all_fixed)...)
+        prim = _branch_flow_primitives(vars.va, vars.vm, prob.network.sw, constants, col_idx)
+        fb = prim.fb
+        tb = prim.tb
 
-        f_col = t -> begin
-            p_t = typeof(t).(p0)
-            p_t[col_idx] = t
-            kkt(z0, prob, sw; NamedTuple{(kw,)}((p_t,))..., fixed_nt...,
-                idx=idx, constants=constants)
-        end
-        return ForwardDiff.derivative(f_col, p0[col_idx])
+        coeff_p_fr = -vars.nu_p_bal[fb] - 4 * vars.lam_thermal_fr[col_idx] * prim.p_fr -
+                     vars.sig_p_fr_lb[col_idx] - vars.sig_p_fr_ub[col_idx]
+        coeff_q_fr = -vars.nu_q_bal[fb] - 4 * vars.lam_thermal_fr[col_idx] * prim.q_fr -
+                     vars.sig_q_fr_lb[col_idx] - vars.sig_q_fr_ub[col_idx]
+        coeff_p_to = -vars.nu_p_bal[tb] - 4 * vars.lam_thermal_to[col_idx] * prim.p_to -
+                     vars.sig_p_to_lb[col_idx] - vars.sig_p_to_ub[col_idx]
+        coeff_q_to = -vars.nu_q_bal[tb] - 4 * vars.lam_thermal_to[col_idx] * prim.q_to -
+                     vars.sig_q_to_lb[col_idx] - vars.sig_q_to_ub[col_idx]
+
+        Kcol[idx.va[fb]] += coeff_p_fr * prim.dp_fr_hat[1] +
+                            coeff_q_fr * prim.dq_fr_hat[1] +
+                            coeff_p_to * prim.dp_to_hat[1] +
+                            coeff_q_to * prim.dq_to_hat[1]
+        Kcol[idx.va[tb]] += coeff_p_fr * prim.dp_fr_hat[2] +
+                            coeff_q_fr * prim.dq_fr_hat[2] +
+                            coeff_p_to * prim.dp_to_hat[2] +
+                            coeff_q_to * prim.dq_to_hat[2]
+        Kcol[idx.vm[fb]] += coeff_p_fr * prim.dp_fr_hat[3] +
+                            coeff_q_fr * prim.dq_fr_hat[3] +
+                            coeff_p_to * prim.dp_to_hat[3] +
+                            coeff_q_to * prim.dq_to_hat[3]
+        Kcol[idx.vm[tb]] += coeff_p_fr * prim.dp_fr_hat[4] +
+                            coeff_q_fr * prim.dq_fr_hat[4] +
+                            coeff_p_to * prim.dp_to_hat[4] +
+                            coeff_q_to * prim.dq_to_hat[4]
+
+        Kcol[idx.nu_p_bal[fb]] += prim.p_fr_hat
+        Kcol[idx.nu_p_bal[tb]] += prim.p_to_hat
+        Kcol[idx.nu_q_bal[fb]] += prim.q_fr_hat
+        Kcol[idx.nu_q_bal[tb]] += prim.q_to_hat
+
+        Kcol[idx.lam_thermal_fr[col_idx]] = vars.lam_thermal_fr[col_idx] *
+                                            2 * (prim.p_fr * prim.p_fr_hat + prim.q_fr * prim.q_fr_hat)
+        Kcol[idx.lam_thermal_to[col_idx]] = vars.lam_thermal_to[col_idx] *
+                                            2 * (prim.p_to * prim.p_to_hat + prim.q_to * prim.q_to_hat)
+
+        Kcol[idx.sig_p_fr_lb[col_idx]] = vars.sig_p_fr_lb[col_idx] * prim.p_fr_hat
+        Kcol[idx.sig_p_fr_ub[col_idx]] = -vars.sig_p_fr_ub[col_idx] * prim.p_fr_hat
+        Kcol[idx.sig_q_fr_lb[col_idx]] = vars.sig_q_fr_lb[col_idx] * prim.q_fr_hat
+        Kcol[idx.sig_q_fr_ub[col_idx]] = -vars.sig_q_fr_ub[col_idx] * prim.q_fr_hat
+        Kcol[idx.sig_p_to_lb[col_idx]] = vars.sig_p_to_lb[col_idx] * prim.p_to_hat
+        Kcol[idx.sig_p_to_ub[col_idx]] = -vars.sig_p_to_ub[col_idx] * prim.p_to_hat
+        Kcol[idx.sig_q_to_lb[col_idx]] = vars.sig_q_to_lb[col_idx] * prim.q_to_hat
+        Kcol[idx.sig_q_to_ub[col_idx]] = -vars.sig_q_to_ub[col_idx] * prim.q_to_hat
+        return Kcol
     end
+
+    if param === :d
+        Kcol[idx.nu_p_bal[col_idx]] = 1.0
+    elseif param === :qd
+        Kcol[idx.nu_q_bal[col_idx]] = 1.0
+    elseif param === :cl
+        Kcol[idx.pg[col_idx]] = 1.0
+    elseif param === :cq
+        Kcol[idx.pg[col_idx]] = 2 * vars.pg[col_idx]
+    elseif param === :fmax
+        Kcol[idx.lam_thermal_fr[col_idx]] = -2 * vars.lam_thermal_fr[col_idx] * p0[col_idx]
+        Kcol[idx.lam_thermal_to[col_idx]] = -2 * vars.lam_thermal_to[col_idx] * p0[col_idx]
+        Kcol[idx.sig_p_fr_lb[col_idx]] = vars.sig_p_fr_lb[col_idx]
+        Kcol[idx.sig_p_fr_ub[col_idx]] = vars.sig_p_fr_ub[col_idx]
+        Kcol[idx.sig_q_fr_lb[col_idx]] = vars.sig_q_fr_lb[col_idx]
+        Kcol[idx.sig_q_fr_ub[col_idx]] = vars.sig_q_fr_ub[col_idx]
+        Kcol[idx.sig_p_to_lb[col_idx]] = vars.sig_p_to_lb[col_idx]
+        Kcol[idx.sig_p_to_ub[col_idx]] = vars.sig_p_to_ub[col_idx]
+        Kcol[idx.sig_q_to_lb[col_idx]] = vars.sig_q_to_lb[col_idx]
+        Kcol[idx.sig_q_to_ub[col_idx]] = vars.sig_q_to_ub[col_idx]
+    else
+        error("Unhandled AC OPF parameter: $param")
+    end
+
+    return Kcol
 end
