@@ -188,3 +188,47 @@ function update_demand!(prob::DCOPFProblem, d::AbstractVector)
 
     return prob
 end
+
+"""
+    update_fmax!(prob::DCOPFProblem, fmax::AbstractVector)
+
+Update branch flow limits in the DC OPF problem without rebuilding the JuMP
+model. Mutates `prob.network.fmax` in place, rewrites the RHS of the
+`line_lb` (f ≥ -fmax) and `line_ub` (f ≤ fmax) constraints, and invalidates
+the sensitivity cache so the next `solve!`/sensitivity query recomputes from
+scratch.
+
+`fmax` does not enter the reduced-Laplacian factorization `b_r_factor`
+(which depends only on susceptances and switching), so `invalidate!` is
+sufficient — no topology invalidation is needed.
+
+# Arguments
+- `prob`: DCOPFProblem to update
+- `fmax`: New flow limit vector (length m), non-negative per-unit MW
+
+# Throws
+- `DimensionMismatch` if `length(fmax) != network.m`
+- `ArgumentError` if any entry of `fmax` is negative
+"""
+function update_fmax!(prob::DCOPFProblem, fmax::AbstractVector)
+    m = prob.network.m
+    length(fmax) == m || throw(DimensionMismatch("Flow limit vector length $(length(fmax)) must match number of branches $m"))
+    all(fmax .>= 0) || throw(ArgumentError("Flow limits must be non-negative"))
+
+    # Invalidate sensitivity cache since parameters changed.
+    # NOT invalidate_topology! — b_r_factor is fmax-independent.
+    invalidate!(prob.cache)
+
+    # Update stored flow limits
+    prob.network.fmax .= fmax
+
+    # Update constraint RHS:
+    #   line_lb: f ≥ -fmax  ⟹  RHS = -fmax
+    #   line_ub: f ≤  fmax  ⟹  RHS =  fmax
+    for e in 1:m
+        set_normalized_rhs(prob.cons.line_lb[e], -fmax[e])
+        set_normalized_rhs(prob.cons.line_ub[e],  fmax[e])
+    end
+
+    return prob
+end
