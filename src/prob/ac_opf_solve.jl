@@ -69,7 +69,9 @@ function solve!(prob::ACOPFProblem{ExaBackend})
     # Invalidate sensitivity cache since we're re-solving
     invalidate!(prob.cache)
 
-    result = NLPModelsIpopt.ipopt(prob.model; print_level = prob._silent ? 0 : 5)
+    # Match the JuMP backend's Ipopt tolerance so backend correspondence tests
+    # compare like-for-like solver targets.
+    result = NLPModelsIpopt.ipopt(prob.model; print_level = prob._silent ? 0 : 5, tol=1e-6)
 
     _check_solve_status(result, "AC OPF")
 
@@ -188,28 +190,30 @@ function _extract_ac_opf_solution(prob::ACOPFProblem{ExaBackend}, result)
     p_val = Dict(prob.data.arcs[i] => p_arr[i] for i in eachindex(prob.data.arcs))
     q_val = Dict(prob.data.arcs[i] => q_arr[i] for i in eachindex(prob.data.arcs))
 
-    ν_p_bal = ExaModels.multipliers(result, prob.cons.p_bal)
-    ν_q_bal = ExaModels.multipliers(result, prob.cons.q_bal)
-    ν_ref_bus = ExaModels.multipliers(result, prob.cons.ref_bus)
-    ν_p_fr = ExaModels.multipliers(result, prob.cons.p_fr)
-    ν_p_to = ExaModels.multipliers(result, prob.cons.p_to)
-    ν_q_fr = ExaModels.multipliers(result, prob.cons.q_fr)
-    ν_q_to = ExaModels.multipliers(result, prob.cons.q_to)
-    λ_thermal_fr = ExaModels.multipliers(result, prob.cons.thermal_fr)
-    λ_thermal_to = ExaModels.multipliers(result, prob.cons.thermal_to)
-    λ_angle_lb = ExaModels.multipliers(result, prob.cons.angle_diff_lb)
-    λ_angle_ub = ExaModels.multipliers(result, prob.cons.angle_diff_ub)
+    # ExaModels reports minimization-constraint multipliers with the opposite
+    # sign of JuMP's duals; ACOPFSolution uses the JuMP/KKT convention.
+    ν_p_bal = -ExaModels.multipliers(result, prob.cons.p_bal)
+    ν_q_bal = -ExaModels.multipliers(result, prob.cons.q_bal)
+    ν_ref_bus = -ExaModels.multipliers(result, prob.cons.ref_bus)
+    ν_p_fr = -ExaModels.multipliers(result, prob.cons.p_fr)
+    ν_p_to = -ExaModels.multipliers(result, prob.cons.p_to)
+    ν_q_fr = -ExaModels.multipliers(result, prob.cons.q_fr)
+    ν_q_to = -ExaModels.multipliers(result, prob.cons.q_to)
+    λ_thermal_fr = -ExaModels.multipliers(result, prob.cons.thermal_fr)
+    λ_thermal_to = -ExaModels.multipliers(result, prob.cons.thermal_to)
+    λ_angle_lb = -ExaModels.multipliers(result, prob.cons.angle_diff_lb)
+    λ_angle_ub = -ExaModels.multipliers(result, prob.cons.angle_diff_ub)
     μ_vm_lb = ExaModels.multipliers_L(result, prob.vm)
-    μ_vm_ub = ExaModels.multipliers_U(result, prob.vm)
+    μ_vm_ub = -ExaModels.multipliers_U(result, prob.vm)
     ρ_pg_lb = ExaModels.multipliers_L(result, prob.pg)
-    ρ_pg_ub = ExaModels.multipliers_U(result, prob.pg)
+    ρ_pg_ub = -ExaModels.multipliers_U(result, prob.pg)
     ρ_qg_lb = ExaModels.multipliers_L(result, prob.qg)
-    ρ_qg_ub = ExaModels.multipliers_U(result, prob.qg)
+    ρ_qg_ub = -ExaModels.multipliers_U(result, prob.qg)
 
     p_lb = ExaModels.multipliers_L(result, prob.p)
-    p_ub = ExaModels.multipliers_U(result, prob.p)
+    p_ub = -ExaModels.multipliers_U(result, prob.p)
     q_lb = ExaModels.multipliers_L(result, prob.q)
-    q_ub = ExaModels.multipliers_U(result, prob.q)
+    q_ub = -ExaModels.multipliers_U(result, prob.q)
     σ_p_fr_lb = p_lb[prob.data.arc_from_idx]
     σ_p_fr_ub = p_ub[prob.data.arc_from_idx]
     σ_q_fr_lb = q_lb[prob.data.arc_from_idx]
