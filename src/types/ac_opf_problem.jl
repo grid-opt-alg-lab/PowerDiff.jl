@@ -259,6 +259,30 @@ struct ACExaBranchRecord
     rate_a_sq::Float64
 end
 
+const _EXA_HAS_FUNCTIONAL_API = isdefined(ExaModels, :add_var)
+
+_exa_core(; backend=nothing) = _EXA_HAS_FUNCTIONAL_API ?
+    ExaModels.ExaCore(; backend=backend, concrete=Val(true)) :
+    ExaModels.ExaCore(; backend=backend)
+
+_exa_add_var(core, dims...; kwargs...) = _EXA_HAS_FUNCTIONAL_API ?
+    ExaModels.add_var(core, dims...; kwargs...) :
+    (core, ExaModels.variable(core, dims...; kwargs...))
+
+_exa_add_obj(core, expr; kwargs...) = _EXA_HAS_FUNCTIONAL_API ?
+    ExaModels.add_obj(core, expr; kwargs...) :
+    (core, ExaModels.objective(core, expr; kwargs...))
+
+_exa_add_con(core, expr; kwargs...) = _EXA_HAS_FUNCTIONAL_API ?
+    ExaModels.add_con(core, expr; kwargs...) :
+    (core, ExaModels.constraint(core, expr; kwargs...))
+
+_exa_add_con!(core, con, expr) = _EXA_HAS_FUNCTIONAL_API ?
+    ExaModels.add_con!(core, con, expr) :
+    (core, ExaModels.constraint!(core, con, expr))
+
+_exa_model(core; kwargs...) = ExaModels.ExaModel(core; kwargs...)
+
 """
     ACOPFProblem <: AbstractOPFProblem
 
@@ -632,62 +656,62 @@ function _build_examodel(network::ACNetwork, data::ACOPFData, optimizer, silent:
     arc_fmax = [constants.fmax[arc[1]] for arc in data.arcs]
     exa = _build_ac_exa_records(network, data)
 
-    core = ExaModels.ExaCore()
-    va = ExaModels.variable(core, n)
-    vm = ExaModels.variable(core, n; start=ones(n), lvar=constants.vmin, uvar=constants.vmax)
-    pg = ExaModels.variable(core, n_gen; lvar=constants.pmin, uvar=constants.pmax)
-    qg = ExaModels.variable(core, n_gen; lvar=constants.qmin, uvar=constants.qmax)
-    p = ExaModels.variable(core, length(data.arcs); lvar=-arc_fmax, uvar=arc_fmax)
-    q = ExaModels.variable(core, length(data.arcs); lvar=-arc_fmax, uvar=arc_fmax)
+    core = _exa_core()
+    core, va = _exa_add_var(core, n)
+    core, vm = _exa_add_var(core, n; start=ones(n), lvar=constants.vmin, uvar=constants.vmax)
+    core, pg = _exa_add_var(core, n_gen; lvar=constants.pmin, uvar=constants.pmax)
+    core, qg = _exa_add_var(core, n_gen; lvar=constants.qmin, uvar=constants.qmax)
+    core, p = _exa_add_var(core, length(data.arcs); lvar=-arc_fmax, uvar=arc_fmax)
+    core, q = _exa_add_var(core, length(data.arcs); lvar=-arc_fmax, uvar=arc_fmax)
 
-    ExaModels.objective(core,
+    core, _ = _exa_add_obj(core,
         g.cost1 * pg[g.i]^2 + g.cost2 * pg[g.i] + g.cost3 for g in exa.gen)
 
-    ref_bus = ExaModels.constraint(core, va[i] for i in exa.ref_bus_keys)
-    p_fr = ExaModels.constraint(core,
+    core, ref_bus = _exa_add_con(core, va[i] for i in exa.ref_bus_keys)
+    core, p_fr = _exa_add_con(core,
         p[b.f_idx] - b.c5 * vm[b.f_bus]^2 -
         b.c3 * (vm[b.f_bus] * vm[b.t_bus] * cos(va[b.f_bus] - va[b.t_bus])) -
         b.c4 * (vm[b.f_bus] * vm[b.t_bus] * sin(va[b.f_bus] - va[b.t_bus]))
         for b in exa.branch)
-    q_fr = ExaModels.constraint(core,
+    core, q_fr = _exa_add_con(core,
         q[b.f_idx] + b.c6 * vm[b.f_bus]^2 +
         b.c4 * (vm[b.f_bus] * vm[b.t_bus] * cos(va[b.f_bus] - va[b.t_bus])) -
         b.c3 * (vm[b.f_bus] * vm[b.t_bus] * sin(va[b.f_bus] - va[b.t_bus]))
         for b in exa.branch)
-    p_to = ExaModels.constraint(core,
+    core, p_to = _exa_add_con(core,
         p[b.t_idx] - b.c7 * vm[b.t_bus]^2 -
         b.c1 * (vm[b.t_bus] * vm[b.f_bus] * cos(va[b.t_bus] - va[b.f_bus])) -
         b.c2 * (vm[b.t_bus] * vm[b.f_bus] * sin(va[b.t_bus] - va[b.f_bus]))
         for b in exa.branch)
-    q_to = ExaModels.constraint(core,
+    core, q_to = _exa_add_con(core,
         q[b.t_idx] + b.c8 * vm[b.t_bus]^2 +
         b.c2 * (vm[b.t_bus] * vm[b.f_bus] * cos(va[b.t_bus] - va[b.f_bus])) -
         b.c1 * (vm[b.t_bus] * vm[b.f_bus] * sin(va[b.t_bus] - va[b.f_bus]))
         for b in exa.branch)
-    angle_diff_lb = ExaModels.constraint(core,
+    core, angle_diff_lb = _exa_add_con(core,
         b.angmin_scaled - b.sw * va[b.f_bus] + b.sw * va[b.t_bus] for b in exa.branch;
         lcon=exa.thermal_lcon, ucon=exa.thermal_ucon)
-    angle_diff_ub = ExaModels.constraint(core,
+    core, angle_diff_ub = _exa_add_con(core,
         b.sw * va[b.f_bus] - b.sw * va[b.t_bus] - b.angmax_scaled for b in exa.branch;
         lcon=exa.thermal_lcon, ucon=exa.thermal_ucon)
-    thermal_fr = ExaModels.constraint(core,
+    core, thermal_fr = _exa_add_con(core,
         p[b.f_idx]^2 + q[b.f_idx]^2 - b.rate_a_sq for b in exa.branch;
         lcon=exa.thermal_lcon, ucon=exa.thermal_ucon)
-    thermal_to = ExaModels.constraint(core,
+    core, thermal_to = _exa_add_con(core,
         p[b.t_idx]^2 + q[b.t_idx]^2 - b.rate_a_sq for b in exa.branch;
         lcon=exa.thermal_lcon, ucon=exa.thermal_ucon)
 
-    p_bal = ExaModels.constraint(core,
+    core, p_bal = _exa_add_con(core,
         b.pd + b.gs * vm[b.i]^2 for b in exa.bus)
-    ExaModels.constraint!(core, p_bal, a.bus => p[a.i] for a in exa.arc)
-    ExaModels.constraint!(core, p_bal, g.bus => -pg[g.i] for g in exa.gen)
+    core, _ = _exa_add_con!(core, p_bal, a.bus => p[a.i] for a in exa.arc)
+    core, _ = _exa_add_con!(core, p_bal, g.bus => -pg[g.i] for g in exa.gen)
 
-    q_bal = ExaModels.constraint(core,
+    core, q_bal = _exa_add_con(core,
         b.qd - b.bs * vm[b.i]^2 for b in exa.bus)
-    ExaModels.constraint!(core, q_bal, a.bus => q[a.i] for a in exa.arc)
-    ExaModels.constraint!(core, q_bal, g.bus => -qg[g.i] for g in exa.gen)
+    core, _ = _exa_add_con!(core, q_bal, a.bus => q[a.i] for a in exa.arc)
+    core, _ = _exa_add_con!(core, q_bal, g.bus => -qg[g.i] for g in exa.gen)
 
-    model = ExaModels.ExaModel(core; prod=true)
+    model = _exa_model(core)
     cons = ACExaConstraints(ref_bus, p_bal, q_bal, p_fr, q_fr, p_to, q_to,
         thermal_fr, thermal_to, angle_diff_lb, angle_diff_ub)
     return model, va, vm, pg, qg, p, q, cons
