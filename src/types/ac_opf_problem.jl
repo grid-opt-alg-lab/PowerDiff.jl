@@ -351,12 +351,6 @@ function _build_acopf_data(network::ACNetwork)
     return ACOPFData(arcs, arc_from_idx, arc_to_idx, bus_arc_idxs, bus_gen_idxs, ref_bus_keys, constants)
 end
 
-"""
-    _rebuild_jump_model!(prob::ACOPFProblem)
-
-Build (or rebuild) the JuMP model from current network parameters.
-Called by the constructor and by `update_switching!` after mutating `network.sw`.
-"""
 function _acopf_problem(network::ACNetwork, data::ACOPFData, ::JuMPBackend; optimizer, silent::Bool)
     model, va, vm, pg, qg, p, q, cons = _build_jump_model(network, data, optimizer, silent)
     cache = ACSensitivityCache()
@@ -417,29 +411,42 @@ function _build_jump_model(network::ACNetwork, data::ACOPFData, optimizer, silen
     n_gen = length(constants.gen_bus)
     arc_fmax = [constants.fmax[arc[1]] for arc in data.arcs]
 
+    # Create model
     model = JuMP.Model(optimizer)
     silent && set_silent(model)
     set_optimizer_attribute(model, "tol", 1e-6)
 
+    # Voltage variables
     @variable(model, va[1:n])
     @variable(model, constants.vmin[i] <= vm[i in 1:n] <= constants.vmax[i], start=1.0)
+
+    # Generation variables
     @variable(model, constants.pmin[i] <= pg[i in 1:n_gen] <= constants.pmax[i])
     @variable(model, constants.qmin[i] <= qg[i in 1:n_gen] <= constants.qmax[i])
+
+    # Branch flow variables
     @variable(model, -arc_fmax[i] <= p[i in 1:length(data.arcs)] <= arc_fmax[i])
     @variable(model, -arc_fmax[i] <= q[i in 1:length(data.arcs)] <= arc_fmax[i])
 
+    # Objective: minimize generation cost (quadratic)
     @objective(model, Min,
         sum(constants.cq[i] * pg[i]^2 + constants.cl[i] * pg[i] + constants.cc[i] for i in 1:n_gen)
     )
 
+    # Reference bus constraint
     ref_bus = [@constraint(model, va[i] == 0) for i in data.ref_bus_keys]
+
+    # Nodal power balance constraints
     p_bal = Vector{ConstraintRef}(undef, n)
     q_bal = Vector{ConstraintRef}(undef, n)
     for i in 1:n
+        # Active power balance
         p_bal[i] = @constraint(model,
             sum(p[j] for j in data.bus_arc_idxs[i]) ==
             sum(pg[g] for g in data.bus_gen_idxs[i]) - constants.pd[i] - constants.gs[i] * vm[i]^2
         )
+
+        # Reactive power balance
         q_bal[i] = @constraint(model,
             sum(q[j] for j in data.bus_arc_idxs[i]) ==
             sum(qg[g] for g in data.bus_gen_idxs[i]) - constants.qd[i] + constants.bs[i] * vm[i]^2
@@ -455,6 +462,7 @@ function _build_jump_model(network::ACNetwork, data::ACOPFData, optimizer, silen
     angle_diff_lb = Vector{ConstraintRef}(undef, m)
     angle_diff_ub = Vector{ConstraintRef}(undef, m)
 
+    # Branch power flow constraints and thermal limits
     for l in 1:m
         f_idx = data.arc_from_idx[l]
         t_idx = data.arc_to_idx[l]
@@ -462,6 +470,7 @@ function _build_jump_model(network::ACNetwork, data::ACOPFData, optimizer, silen
         tb = constants.t_bus[l]
         sw_l = network.sw[l]
 
+        # AC Power Flow Constraints (from side)
         p_fr[l] = @constraint(model,
             p[f_idx] == sw_l * ((constants.g_br[l] + constants.g_fr[l]) / constants.tm[l] * vm[fb]^2 +
                 (-constants.g_br[l] * constants.tr[l] + constants.b_br[l] * constants.ti[l]) / constants.tm[l] *
@@ -469,6 +478,7 @@ function _build_jump_model(network::ACNetwork, data::ACOPFData, optimizer, silen
                 (-constants.b_br[l] * constants.tr[l] - constants.g_br[l] * constants.ti[l]) / constants.tm[l] *
                 (vm[fb] * vm[tb] * sin(va[fb] - va[tb])))
         )
+
         q_fr[l] = @constraint(model,
             q[f_idx] == sw_l * (-(constants.b_br[l] + constants.b_fr[l]) / constants.tm[l] * vm[fb]^2 -
                 (-constants.b_br[l] * constants.tr[l] - constants.g_br[l] * constants.ti[l]) / constants.tm[l] *
@@ -476,6 +486,8 @@ function _build_jump_model(network::ACNetwork, data::ACOPFData, optimizer, silen
                 (-constants.g_br[l] * constants.tr[l] + constants.b_br[l] * constants.ti[l]) / constants.tm[l] *
                 (vm[fb] * vm[tb] * sin(va[fb] - va[tb])))
         )
+
+        # AC Power Flow Constraints (to side)
         p_to[l] = @constraint(model,
             p[t_idx] == sw_l * ((constants.g_br[l] + constants.g_to[l]) * vm[tb]^2 +
                 (-constants.g_br[l] * constants.tr[l] - constants.b_br[l] * constants.ti[l]) / constants.tm[l] *
@@ -483,6 +495,7 @@ function _build_jump_model(network::ACNetwork, data::ACOPFData, optimizer, silen
                 (-constants.b_br[l] * constants.tr[l] + constants.g_br[l] * constants.ti[l]) / constants.tm[l] *
                 (vm[tb] * vm[fb] * sin(va[tb] - va[fb])))
         )
+
         q_to[l] = @constraint(model,
             q[t_idx] == sw_l * (-(constants.b_br[l] + constants.b_to[l]) * vm[tb]^2 -
                 (-constants.b_br[l] * constants.tr[l] + constants.g_br[l] * constants.ti[l]) / constants.tm[l] *
@@ -490,8 +503,12 @@ function _build_jump_model(network::ACNetwork, data::ACOPFData, optimizer, silen
                 (-constants.g_br[l] * constants.tr[l] - constants.b_br[l] * constants.ti[l]) / constants.tm[l] *
                 (vm[tb] * vm[fb] * sin(va[tb] - va[fb])))
         )
+
+        # Angle difference limits
         angle_diff_lb[l] = @constraint(model, sw_l * (va[fb] - va[tb]) >= sw_l * constants.angmin[l])
         angle_diff_ub[l] = @constraint(model, sw_l * (va[fb] - va[tb]) <= sw_l * constants.angmax[l])
+
+        # Thermal limits (apparent power)
         thermal_fr[l] = @constraint(model, p[f_idx]^2 + q[f_idx]^2 <= constants.fmax[l]^2)
         thermal_to[l] = @constraint(model, p[t_idx]^2 + q[t_idx]^2 <= constants.fmax[l]^2)
     end

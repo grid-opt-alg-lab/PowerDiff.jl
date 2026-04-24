@@ -58,7 +58,10 @@ function solve!(prob::ACOPFProblem{JuMPBackend})
     _check_solve_status(prob.model, "AC OPF")
 
     sol = _extract_ac_opf_solution(prob)
+
+    # Cache the solution for sensitivity computations
     prob.cache.solution = sol
+
     return sol
 end
 
@@ -71,6 +74,8 @@ function solve!(prob::ACOPFProblem{ExaBackend})
     _check_solve_status(result, "AC OPF")
 
     sol = _extract_ac_opf_solution(prob, result)
+
+    # Cache the solution for sensitivity computations
     prob.cache.solution = sol
 
     return sol
@@ -84,6 +89,7 @@ function _extract_ac_opf_solution(prob::ACOPFProblem{JuMPBackend})
     m = prob.network.m
     k = prob.n_gen
 
+    # Extract primal variables
     va_val = value.(prob.va)
     vm_val = value.(prob.vm)
     pg_val = value.(prob.pg)
@@ -94,24 +100,38 @@ function _extract_ac_opf_solution(prob::ACOPFProblem{JuMPBackend})
     p_val = Dict(prob.data.arcs[i] => p_arr[i] for i in eachindex(prob.data.arcs))
     q_val = Dict(prob.data.arcs[i] => q_arr[i] for i in eachindex(prob.data.arcs))
 
-    ν_p_bal = dual.(prob.cons.p_bal)
-    ν_q_bal = dual.(prob.cons.q_bal)
-    ν_ref_bus = dual.(prob.cons.ref_bus)
-    ν_p_fr = dual.(prob.cons.p_fr)
-    ν_p_to = dual.(prob.cons.p_to)
-    ν_q_fr = dual.(prob.cons.q_fr)
-    ν_q_to = dual.(prob.cons.q_to)
-    λ_thermal_fr = dual.(prob.cons.thermal_fr)
-    λ_thermal_to = dual.(prob.cons.thermal_to)
-    λ_angle_lb = dual.(prob.cons.angle_diff_lb)
-    λ_angle_ub = dual.(prob.cons.angle_diff_ub)
+    # Extract dual variables - power balance (equality)
+    ν_p_bal = [dual(prob.cons.p_bal[i]) for i in 1:n]
+    ν_q_bal = [dual(prob.cons.q_bal[i]) for i in 1:n]
+
+    # Extract dual variables - reference bus (equality)
+    ν_ref_bus = [dual(prob.cons.ref_bus[i]) for i in eachindex(prob.cons.ref_bus)]
+
+    # Extract dual variables - flow definition equations (equality)
+    ν_p_fr = [dual(prob.cons.p_fr[l]) for l in 1:m]
+    ν_p_to = [dual(prob.cons.p_to[l]) for l in 1:m]
+    ν_q_fr = [dual(prob.cons.q_fr[l]) for l in 1:m]
+    ν_q_to = [dual(prob.cons.q_to[l]) for l in 1:m]
+
+    # Extract dual variables - thermal limits (inequality)
+    λ_thermal_fr = [dual(prob.cons.thermal_fr[l]) for l in 1:m]
+    λ_thermal_to = [dual(prob.cons.thermal_to[l]) for l in 1:m]
+
+    # Extract dual variables - angle difference limits (inequality)
+    λ_angle_lb = [dual(prob.cons.angle_diff_lb[l]) for l in 1:m]
+    λ_angle_ub = [dual(prob.cons.angle_diff_ub[l]) for l in 1:m]
+
+    # Extract dual variables - voltage bounds (inequality)
     μ_vm_lb = [dual(LowerBoundRef(prob.vm[i])) for i in 1:n]
     μ_vm_ub = [dual(UpperBoundRef(prob.vm[i])) for i in 1:n]
+
+    # Extract dual variables - generation bounds (inequality)
     ρ_pg_lb = [dual(LowerBoundRef(prob.pg[i])) for i in 1:k]
     ρ_pg_ub = [dual(UpperBoundRef(prob.pg[i])) for i in 1:k]
     ρ_qg_lb = [dual(LowerBoundRef(prob.qg[i])) for i in 1:k]
     ρ_qg_ub = [dual(UpperBoundRef(prob.qg[i])) for i in 1:k]
 
+    # Extract dual variables - flow variable bounds (inequality)
     σ_p_fr_lb = zeros(m)
     σ_p_fr_ub = zeros(m)
     σ_q_fr_lb = zeros(m)
@@ -120,6 +140,7 @@ function _extract_ac_opf_solution(prob::ACOPFProblem{JuMPBackend})
     σ_p_to_ub = zeros(m)
     σ_q_to_lb = zeros(m)
     σ_q_to_ub = zeros(m)
+
     for l in 1:m
         f_idx = prob.data.arc_from_idx[l]
         t_idx = prob.data.arc_to_idx[l]
@@ -132,6 +153,8 @@ function _extract_ac_opf_solution(prob::ACOPFProblem{JuMPBackend})
         σ_q_to_lb[l] = dual(LowerBoundRef(prob.q[t_idx]))
         σ_q_to_ub[l] = dual(UpperBoundRef(prob.q[t_idx]))
     end
+
+    obj = objective_value(prob.model)
 
     return ACOPFSolution(
         va = va_val, vm = vm_val,
@@ -148,7 +171,7 @@ function _extract_ac_opf_solution(prob::ACOPFProblem{JuMPBackend})
         sig_q_fr_lb = σ_q_fr_lb, sig_q_fr_ub = σ_q_fr_ub,
         sig_p_to_lb = σ_p_to_lb, sig_p_to_ub = σ_p_to_ub,
         sig_q_to_lb = σ_q_to_lb, sig_q_to_ub = σ_q_to_ub,
-        objective = objective_value(prob.model)
+        objective = obj
     )
 end
 
@@ -236,6 +259,7 @@ function update_switching!(prob::ACOPFProblem, sw::AbstractVector)
     # Update network switching state
     prob.network.sw .= sw
 
+    # Rebuild the model with new switching coefficients
     _rebuild_model!(prob)
 
     return prob
