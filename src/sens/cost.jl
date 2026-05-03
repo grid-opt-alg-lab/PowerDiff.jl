@@ -33,16 +33,26 @@ Only the stationarity condition for g depends on cl:
   dK_g/dcl = I_k (identity matrix)
 """
 function calc_kkt_jacobian_cost_linear(net::DCNetwork)
-    n, m, k = net.n, net.m, net.k
-    dim = kkt_dims(net)
+    n = getfield(net, :n)
+    m = getfield(net, :m)
+    k = getfield(net, :k)
+    dim = 5n + 6m + 3k + 1
     idx = kkt_indices(n, m, k)
 
-    J_cl = spzeros(dim, k)
+    colptr = Vector{Int}(undef, k + 1)
+    rowval = Int[]
+    nzval = Float64[]
+    sizehint!(rowval, k)
+    sizehint!(nzval, k)
 
     # dK_g/dcl = I_k
-    J_cl[idx.pg, :] = sparse(I, k, k)
+    @inbounds for j in 1:k
+        colptr[j] = length(rowval) + 1
+        _push_csc_entry!(rowval, nzval, idx.pg[j], 1.0)
+    end
+    colptr[k + 1] = length(rowval) + 1
 
-    return J_cl
+    return SparseMatrixCSC(dim, k, colptr, rowval, nzval)
 end
 
 """
@@ -77,21 +87,31 @@ Only the stationarity condition for g depends on cq:
 So dK_g/dcq = 2*Diagonal(g) evaluated at the solution.
 """
 function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem, sol::DCOPFSolution)
-    net = prob.network
-    n, m, k = net.n, net.m, net.k
-    dim = kkt_dims(net)
+    net = getfield(prob, :network)
+    n = getfield(net, :n)
+    m = getfield(net, :m)
+    k = getfield(net, :k)
+    dim = 5n + 6m + 3k + 1
     idx = kkt_indices(n, m, k)
 
-    g = sol.pg
+    g = getfield(sol, :pg)
 
-    J_cq = spzeros(dim, k)
+    colptr = Vector{Int}(undef, k + 1)
+    rowval = Int[]
+    nzval = Float64[]
+    sizehint!(rowval, k)
+    sizehint!(nzval, k)
 
     # dK_g/dcq = 2*Diagonal(g)
     # Objective is cq_i * g_i^2, stationarity is 2*cq_i*g_i + cl_i - ...
     # So ∂(2*cq_i*g_i)/∂cq_i = 2*g_i
-    J_cq[idx.pg, :] = 2 * sparse(Diagonal(g))
+    @inbounds for j in 1:k
+        colptr[j] = length(rowval) + 1
+        _push_csc_entry!(rowval, nzval, idx.pg[j], 2 * g[j])
+    end
+    colptr[k + 1] = length(rowval) + 1
 
-    return J_cq
+    return SparseMatrixCSC(dim, k, colptr, rowval, nzval)
 end
 
 """

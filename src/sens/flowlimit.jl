@@ -48,25 +48,33 @@ Therefore:
 - dK_lambda_ub/dfmax = Diag(lambda_ub)
 """
 function calc_kkt_jacobian_flowlimit(prob::DCOPFProblem, sol::DCOPFSolution)
-    net = prob.network
-    n, m, k = net.n, net.m, net.k
-    dim = kkt_dims(net)
+    net = getfield(prob, :network)
+    n = getfield(net, :n)
+    m = getfield(net, :m)
+    k = getfield(net, :k)
+    dim = 5n + 6m + 3k + 1
     idx = kkt_indices(n, m, k)
 
-    lambda_lb = sol.lam_lb
-    lambda_ub = sol.lam_ub
+    lambda_lb = getfield(sol, :lam_lb)
+    lambda_ub = getfield(sol, :lam_ub)
 
-    J_fmax = spzeros(dim, m)
+    colptr = Vector{Int}(undef, m + 1)
+    rowval = Int[]
+    nzval = Float64[]
+    sizehint!(rowval, 2m)
+    sizehint!(nzval, 2m)
 
-    # dK_lambda_lb/dfmax = Diag(lambda_lb)
-    # K_lambda_lb = lambda_lb .* (f + fmax), so dK_lambda_lb/dfmax_e = lambda_lb[e] for row e
-    J_fmax[idx.lam_lb, :] = sparse(Diagonal(lambda_lb))
+    # dK_lambda_lb/dfmax and dK_lambda_ub/dfmax.
+    @inbounds for e in 1:m
+        colptr[e] = length(rowval) + 1
+        # K_lambda_lb = lambda_lb .* (f + fmax), so dK_lambda_lb/dfmax_e = lambda_lb[e]
+        _push_csc_entry!(rowval, nzval, idx.lam_lb[e], lambda_lb[e])
+        # K_lambda_ub = lambda_ub .* (fmax - f), so dK_lambda_ub/dfmax_e = lambda_ub[e]
+        _push_csc_entry!(rowval, nzval, idx.lam_ub[e], lambda_ub[e])
+    end
+    colptr[m + 1] = length(rowval) + 1
 
-    # dK_lambda_ub/dfmax = Diag(lambda_ub)
-    # K_lambda_ub = lambda_ub .* (fmax - f), so dK_lambda_ub/dfmax_e = lambda_ub[e] for row e
-    J_fmax[idx.lam_ub, :] = sparse(Diagonal(lambda_ub))
-
-    return J_fmax
+    return SparseMatrixCSC(dim, m, colptr, rowval, nzval)
 end
 
 """
