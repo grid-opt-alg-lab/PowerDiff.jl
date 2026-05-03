@@ -88,7 +88,7 @@ include("sens/interface.jl")
 include("sens/vjp_jvp.jl")
 
 # =============================================================================
-# Exports — clean public API
+# Exports
 # =============================================================================
 
 # Abstract Type Hierarchy
@@ -108,12 +108,11 @@ export DCNetwork, DCPowerFlowState
 # DC OPF Types and Functions
 export DCOPFProblem, DCOPFSolution
 export DCSensitivityCache, invalidate!
-export solve!, update_demand!
+export solve!, update_demand!, update_fmax!, update_switching!
 export calc_demand_vector, calc_susceptance_matrix
 
 # DC Sensitivity Functions (convenience wrappers)
 export calc_generation_participation_factors, calc_ptdf_from_sensitivity
-export update_switching!, update_fmax!
 
 # LMP Functions
 export calc_lmp, calc_qlmp, calc_congestion_component, calc_energy_component

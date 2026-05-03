@@ -12,14 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# =============================================================================
-# Tests for update_fmax! correctness
-# =============================================================================
-#
-# Verifies update_fmax! correctly mutates branch flow limits and produces
-# solutions + sensitivities consistent with fresh construction. Also checks
-# argument validation and cache invalidation semantics.
-
 @testset "update_fmax! correctness" begin
 
     net_data = load_test_case("case14.m")
@@ -139,7 +131,7 @@
     end
 
     # =========================================================================
-    @testset "VJP :lmp/:fmax finite-difference consistency after update_fmax!" begin
+    @testset "VJP :lmp/:fmax finite difference consistency after update_fmax!" begin
         dc_net = DCNetwork(net_data)
         d = calc_demand_vector(net_data)
         fmax_base = copy(dc_net.fmax)
@@ -159,7 +151,7 @@
         work = zeros(kkt_dims(prob))
         vjp!(grad_vjp, prob, :lmp, :fmax, w; work=work)
 
-        # Finite-difference check on 3 representative branches (binding-ish)
+        # Finite difference check on 3 representative branches (binding-ish)
         fd = zeros(m)
         δ = 1e-5
         for e in 1:min(3, m)
@@ -220,7 +212,7 @@
         @test prob.cache.dz_dfmax === nothing
         @test prob.cache.kkt_factor === nothing
 
-        # But b_r_factor (topology-dependent) must be preserved (fmax doesn't change topology)
+        # But b_r_factor (topology dependent) must be preserved (fmax doesn't change topology)
         @test prob.cache.b_r_factor !== nothing
     end
 

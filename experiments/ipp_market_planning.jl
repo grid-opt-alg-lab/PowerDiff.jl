@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # =============================================================================
-# IPP Market-Aware Transmission Upgrade Planning via Frank-Wolfe
+# IPP market aware transmission upgrade planning via Frank-Wolfe
 # =============================================================================
 #
 # Bilevel program (weighted-hub IPP formulation):
@@ -38,7 +38,7 @@
 #   U = { u : u_e ≥ 0,  Σ u_e ≤ B,  u_e ≤ Δmax_e }
 #
 # Per FW iteration: update_fmax! → solve! → vjp!(:lmp, :fmax, w) → LMO → step.
-# Matrix-free gradient: O(nnz) per iteration via PowerDiff's transpose KKT solve.
+# Matrix free gradient: O(nnz) per iteration via PowerDiff's transpose KKT solve.
 
 using PowerDiff
 using PowerModels
@@ -141,7 +141,7 @@ end
 
 Solve the baseline OPF and pick:
 - `ipp_node` (orig ID) = generator bus with the lowest baseline LMP (the most
-  congested-out cheap generator — the canonical IPP whose value shows up as a
+  most congested out cheap generator — the canonical IPP whose value shows up as a
   basis discount).
 - `hub_nodes` (orig IDs):
     * if `by_zone=true`: highest-LMP bus in each of the top-k_hub zones
@@ -149,7 +149,7 @@ Solve the baseline OPF and pick:
     * else: top-`k_hub` highest-LMP buses overall (excluding ipp_node).
 - `hub_weights` = uniform 1/k_hub.
 
-Generator-bearing buses are derived from `net.G_inc` (n×k sparse, entry
+Generator bearing buses are derived from `net.G_inc` (n×k sparse, entry
 [bus_seq, gen_seq] = 1 ⇒ generator at that bus).
 """
 function pick_default_ipp_hub(prob::DCOPFProblem;
@@ -157,7 +157,7 @@ function pick_default_ipp_hub(prob::DCOPFProblem;
                               raw::Union{Nothing,AbstractDict}=nothing,
                               by_zone::Bool=false)
     net = prob.network
-    sol = with_logger(SimpleLogger(stderr, Logging.Error)) do
+    sol = with_logger(SimpleLogger(stderr, Logging.Warn)) do
         PowerDiff.solve!(prob)
     end
     λ = sol.nu_bal
@@ -165,7 +165,7 @@ function pick_default_ipp_hub(prob::DCOPFProblem;
     # Sequential bus indices that have at least one generator.
     gen_seqs = unique(rowvals(net.G_inc))
     isempty(gen_seqs) && error("Network has no generators")
-    # IPP at the gen-bearing bus with the lowest baseline LMP.
+    # IPP at the gen bearing bus with the lowest baseline LMP.
     ipp_seq  = gen_seqs[argmin(λ[gen_seqs])]
     ipp_orig = net.id_map.bus_ids[ipp_seq]
 
@@ -237,15 +237,13 @@ Frank-Wolfe outer loop. Mutates `prob` (via `update_fmax!`) and returns
 - `capex_α > 0`: adds α·c'(fmax-fmax_0) penalty to the objective and gradient.
 - `demand_periods::Vector{Vector{Float64}}`: averages gradient and objective
   across periods using `update_demand!`. Each entry is a length-`n` demand
-  vector. If `nothing`, runs a single-period FW with the prob's current `d`.
+  vector. If `nothing`, runs a single period FW with the prob's current `d`.
 """
-# Re-solve the OPF at fmax_try (mutates prob) and return scalar objective.
-# Used by the Armijo line search inside fw_ipp!.
 function _eval_obj!(prob, st, fmax_try, capex_α, capex_c, demand_periods)
     update_fmax!(prob, fmax_try)
     obj = 0.0
     if demand_periods === nothing
-        sol = with_logger(SimpleLogger(stderr, Logging.Error)) do
+        sol = with_logger(SimpleLogger(stderr, Logging.Warn)) do
             PowerDiff.solve!(prob)
         end
         obj = dot(st.w, sol.nu_bal)
@@ -253,7 +251,7 @@ function _eval_obj!(prob, st, fmax_try, capex_α, capex_c, demand_periods)
         T = length(demand_periods)
         for t in 1:T
             update_demand!(prob, demand_periods[t])
-            sol = with_logger(SimpleLogger(stderr, Logging.Error)) do
+            sol = with_logger(SimpleLogger(stderr, Logging.Warn)) do
                 PowerDiff.solve!(prob)
             end
             obj += dot(st.w, sol.nu_bal) / T
@@ -272,6 +270,9 @@ function fw_ipp!(prob::DCOPFProblem, st::IPPState;
                   step_rule::Symbol=:armijo,   # :armijo (backtrack) or :simple (2/(k+2))
                   verbose::Bool=true)
     m = prob.network.m
+    # Save the caller's demand so we can restore it on exit when the multi
+    # period branch overwrites prob.d via update_demand!.
+    d_entry = demand_periods === nothing ? nothing : copy(prob.d)
     fmax_k = copy(st.fmax_0)
     update_fmax!(prob, fmax_k)
 
@@ -288,7 +289,7 @@ function fw_ipp!(prob::DCOPFProblem, st::IPPState;
     Δnorm_hist = Float64[]
     fmax_hist = zeros(m, 0)
 
-    # Best iterate tracking (handles non-convex w'λ from active-set jumps)
+    # Best iterate tracking (handles non-convex w'λ from active set jumps)
     fmax_best = copy(fmax_k)
     obj_best  = Inf
 
@@ -302,23 +303,23 @@ function fw_ipp!(prob::DCOPFProblem, st::IPPState;
         obj = 0.0
         fill!(g, 0.0)
         if demand_periods === nothing
-            sol = with_logger(SimpleLogger(stderr, Logging.Error)) do
+            sol = with_logger(SimpleLogger(stderr, Logging.Warn)) do
                 PowerDiff.solve!(prob)
             end
             obj = dot(st.w, sol.nu_bal)
-            with_logger(SimpleLogger(stderr, Logging.Error)) do
+            with_logger(SimpleLogger(stderr, Logging.Warn)) do
                 vjp!(g, prob, :lmp, :fmax, st.w; work=work)
             end
         else
             T = length(demand_periods)
             for t in 1:T
                 update_demand!(prob, demand_periods[t])
-                sol = with_logger(SimpleLogger(stderr, Logging.Error)) do
+                sol = with_logger(SimpleLogger(stderr, Logging.Warn)) do
                     PowerDiff.solve!(prob)
                 end
                 obj += dot(st.w, sol.nu_bal) / T
                 fill!(g_t, 0.0)
-                with_logger(SimpleLogger(stderr, Logging.Error)) do
+                with_logger(SimpleLogger(stderr, Logging.Warn)) do
                     vjp!(g_t, prob, :lmp, :fmax, st.w; work=work)
                 end
                 @. g += g_t / T
@@ -355,19 +356,20 @@ function fw_ipp!(prob::DCOPFProblem, st::IPPState;
             break
         end
 
-        # Step
+        # Step. Armijo: backtrack from γ_full = 2/(k+2), halving until obj
+        # decreases. Handles active set kinks where the linearization stops
+        # being valid mid step.
         γ = if step_rule == :armijo
-            # Backtrack from γ_full = 2/(k+2). Halve until obj decreases (or
-            # we exhaust 8 backtracks). This handles active-set kinks where
-            # the linearization stops being valid mid-step.
             γ_try = 2.0 / (k + 2)
             best_γ = γ_try
             best_δ = +Inf
+            descent = false
             for _ in 1:8
                 @. fmax_try = (1 - γ_try) * fmax_k + γ_try * v
                 obj_try = _eval_obj!(prob, st, fmax_try, capex_α, capex_c, demand_periods)
-                if obj_try < obj + 0.0
+                if obj_try < obj
                     best_γ = γ_try; best_δ = obj_try - obj
+                    descent = true
                     break
                 else
                     if obj_try - obj < best_δ
@@ -376,6 +378,7 @@ function fw_ipp!(prob::DCOPFProblem, st::IPPState;
                     γ_try /= 2.0
                 end
             end
+            descent || @warn "Armijo backtrack exhausted at iter $k without descent; taking smallest γ" γ=best_γ Δobj=best_δ
             best_γ
         else
             2.0 / (k + 2)
@@ -392,8 +395,11 @@ function fw_ipp!(prob::DCOPFProblem, st::IPPState;
         update_fmax!(prob, fmax_k)
     end
 
-    # Restore prob to best iterate
+    # Restore prob to best iterate; restore caller demand if multi period.
     update_fmax!(prob, fmax_best)
+    if d_entry !== nothing
+        update_demand!(prob, d_entry)
+    end
     invalidate!(prob.cache)
 
     history = (
@@ -462,7 +468,7 @@ function run_tier1(; outdir::String=@__DIR__)
     d   = [0.05, 0.05, 1.0]
     prob = DCOPFProblem(net, d)
 
-    sol = with_logger(SimpleLogger(stderr, Logging.Error)) do
+    sol = with_logger(SimpleLogger(stderr, Logging.Warn)) do
         PowerDiff.solve!(prob)
     end
     lmp_base = copy(sol.nu_bal)
@@ -493,23 +499,23 @@ function run_tier1(; outdir::String=@__DIR__)
         fmax_p = copy(fmax_baseline)   # always perturb from the baseline, not last iterate
         fmax_p[e] += ε
         update_fmax!(prob, fmax_p)
-        sol_p = with_logger(SimpleLogger(stderr, Logging.Error)) do
+        sol_p = with_logger(SimpleLogger(stderr, Logging.Warn)) do
             PowerDiff.solve!(prob)
         end
         fd[:, e] = (sol_p.nu_bal .- lmp_base) ./ ε
     end
     update_fmax!(prob, fmax_baseline)  # restore
-    with_logger(SimpleLogger(stderr, Logging.Error)) do
+    with_logger(SimpleLogger(stderr, Logging.Warn)) do
         PowerDiff.solve!(prob)
     end
 
-    println("\nFinite-difference reference:")
+    println("\nFinite difference reference:")
     show(stdout, "text/plain", round.(fd, digits=4)); println()
     err = maximum(abs.(Matrix(dlmp_dfmax) .- fd))
     @printf("\nmax |analytical − FD| = %.3e   (tol 1e-3)\n", err)
     err < 1e-3 || @warn "Tier 1 FD verification failed" err
 
-    # Reset cache (so the in-loop VJP takes the matrix-free path, not the cached matrix)
+    # Reset cache (so the in loop VJP takes the matrix free path, not the cached matrix)
     invalidate!(prob.cache)
 
     # ── Frank-Wolfe ────────────────────────────────────────────────────────────
@@ -528,7 +534,7 @@ function run_tier1(; outdir::String=@__DIR__)
                 e, st.fmax_0[e], fmax_star[e], fmax_star[e]-st.fmax_0[e])
     end
 
-    sol_star = with_logger(SimpleLogger(stderr, Logging.Error)) do
+    sol_star = with_logger(SimpleLogger(stderr, Logging.Warn)) do
         PowerDiff.solve!(prob)
     end
     println("\nLMPs (baseline → optimized):")
@@ -561,7 +567,7 @@ function run_tier2(; outdir::String=@__DIR__,
                      hub_nodes::Union{Nothing,Vector{Int}}=nothing,
                      fmax_scale::Float64=0.10)
     println("\n" * "="^65)
-    println("Tier 2: case14, rate_a × $(fmax_scale)  (single-period + capex Pareto)")
+    println("Tier 2: case14, rate_a × $(fmax_scale)  (single period + capex Pareto)")
     println("="^65)
 
     case_path = joinpath(dirname(pathof(PM)), "..", "test", "data", "matpower", "case14.m")
@@ -575,10 +581,9 @@ function run_tier2(; outdir::String=@__DIR__,
         br["rate_a"] *= fmax_scale
     end
     net = DCNetwork(raw)
-    # Break generator degeneracy (per MEMORY.md and experiments/lmp_switching_fw.jl
-    # pattern). Without this the KKT system is singular at the optimum (multiple
-    # gens at upper bound), Tikhonov regularization kicks in, and the matrix-free
-    # VJP returns essentially zero gradient.
+    # Break generator degeneracy. Without this the KKT system is singular at
+    # the optimum (multiple gens at upper bound), Tikhonov regularization kicks
+    # in, and the matrix free VJP returns essentially zero gradient.
     for i in eachindex(net.gmax)
         if net.gmax[i] > 0.01
             net.gmax[i] *= 3.0
@@ -603,7 +608,7 @@ function run_tier2(; outdir::String=@__DIR__,
                          B_frac=0.5, Δmax_factor=2.0)
 
     # Re-solve at fmax_0 to get baseline LMPs (pick_default_ipp_hub already solved once)
-    sol_base = with_logger(SimpleLogger(stderr, Logging.Error)) do
+    sol_base = with_logger(SimpleLogger(stderr, Logging.Warn)) do
         PowerDiff.solve!(prob)
     end
     lmp_base = copy(sol_base.nu_bal)
@@ -615,14 +620,14 @@ function run_tier2(; outdir::String=@__DIR__,
     println("  Baseline basis  w_i'λ = $(round(dot(st.w, lmp_base), digits=4))   (= λ_h - λ_i)")
     println("  Budget B = $(round(st.B, digits=3))")
 
-    # Reset cache so in-loop VJP is matrix-free
+    # Reset cache so in loop VJP is matrix free
     invalidate!(prob.cache)
 
     # ── Pure spread (capex_α = 0) ─────────────────────────────────────────────
     println("\nPure spread: min w'λ")
     fmax_star, hist = fw_ipp!(prob, st; max_iters=80, tol=1e-7)
 
-    sol_star = with_logger(SimpleLogger(stderr, Logging.Error)) do
+    sol_star = with_logger(SimpleLogger(stderr, Logging.Warn)) do
         PowerDiff.solve!(prob)
     end
 
@@ -649,7 +654,7 @@ function run_tier2(; outdir::String=@__DIR__,
     g_star = zeros(m); work = zeros(kkt_dims(prob))
     invalidate!(prob.cache)
     PowerDiff.solve!(prob)
-    with_logger(SimpleLogger(stderr, Logging.Error)) do
+    with_logger(SimpleLogger(stderr, Logging.Warn)) do
         vjp!(g_star, prob, :lmp, :fmax, st.w; work=work)
     end
     ε = 1e-5
@@ -658,7 +663,7 @@ function run_tier2(; outdir::String=@__DIR__,
         Δ[e] < 1e-6 && break
         fmax_p = copy(fmax_star); fmax_p[e] += ε
         update_fmax!(prob, fmax_p)
-        sol_p = with_logger(SimpleLogger(stderr, Logging.Error)) do
+        sol_p = with_logger(SimpleLogger(stderr, Logging.Warn)) do
             PowerDiff.solve!(prob)
         end
         fd_e = (dot(st.w, sol_p.nu_bal) - obj_star) / ε
@@ -680,11 +685,11 @@ function run_tier2(; outdir::String=@__DIR__,
     # Alternative: sweep capex weight α in `min wᵀλ + α·cᵀ(f̄−f̄₀)`. With
     # uniform `c=ones(m)`, α uniformly shifts the gradient — the LMO always
     # picks the same `argmin(g)` branch but stops committing once `g[e_star]+α
-    # ≥ 0`. Combined with active-set kinks, this gives a piecewise-constant
+    # ≥ 0`. Combined with active set kinks, this gives a piecewise-constant
     # Pareto with only a couple of distinct (Σ Δ, obj) "best iterates" — not
     # presentation-friendly. The capex_α machinery is still available in
     # `fw_ipp!` for callers that want it.
-    println("\nBudget-aware Pareto: sweep transmission budget B")
+    println("\nBudget aware Pareto: sweep transmission budget B")
     B_frac_grid = [0.015, 0.025, 0.04, 0.07, 0.15]
     spread_grid = Float64[]
     Δnorm_grid  = Float64[]
@@ -694,7 +699,7 @@ function run_tier2(; outdir::String=@__DIR__,
         B_α = B_frac * sum(st.fmax_0)
         st_B = IPPState(st; B=B_α)
         fmax_B, _ = fw_ipp!(prob, st_B; max_iters=80, tol=1e-7, verbose=false)
-        sol_B = with_logger(SimpleLogger(stderr, Logging.Error)) do
+        sol_B = with_logger(SimpleLogger(stderr, Logging.Warn)) do
             PowerDiff.solve!(prob)
         end
         push!(spread_grid, dot(st.w, sol_B.nu_bal))
@@ -731,7 +736,7 @@ function load_rts_gmlc()
 end
 
 """
-Read DAY_AHEAD_regional_Load.csv and compute, for each hour-of-day h ∈ 1:24,
+Read DAY_AHEAD_regional_Load.csv and compute, for each hour of day h ∈ 1:24,
 the mean total system load over the year. Return a 24-vector of multipliers
 (scaled so the annual mean = 1.0).
 """
@@ -765,7 +770,7 @@ function run_tier4(; outdir::String=@__DIR__,
         br["rate_a"] *= 0.5
     end
     net = DCNetwork(raw)
-    # Break gen degeneracy (per MEMORY.md / lmp_switching_fw.jl)
+    # Break gen degeneracy so the KKT system is non singular at the optimum.
     for i in eachindex(net.gmax)
         if net.gmax[i] > 0.01
             net.gmax[i] *= 1.5
@@ -789,7 +794,7 @@ function run_tier4(; outdir::String=@__DIR__,
     st = build_ipp_state(prob; ipp_node=ipp, hub_nodes=hubs, hub_weights=hub_w,
                          B_frac=0.3, Δmax_factor=2.0)
 
-    sol_base = with_logger(SimpleLogger(stderr, Logging.Error)) do
+    sol_base = with_logger(SimpleLogger(stderr, Logging.Warn)) do
         PowerDiff.solve!(prob)
     end
     lmp_base = copy(sol_base.nu_bal)
@@ -803,15 +808,15 @@ function run_tier4(; outdir::String=@__DIR__,
 
     invalidate!(prob.cache)
 
-    # ── Single-period (peak hour proxy = baseline d) ──────────────────────────
-    println("\nSingle-period FW:")
+    # ── Single period (peak hour proxy = baseline d) ──────────────────────────
+    println("\nSingle period FW:")
     t0 = time()
     fmax_star, hist = fw_ipp!(prob, st; max_iters=60, tol=1e-7)
     elapsed_single = time() - t0
-    println("\nSingle-period wall time: ", round(elapsed_single, digits=1), " s, ",
+    println("\nSingle period wall time: ", round(elapsed_single, digits=1), " s, ",
             length(hist.obj), " iters")
 
-    sol_star = with_logger(SimpleLogger(stderr, Logging.Error)) do
+    sol_star = with_logger(SimpleLogger(stderr, Logging.Warn)) do
         PowerDiff.solve!(prob)
     end
     Δ = fmax_star .- st.fmax_0
@@ -840,8 +845,8 @@ function run_tier4(; outdir::String=@__DIR__,
         return prob, st, fmax_star, hist
     end
 
-    # ── Multi-period (12 hour-of-day means from RTS-GMLC time series) ────────
-    println("\nMulti-period FW (12 representative hours from RTS-GMLC time series):")
+    # ── Multi period (12 hour of day means from RTS-GMLC time series) ────────
+    println("\nMulti period FW (12 representative hours from RTS-GMLC time series):")
     update_fmax!(prob, st.fmax_0); invalidate!(prob.cache)
 
     mults24 = rts_hourly_multipliers()
@@ -857,11 +862,11 @@ function run_tier4(; outdir::String=@__DIR__,
     fmax_star_mp, hist_mp = fw_ipp!(prob, st; max_iters=40, tol=1e-7,
                                      demand_periods=demand_periods)
     elapsed_mp = time() - t0
-    println("\nMulti-period wall time: ", round(elapsed_mp, digits=1), " s")
+    println("\nMulti period wall time: ", round(elapsed_mp, digits=1), " s")
 
     Δ_mp = fmax_star_mp .- st.fmax_0
     perm_mp = sortperm(Δ_mp; rev=true)
-    println("\nTop 8 upgraded branches (multi-period):")
+    println("\nTop 8 upgraded branches (multi period):")
     @printf("  Branch ID  fmax_0   fmax*    Δ        %% increase\n")
     cnt = 0
     for e in perm_mp
@@ -875,7 +880,7 @@ function run_tier4(; outdir::String=@__DIR__,
     # restore at peak hour for plotting
     update_fmax!(prob, fmax_star_mp); invalidate!(prob.cache)
     update_demand!(prob, d)
-    sol_mp_final = with_logger(SimpleLogger(stderr, Logging.Error)) do
+    sol_mp_final = with_logger(SimpleLogger(stderr, Logging.Warn)) do
         PowerDiff.solve!(prob)
     end
 
@@ -933,7 +938,6 @@ function plot_3bus(history, lmp_base, lmp_star, savepath::String;
            orientation=:horizontal, framevisible=false, nbanks=1,
            colgap=18, labelsize=12)
 
-    Δused = round(sum(lmp_star .- lmp_star) + 0.0, digits=2)  # placeholder unused; title below
     Label(fig[0, :], L"\text{3-bus}: \;\; \text{IPP}\,@\,\text{bus}\,%$(ipp_seq), \;\; H_i = %$(hub_seqs), \;\; \omega = [1.0]";
           fontsize=15, font=:bold)
 
@@ -962,7 +966,7 @@ function plot_results(history, prob, st::IPPState, lmp_base, lmp_star, fmax_star
     pos_gaps = max.(abs.(history.gap), 1e-12)
     ax_b = Axis(fig[1, 2]; xlabel="FW iteration  k",
                 ylabel=L"g(u_k)^{\!\top}\!(u_k - v_k)",
-                title=L"\text{(b)}\;\;\text{FW duality gap (active-set transitions cause spikes)}",
+                title=L"\text{(b)}\;\;\text{FW duality gap (active set transitions cause spikes)}",
                 yscale=log10)
     lines!(ax_b, iters, pos_gaps; color=:firebrick, linewidth=2)
     scatter!(ax_b, iters, pos_gaps; color=:firebrick, markersize=5)
@@ -1052,7 +1056,7 @@ function plot_pareto(B_grid, spread_grid, Δnorm_grid, savepath::String)
              strokecolor=:black, strokewidth=0.5)
 
     Colorbar(fig[1, 3], sc_a; label=L"\text{Budget}~B", width=12)
-    Label(fig[0, :], L"\text{case14: budget-aware Pareto frontier (premium}~\Pi_i = \lambda_i - \sum_{j \in H_i}\omega_j \lambda_j\text{)}";
+    Label(fig[0, :], L"\text{case14: budget aware Pareto frontier (premium}~\Pi_i = \lambda_i - \sum_{j \in H_i}\omega_j \lambda_j\text{)}";
           fontsize=14, font=:bold)
 
     save(savepath * ".pdf", fig)

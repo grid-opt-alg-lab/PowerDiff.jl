@@ -75,7 +75,7 @@ The [`DCOPFProblem`](@ref) maintains a `DCSensitivityCache` that avoids redundan
 
 Calling `calc_sensitivity` with different operands for the same parameter reuses the cached KKT solve. For example, computing both `:va` and `:pg` w.r.t. `:d` only solves the KKT system once.
 
-Cache invalidation happens automatically when `solve!`, `update_demand!`, or `update_switching!` is called.
+Cache invalidation happens automatically when `solve!`, `update_demand!`, `update_switching!`, or `update_fmax!` is called.
 
 ### ACSensitivityCache
 

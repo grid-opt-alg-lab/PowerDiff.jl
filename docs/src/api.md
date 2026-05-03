@@ -49,6 +49,7 @@ DCSensitivityCache
 solve!
 update_demand!
 update_switching!
+update_fmax!
 calc_demand_vector
 calc_susceptance_matrix
 calc_lmp
