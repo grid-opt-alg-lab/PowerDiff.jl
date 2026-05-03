@@ -18,15 +18,12 @@ CLAUDE.md
 # Development reference materials
 development/
 
+# macOS
+.DS_Store
+
 # Experiments and generated artifacts
 experiments/*
-# Allow the IPP market-planning demo (for Pablo Ruiz / NewGrid handoff)
+# Track only the runnable script and its environment.
 !experiments/Project.toml
-!experiments/IPP_DEMO_HANDOFF.md
 !experiments/ipp_market_planning.jl
-!experiments/ipp_pablo_deck.html
-!experiments/ipp_pablo_deck_beamer.md
-!experiments/ipp_market_planning_*.png
-!experiments/ipp_market_planning_*.pdf
-!experiments/ipp_history_*.csv
 presentation.html
