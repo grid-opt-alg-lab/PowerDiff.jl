@@ -623,7 +623,16 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         return nothing
     end
 
-    # va columns
+    # Column-wise CSC assembly of ∂K/∂z. The groups below mirror the block
+    # formulas from the original assignment form while avoiding temporary
+    # SparseMatrixCSC diagonals and structural setindex! insertions.
+
+    # va columns:
+    # ∂K_γ_lb/∂θ = Diag(γ_lb .* sw) * A
+    # ∂K_γ_ub/∂θ = -Diag(γ_ub .* sw) * A
+    # ∂K_power_bal/∂θ = -B
+    # ∂K_flow_def/∂θ = -W*A, where W = Diag(-b .* sw)
+    # ∂K_ref/∂θ_ref = 1
     @inbounds for j in 1:n
         start_col!(idx.va[j])
         for p in nzrange(A, j)
@@ -646,7 +655,11 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         j == ref_bus && _push_csc_entry!(rowval, nzval, idx.η, 1.0)
     end
 
-    # pg columns
+    # pg columns:
+    # ∂K_g/∂g = 2*Diag(cq)
+    # ∂K_ρ_lb/∂g = Diag(ρ_lb)
+    # ∂K_ρ_ub/∂g = -Diag(ρ_ub)
+    # ∂K_power_bal/∂g = G_inc
     @inbounds for j in 1:k
         start_col!(idx.pg[j])
         _push_csc_entry!(rowval, nzval, idx.pg[j], 2 * cq[j])
@@ -657,7 +670,11 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         end
     end
 
-    # f columns
+    # f columns:
+    # ∂K_f/∂f = τ²*I
+    # ∂K_λ_lb/∂f = Diag(λ_lb)
+    # ∂K_λ_ub/∂f = -Diag(λ_ub)
+    # ∂K_flow_def/∂f = I
     @inbounds for e in 1:m
         start_col!(idx.f[e])
         _push_csc_entry!(rowval, nzval, idx.f[e], tau^2)
@@ -666,7 +683,10 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         _push_csc_entry!(rowval, nzval, idx.nu_flow[e], 1.0)
     end
 
-    # psh columns
+    # psh columns:
+    # ∂K_μ_lb/∂psh = Diag(μ_lb), except fixed zero-shed buses use I
+    # ∂K_μ_ub/∂psh = -Diag(μ_ub), except fixed zero-shed buses omit this term
+    # ∂K_power_bal/∂psh = I
     @inbounds for i in 1:n
         start_col!(idx.psh[i])
         if _is_fixed_zero_shed(d[i])
@@ -678,7 +698,11 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         _push_csc_entry!(rowval, nzval, idx.nu_bal[i], 1.0)
     end
 
-    # lambda columns
+    # lambda columns:
+    # ∂K_f/∂λ_lb = -I
+    # ∂K_λ_lb/∂λ_lb = Diag(f + fmax)
+    # ∂K_f/∂λ_ub = I
+    # ∂K_λ_ub/∂λ_ub = Diag(fmax - f)
     @inbounds for e in 1:m
         start_col!(idx.lam_lb[e])
         _push_csc_entry!(rowval, nzval, idx.f[e], -1.0)
@@ -690,7 +714,11 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         _push_csc_entry!(rowval, nzval, idx.lam_ub[e], fmax[e] - f[e])
     end
 
-    # gamma columns
+    # gamma columns:
+    # ∂K_θ/∂γ_lb = -A' * Diag(sw)
+    # ∂K_γ_lb/∂γ_lb = Diag(sw .* (A*θ - angmin))
+    # ∂K_θ/∂γ_ub = A' * Diag(sw)
+    # ∂K_γ_ub/∂γ_ub = Diag(sw .* (angmax - A*θ))
     @inbounds for e in 1:m
         start_col!(idx.gamma_lb[e])
         for p in A_rowptr[e]:(A_rowptr[e + 1] - 1)
@@ -706,7 +734,11 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         _push_csc_entry!(rowval, nzval, idx.gamma_ub[e], sw[e] * (angmax[e] - Aθ[e]))
     end
 
-    # rho columns
+    # rho columns:
+    # ∂K_g/∂ρ_lb = -I
+    # ∂K_ρ_lb/∂ρ_lb = Diag(g - gmin)
+    # ∂K_g/∂ρ_ub = I
+    # ∂K_ρ_ub/∂ρ_ub = Diag(gmax - g)
     @inbounds for j in 1:k
         start_col!(idx.rho_lb[j])
         _push_csc_entry!(rowval, nzval, idx.pg[j], -1.0)
@@ -718,7 +750,11 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         _push_csc_entry!(rowval, nzval, idx.rho_ub[j], gmax[j] - pg[j])
     end
 
-    # mu columns
+    # mu columns:
+    # ∂K_psh/∂μ_lb = -I
+    # ∂K_μ_lb/∂μ_lb = Diag(psh), except fixed zero-shed buses omit this term
+    # ∂K_psh/∂μ_ub = I
+    # ∂K_μ_ub/∂μ_ub = Diag(d - psh), except fixed zero-shed buses use I
     @inbounds for i in 1:n
         start_col!(idx.mu_lb[i])
         _push_csc_entry!(rowval, nzval, idx.psh[i], -1.0)
@@ -734,7 +770,10 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         end
     end
 
-    # nu_bal columns
+    # nu_bal columns:
+    # ∂K_θ/∂ν_bal = B'
+    # ∂K_g/∂ν_bal = -G_inc'
+    # ∂K_psh/∂ν_bal = -I
     @inbounds for i in 1:n
         start_col!(idx.nu_bal[i])
         for p in nzrange(B_mat, i)
@@ -746,7 +785,9 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         _push_csc_entry!(rowval, nzval, idx.psh[i], -1.0)
     end
 
-    # nu_flow columns
+    # nu_flow columns:
+    # ∂K_θ/∂ν_flow = (W*A)'
+    # ∂K_f/∂ν_flow = -I
     @inbounds for e in 1:m
         start_col!(idx.nu_flow[e])
         for p in A_rowptr[e]:(A_rowptr[e + 1] - 1)
@@ -755,7 +796,8 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         _push_csc_entry!(rowval, nzval, idx.f[e], -1.0)
     end
 
-    # eta column
+    # eta column:
+    # ∂K_θ/∂η = e_ref
     start_col!(idx.η)
     _push_csc_entry!(rowval, nzval, idx.va[ref_bus], 1.0)
     colptr[dim + 1] = length(rowval) + 1
