@@ -1,7 +1,7 @@
 name: Benchmark this PR
 
 on:
-  pull_request_target:
+  pull_request:
     branches: [main]
 
 permissions:
@@ -16,7 +16,7 @@ jobs:
   benchmark:
     runs-on: ubuntu-latest
     steps:
-      - uses: MilesCranmer/AirspeedVelocity.jl@action-v1
+      - uses: MilesCranmer/AirspeedVelocity.jl@315c11b51ceee8ebd6063d70cff6ae499a040d28
         with:
           julia-version: '1'
           mode: 'time,memory'

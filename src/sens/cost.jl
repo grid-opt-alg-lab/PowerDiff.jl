@@ -33,10 +33,11 @@ Only the stationarity condition for g depends on cl:
   dK_g/dcl = I_k (identity matrix)
 """
 function calc_kkt_jacobian_cost_linear(net::DCNetwork)
+    # Use getfield because DCNetwork overloads getproperty for field aliases.
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim = 5n + 6m + 3k + 1
+    dim = kkt_dims(n, m, k)
     idx = kkt_indices(n, m, k)
 
     colptr = Vector{Int}(undef, k + 1)
@@ -87,11 +88,12 @@ Only the stationarity condition for g depends on cq:
 So dK_g/dcq = 2*Diagonal(g) evaluated at the solution.
 """
 function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem, sol::DCOPFSolution)
+    # Use getfield because DC OPF types overload getproperty for field aliases.
     net = getfield(prob, :network)
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim = 5n + 6m + 3k + 1
+    dim = kkt_dims(n, m, k)
     idx = kkt_indices(n, m, k)
 
     g = getfield(sol, :pg)

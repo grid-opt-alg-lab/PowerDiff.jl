@@ -48,11 +48,12 @@ Therefore:
 - dK_lambda_ub/dfmax = Diag(lambda_ub)
 """
 function calc_kkt_jacobian_flowlimit(prob::DCOPFProblem, sol::DCOPFSolution)
+    # Use getfield because DC OPF types overload getproperty for field aliases.
     net = getfield(prob, :network)
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim = 5n + 6m + 3k + 1
+    dim = kkt_dims(n, m, k)
     idx = kkt_indices(n, m, k)
 
     lambda_lb = getfield(sol, :lam_lb)

@@ -285,11 +285,14 @@ The KKT system includes:
 Total: 5n + 6m + 3k + 1
 """
 kkt_dims(prob::DCOPFProblem) = kkt_dims(prob.network)
+kkt_dims(n::Int, m::Int, k::Int) = 5n + 6m + 3k + 1
 
 function kkt_dims(net::DCNetwork)
-    n, m, k = net.n, net.m, net.k
+    n = getfield(net, :n)
+    m = getfield(net, :m)
+    k = getfield(net, :k)
     # va(n) + pg(k) + f(m) + psh(n) + lam_lb(m) + lam_ub(m) + gamma_lb(m) + gamma_ub(m) + rho_lb(k) + rho_ub(k) + mu_lb(n) + mu_ub(n) + nu_bal(n) + nu_flow(m) + ref(1)
-    return 5n + 6m + 3k + 1
+    return kkt_dims(n, m, k)
 end
 
 """
@@ -548,6 +551,9 @@ end
     return nothing
 end
 
+# SparseArrays provides fast column iteration for SparseMatrixCSC, but not row
+# iteration on the lazy transpose. This cache gives row-wise access without
+# materializing sparse(transpose(M)) in the KKT hot path.
 function _sparse_row_storage(M::SparseMatrixCSC)
     nrow = size(M, 1)
     rows, cols, vals = findnz(M)
@@ -573,9 +579,12 @@ function _sparse_row_storage(M::SparseMatrixCSC)
 end
 
 function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem, sol::DCOPFSolution)
+    # Use getfield in this hot path because these types overload getproperty
+    # for Unicode aliases, which obscures concrete field types from inference.
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
+    dim = kkt_dims(n, m, k)
     A = getfield(net, :A)
     G_inc = getfield(net, :G_inc)
     b = getfield(net, :b)
@@ -588,7 +597,6 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     angmax = getfield(net, :angmax)
     ref_bus = getfield(net, :ref_bus)
     tau = getfield(net, :tau)
-    dim = 5n + 6m + 3k + 1
     va = getfield(sol, :va)
     pg = getfield(sol, :pg)
     f = getfield(sol, :f)
@@ -817,7 +825,7 @@ function calc_kkt_jacobian_demand(net::DCNetwork, d::AbstractVector, sol::DCOPFS
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim = 5n + 6m + 3k + 1
+    dim = kkt_dims(n, m, k)
     idx = kkt_indices(n, m, k)
     mu_ub = getfield(sol, :mu_ub)
 
