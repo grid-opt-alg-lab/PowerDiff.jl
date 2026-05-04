@@ -55,6 +55,71 @@ using LaTeXStrings
 const PM = PowerModels
 PM.silence()
 
+const DEFAULT_OUTPUT_DIR = joinpath(@__DIR__, "output")
+const DEFAULT_PAPER_TIERS = (1, 2)
+const DEFAULT_RNG_SEED = 42
+const TIER1_FD_TOL = 1e-3
+const TIER1_FW_MAX_ITERS = 10
+const TIER1_FW_TOL = 1e-8
+const TIER2_FMAX_SCALE = 0.10
+const TIER2_FW_MAX_ITERS = 80
+const TIER2_FW_TOL = 1e-7
+const TIER2_B_FRAC_GRID = [0.015, 0.025, 0.04, 0.07, 0.15]
+const TIER4_FW_MAX_ITERS = 60
+const TIER4_MULTI_PERIOD_FW_MAX_ITERS = 40
+const TIER4_FW_TOL = 1e-7
+
+function ensure_outdir(outdir::AbstractString)
+    mkpath(outdir)
+    return String(outdir)
+end
+
+function parse_tiers(value::AbstractString)
+    tiers = Int[]
+    for item in split(value, ',')
+        stripped = strip(item)
+        isempty(stripped) && continue
+        push!(tiers, parse(Int, stripped))
+    end
+    isempty(tiers) && error("--tiers must include at least one tier")
+    all(t -> t in (1, 2, 4), tiers) || error("--tiers supports only 1, 2, and 4")
+    return Tuple(tiers)
+end
+
+function parse_cli_args(args::Vector{String})
+    tiers = DEFAULT_PAPER_TIERS
+    outdir = DEFAULT_OUTPUT_DIR
+    include_rts = false
+
+    i = 1
+    while i <= length(args)
+        arg = args[i]
+        if arg == "--include-rts"
+            include_rts = true
+        elseif startswith(arg, "--tiers=")
+            tiers = parse_tiers(split(arg, "=", limit=2)[2])
+        elseif arg == "--tiers"
+            i == length(args) && error("--tiers requires a comma-separated value")
+            i += 1
+            tiers = parse_tiers(args[i])
+        elseif startswith(arg, "--outdir=")
+            outdir = split(arg, "=", limit=2)[2]
+        elseif arg == "--outdir"
+            i == length(args) && error("--outdir requires a path")
+            i += 1
+            outdir = args[i]
+        else
+            error("Unknown argument: $arg")
+        end
+        i += 1
+    end
+
+    if include_rts && !(4 in tiers)
+        tiers = Tuple(vcat(collect(tiers), 4))
+    end
+    return (; tiers, outdir)
+end
+
 # =============================================================================
 # IPP state
 # =============================================================================
@@ -427,6 +492,18 @@ function write_history_csv(history, path::String)
     end
 end
 
+function write_case14_pareto_csv(path::String, B_grid, Δnorm_grid, spread_grid,
+                                 ipp_lmp_grid, hub_lmp_grid)
+    open(path, "w") do io
+        println(io, "budget,total_upgrade,basis,ipp_premium,ipp_lmp,hub_lmp")
+        for j in eachindex(B_grid)
+            @printf(io, "%.10f,%.10f,%.10f,%.10f,%.10f,%.10f\n",
+                    B_grid[j], Δnorm_grid[j], spread_grid[j], -spread_grid[j],
+                    ipp_lmp_grid[j], hub_lmp_grid[j])
+        end
+    end
+end
+
 # =============================================================================
 # Tier 1: 3-bus pedagogical demo
 # =============================================================================
@@ -459,7 +536,8 @@ function build_3bus()
     return net
 end
 
-function run_tier1(; outdir::String=@__DIR__)
+function run_tier1(; outdir::String=DEFAULT_OUTPUT_DIR)
+    outdir = ensure_outdir(outdir)
     println("\n" * "="^65)
     println("Tier 1: 3-bus pedagogical demo")
     println("="^65)
@@ -512,8 +590,8 @@ function run_tier1(; outdir::String=@__DIR__)
     println("\nFinite difference reference:")
     show(stdout, "text/plain", round.(fd, digits=4)); println()
     err = maximum(abs.(Matrix(dlmp_dfmax) .- fd))
-    @printf("\nmax |analytical − FD| = %.3e   (tol 1e-3)\n", err)
-    err < 1e-3 || @warn "Tier 1 FD verification failed" err
+    @printf("\nmax |analytical − FD| = %.3e   (tol %.0e)\n", err, TIER1_FD_TOL)
+    err < TIER1_FD_TOL || @warn "Tier 1 FD verification failed" err
 
     # Reset cache (so the in loop VJP takes the matrix free path, not the cached matrix)
     invalidate!(prob.cache)
@@ -525,7 +603,7 @@ function run_tier1(; outdir::String=@__DIR__)
     st = IPPState(copy(prob.network.fmax), [2.0, 2.0], 1.5, st_auto.H, st_auto.w,
                   st_auto.ipp_node, st_auto.ipp_seq, st_auto.H_seq, st_auto.ω)
     @assert st.w == [-1.0, 0.0, +1.0] "3-bus weight vector mismatch: $(st.w)"
-    fmax_star, hist = fw_ipp!(prob, st; max_iters=10, tol=1e-8)
+    fmax_star, hist = fw_ipp!(prob, st; max_iters=TIER1_FW_MAX_ITERS, tol=TIER1_FW_TOL)
 
     println("\nUpgrade plan:")
     @printf("  Branch  fmax_0   fmax*    Δ\n")
@@ -562,10 +640,11 @@ end
 # Tier 2: case14
 # =============================================================================
 
-function run_tier2(; outdir::String=@__DIR__,
+function run_tier2(; outdir::String=DEFAULT_OUTPUT_DIR,
                      ipp_node::Union{Nothing,Int}=nothing,
                      hub_nodes::Union{Nothing,Vector{Int}}=nothing,
-                     fmax_scale::Float64=0.10)
+                     fmax_scale::Float64=TIER2_FMAX_SCALE)
+    outdir = ensure_outdir(outdir)
     println("\n" * "="^65)
     println("Tier 2: case14, rate_a × $(fmax_scale)  (single period + capex Pareto)")
     println("="^65)
@@ -625,7 +704,7 @@ function run_tier2(; outdir::String=@__DIR__,
 
     # ── Pure spread (capex_α = 0) ─────────────────────────────────────────────
     println("\nPure spread: min w'λ")
-    fmax_star, hist = fw_ipp!(prob, st; max_iters=80, tol=1e-7)
+    fmax_star, hist = fw_ipp!(prob, st; max_iters=TIER2_FW_MAX_ITERS, tol=TIER2_FW_TOL)
 
     sol_star = with_logger(SimpleLogger(stderr, Logging.Warn)) do
         PowerDiff.solve!(prob)
@@ -690,27 +769,39 @@ function run_tier2(; outdir::String=@__DIR__,
     # presentation-friendly. The capex_α machinery is still available in
     # `fw_ipp!` for callers that want it.
     println("\nBudget aware Pareto: sweep transmission budget B")
-    B_frac_grid = [0.015, 0.025, 0.04, 0.07, 0.15]
+    B_frac_grid = TIER2_B_FRAC_GRID
     spread_grid = Float64[]
     Δnorm_grid  = Float64[]
     B_grid      = Float64[]
+    fmax_grid   = zeros(m, length(B_frac_grid))
+    ipp_lmp_grid = Float64[]
+    hub_lmp_grid = Float64[]
     for B_frac in B_frac_grid
         update_fmax!(prob, st.fmax_0); invalidate!(prob.cache)
         B_α = B_frac * sum(st.fmax_0)
         st_B = IPPState(st; B=B_α)
-        fmax_B, _ = fw_ipp!(prob, st_B; max_iters=80, tol=1e-7, verbose=false)
+        fmax_B, _ = fw_ipp!(prob, st_B; max_iters=TIER2_FW_MAX_ITERS, tol=TIER2_FW_TOL, verbose=false)
         sol_B = with_logger(SimpleLogger(stderr, Logging.Warn)) do
             PowerDiff.solve!(prob)
         end
         push!(spread_grid, dot(st.w, sol_B.nu_bal))
         push!(Δnorm_grid, sum(fmax_B .- st.fmax_0))
         push!(B_grid, B_α)
+        fmax_grid[:, length(B_grid)] .= fmax_B
+        push!(ipp_lmp_grid, sol_B.nu_bal[st.ipp_seq])
+        push!(hub_lmp_grid, dot(st.ω, sol_B.nu_bal[st.H_seq]))
         @printf("  B_frac = %4.2f (B = %5.2f):  Σ Δ = %.3f,  w_i'λ = %+.4f,  IPP premium = %+.4f\n",
                 B_frac, B_α, Δnorm_grid[end], spread_grid[end], -spread_grid[end])
     end
 
     plot_pareto(B_grid, spread_grid, Δnorm_grid,
                 joinpath(outdir, "ipp_market_planning_case14_pareto"))
+    plot_case14_market_story(prob, st, lmp_base, sol_base.f, sol_star.nu_bal, sol_star.f,
+                             fmax_star, B_grid, spread_grid, Δnorm_grid, fmax_grid,
+                             ipp_lmp_grid, hub_lmp_grid,
+                             joinpath(outdir, "ipp_market_planning_case14_story"))
+    write_case14_pareto_csv(joinpath(outdir, "ipp_pareto_case14.csv"),
+                            B_grid, Δnorm_grid, spread_grid, ipp_lmp_grid, hub_lmp_grid)
 
     # restore prob to fmax_star for downstream
     update_fmax!(prob, fmax_star)
@@ -722,8 +813,8 @@ end
 # Tier 4: RTS-GMLC
 # =============================================================================
 
-const RTS_PATH = expanduser("~/Datasets/RTS-GMLC/RTS_Data/FormattedData/MATPOWER/RTS_GMLC.m")
-const RTS_LOAD_CSV = expanduser("~/Datasets/RTS-GMLC/RTS_Data/timeseries_data_files/Load/DAY_AHEAD_regional_Load.csv")
+const RTS_PATH = joinpath(homedir(), "Datasets", "RTS-GMLC", "RTS_Data", "FormattedData", "MATPOWER", "RTS_GMLC.m")
+const RTS_LOAD_CSV = joinpath(homedir(), "Datasets", "RTS-GMLC", "RTS_Data", "timeseries_data_files", "Load", "DAY_AHEAD_regional_Load.csv")
 
 function load_rts_gmlc()
     isfile(RTS_PATH) || error("RTS_GMLC.m not at $RTS_PATH")
@@ -755,14 +846,24 @@ function rts_hourly_multipliers()
     return mults ./ annual_mean
 end
 
-function run_tier4(; outdir::String=@__DIR__,
+function run_tier4(; outdir::String=DEFAULT_OUTPUT_DIR,
                      ipp_node::Union{Nothing,Int}=nothing,
                      hub_nodes::Union{Nothing,Vector{Int}}=nothing,
                      k_hub::Int=3,
                      run_multi_period::Bool=true)
+    outdir = ensure_outdir(outdir)
     println("\n" * "="^65)
     println("Tier 4: RTS-GMLC (73 buses, 120 branches)")
     println("="^65)
+
+    if !isfile(RTS_PATH)
+        @warn "Skipping tier 4 because RTS-GMLC data was not found" RTS_PATH
+        return nothing
+    end
+    if run_multi_period && !isfile(RTS_LOAD_CSV)
+        @warn "RTS load CSV was not found; running tier 4 single-period only" RTS_LOAD_CSV
+        run_multi_period = false
+    end
 
     raw = load_rts_gmlc()
     # Tighten flow limits so congestion is meaningful (RTS-GMLC ships generous limits)
@@ -811,7 +912,7 @@ function run_tier4(; outdir::String=@__DIR__,
     # ── Single period (peak hour proxy = baseline d) ──────────────────────────
     println("\nSingle period FW:")
     t0 = time()
-    fmax_star, hist = fw_ipp!(prob, st; max_iters=60, tol=1e-7)
+    fmax_star, hist = fw_ipp!(prob, st; max_iters=TIER4_FW_MAX_ITERS, tol=TIER4_FW_TOL)
     elapsed_single = time() - t0
     println("\nSingle period wall time: ", round(elapsed_single, digits=1), " s, ",
             length(hist.obj), " iters")
@@ -859,7 +960,7 @@ function run_tier4(; outdir::String=@__DIR__,
     println("  Hourly multipliers (12 periods): ", round.(mults24[sample_hours], digits=3))
 
     t0 = time()
-    fmax_star_mp, hist_mp = fw_ipp!(prob, st; max_iters=40, tol=1e-7,
+    fmax_star_mp, hist_mp = fw_ipp!(prob, st; max_iters=TIER4_MULTI_PERIOD_FW_MAX_ITERS, tol=TIER4_FW_TOL,
                                      demand_periods=demand_periods)
     elapsed_mp = time() - t0
     println("\nMulti period wall time: ", round(elapsed_mp, digits=1), " s")
@@ -1028,6 +1129,93 @@ function plot_results(history, prob, st::IPPState, lmp_base, lmp_star, fmax_star
     println("  Figure saved: $(savepath).{pdf,png}")
 end
 
+function plot_case14_market_story(prob, st::IPPState, lmp_base, f_base, lmp_star, f_star,
+                                  fmax_star, B_grid, spread_grid, Δnorm_grid,
+                                  fmax_grid, ipp_lmp_grid, hub_lmp_grid,
+                                  savepath::String)
+    set_theme!(theme_minimal())
+    net = prob.network
+    branch_ids = net.id_map.branch_ids
+    basis_base = dot(st.w, lmp_base)
+    premium_gain = basis_base .- spread_grid
+    hub_lmp_base = dot(st.ω, lmp_base[st.H_seq])
+
+    upgrade_grid = fmax_grid .- st.fmax_0
+    upgrade_score = vec(maximum(upgrade_grid; dims=2))
+    top = sortperm(upgrade_score; rev=true)
+    top = filter(e -> upgrade_score[e] > 1e-7, top)
+    if isempty(top)
+        top = collect(1:min(6, net.m))
+    else
+        top = top[1:min(6, length(top))]
+    end
+    top_labels = string.(branch_ids[top])
+
+    fig = Figure(size=(1180, 760))
+
+    ax_a = Axis(fig[1, 1];
+                xlabel=L"\text{Total upgrade used}\;\sum_e u_e\;[\mathrm{MW}]",
+                ylabel=L"\text{IPP premium improvement}\;\Delta\Pi_i\;[\$/\mathrm{MWh}]",
+                title=L"\text{(a) Market value of transmission upgrades}")
+    lines!(ax_a, [0.0; Δnorm_grid], [0.0; premium_gain]; color=:gray55, linewidth=2)
+    sc = scatter!(ax_a, Δnorm_grid, premium_gain; color=B_grid, colormap=:viridis,
+                  markersize=14, strokecolor=:black, strokewidth=0.5)
+
+    ax_b = Axis(fig[1, 2];
+                xlabel=L"\text{Upgrade budget}\;B\;[\mathrm{MW}]",
+                ylabel=L"\text{LMP}\;[\$/\mathrm{MWh}]",
+                title=L"\text{(b) Local and hub prices}")
+    p_ipp = lines!(ax_b, [0.0; B_grid], [lmp_base[st.ipp_seq]; ipp_lmp_grid];
+                   color=:darkorange, linewidth=2.5)
+    p_hub = lines!(ax_b, [0.0; B_grid], [hub_lmp_base; hub_lmp_grid];
+                   color=:firebrick, linewidth=2.5)
+    scatter!(ax_b, B_grid, ipp_lmp_grid; color=:darkorange, markersize=8)
+    scatter!(ax_b, B_grid, hub_lmp_grid; color=:firebrick, markersize=8)
+    Legend(fig[1, 2, TopRight()], [p_ipp, p_hub],
+           [L"\lambda_i\;\text{(IPP bus)}",
+            L"\sum_{j\in H_i}\omega_j\lambda_j\;\text{(hub basket)}"],
+           framevisible=false, labelsize=12)
+
+    ax_c = Axis(fig[2, 1];
+                xlabel=L"\text{Upgrade budget}\;B\;[\mathrm{MW}]",
+                ylabel=L"\text{Branch ID}",
+                yticks=(1:length(top), top_labels),
+                title=L"\text{(c) Upgrade allocation across budgets}")
+    upgrade_frac = upgrade_grid[top, :] ./ max.(st.fmax_0[top], eps())
+    hm = heatmap!(ax_c, B_grid, 1:length(top), upgrade_frac';
+                  colormap=:viridis)
+    Colorbar(fig[2, 1, Right()], hm; label="u/f0", width=12, labelsize=11)
+
+    ax_d = Axis(fig[2, 2];
+                xlabel=L"\text{Branch ID}",
+                ylabel=L"|f_e|/\overline{f}_e",
+                xticks=(1:length(top), top_labels),
+                title=L"\text{(d) Loading relief on upgraded lines}")
+    base_loading = abs.(f_base[top]) ./ max.(st.fmax_0[top], eps())
+    opt_loading = abs.(f_star[top]) ./ max.(fmax_star[top], eps())
+    x = collect(1:length(top))
+    b_base = barplot!(ax_d, x .- 0.18, base_loading; width=0.32, color=:gray70)
+    b_opt = barplot!(ax_d, x .+ 0.18, opt_loading; width=0.32, color=:steelblue)
+    hlines!(ax_d, [1.0]; color=:black, linestyle=:dash, linewidth=1.5)
+    Legend(fig[2, 2, TopRight()], [b_base, b_opt],
+           [L"\text{Baseline}", L"\text{After upgrade}"],
+           framevisible=false, labelsize=12)
+
+    Colorbar(fig[3, 1], sc; vertical=false, label=L"\text{Budget}\;B",
+             height=14, width=Relative(0.75))
+    Label(fig[0, :],
+          "case14 market-aware planning: price basis, asset upgrades, and congestion relief";
+          fontsize=15, font=:bold)
+
+    rowgap!(fig.layout, 18)
+    colgap!(fig.layout, 34)
+    rowsize!(fig.layout, 3, Relative(0.08))
+
+    save(savepath * ".pdf", fig)
+    save(savepath * ".png", fig; px_per_unit=2)
+    println("  Figure saved: $(savepath).{pdf,png}")
+end
+
 function plot_pareto(B_grid, spread_grid, Δnorm_grid, savepath::String)
     set_theme!(theme_minimal())
     fig = Figure(size=(960, 380))
@@ -1068,13 +1256,17 @@ end
 # main
 # =============================================================================
 
-function main(; tiers=[1, 2, 4])
-    Random.seed!(42)
-    1 in tiers && run_tier1()
-    2 in tiers && run_tier2()
-    4 in tiers && run_tier4()
+function main(; tiers=DEFAULT_PAPER_TIERS,
+                outdir::String=DEFAULT_OUTPUT_DIR,
+                rng_seed::Int=DEFAULT_RNG_SEED)
+    Random.seed!(rng_seed)
+    outdir = ensure_outdir(outdir)
+    println("Writing experiment outputs to: $outdir")
+    1 in tiers && run_tier1(; outdir)
+    2 in tiers && run_tier2(; outdir)
+    4 in tiers && run_tier4(; outdir)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    main()
+    main(; parse_cli_args(ARGS)...)
 end

@@ -26,4 +26,8 @@ experiments/*
 # Track only the runnable script and its environment.
 !experiments/Project.toml
 !experiments/ipp_market_planning.jl
+!experiments/output/
+experiments/output/*
+!experiments/output/ipp_market_planning_case14_story.pdf
+!experiments/output/ipp_market_planning_case14_story.png
 presentation.html
