@@ -31,9 +31,9 @@ Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerDiff.jl.git")
 ## Quick Start
 
 ```julia
-using PowerDiff, PowerModels
+using PowerDiff
 
-# Load network (make_basic_network is optional)
+# Load a MATPOWER v2 case into PowerDiff's typed representation
 net = parse_file("case14.m")
 dc_net = DCNetwork(net)
 d = calc_demand_vector(net)
@@ -59,12 +59,15 @@ See the [Getting Started guide](https://samueltalkington.com/research/powerdiff/
 - [Advanced Topics](https://samueltalkington.com/research/powerdiff/advanced/) — Type hierarchy, caching, solver configuration
 - [API Reference](https://samueltalkington.com/research/powerdiff/api/) — Full docstring reference
 
+## Input Format
+
+PowerDiff reads MATPOWER v2 `.m` files directly through `parse_file`. Convert other
+formats to MATPOWER before constructing PowerDiff networks.
+
 ## Dependencies
 
-- [PowerModels.jl](https://github.com/lanl-ansi/PowerModels.jl) — Power system modeling
 - [JuMP.jl](https://github.com/jump-dev/JuMP.jl) — Optimization modeling
 - [Ipopt.jl](https://github.com/jump-dev/Ipopt.jl) — Default solver for DC and AC OPF
-- [ForwardDiff.jl](https://github.com/JuliaDiff/ForwardDiff.jl) — Automatic differentiation
 
 ## License
 

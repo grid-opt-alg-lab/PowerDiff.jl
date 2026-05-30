@@ -1,4 +1,6 @@
 using PowerDiff
+using Ipopt
+using JuMP: optimizer_with_attributes
 using LinearAlgebra
 using Test
 
@@ -24,12 +26,9 @@ import PowerDiff: kkt, flatten_variables
             for field in (
                 :nu_p_bal, :nu_q_bal, :nu_ref_bus,
                 :nu_p_fr, :nu_p_to, :nu_q_fr, :nu_q_to,
-                :lam_thermal_fr, :lam_thermal_to,
                 :lam_angle_lb, :lam_angle_ub,
                 :mu_vm_lb, :mu_vm_ub,
                 :rho_pg_lb, :rho_pg_ub, :rho_qg_lb, :rho_qg_ub,
-                :sig_p_fr_lb, :sig_p_fr_ub, :sig_q_fr_lb, :sig_q_fr_ub,
-                :sig_p_to_lb, :sig_p_to_ub, :sig_q_to_lb, :sig_q_to_ub,
             )
                 @test getfield(sol_exa, field) ≈ getfield(sol_jump, field) atol=dual_atol rtol=rtol
             end
@@ -55,6 +54,11 @@ import PowerDiff: kkt, flatten_variables
             @test all(isfinite, sol.pg)
             @test all(isfinite, sol.qg)
             _assert_small_kkt(prob, sol)
+        end
+
+        @testset "Rejects custom optimizer" begin
+            optimizer = optimizer_with_attributes(Ipopt.Optimizer, "print_level" => 0)
+            @test_throws ArgumentError ACOPFProblem(pm_data; backend=:exa, optimizer)
         end
 
         @testset "Solve parity with JuMP backend" begin

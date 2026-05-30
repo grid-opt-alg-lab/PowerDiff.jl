@@ -234,9 +234,8 @@ end
                 sol_base.pg[i] < dc_net.gmax[i] - 0.01, 1:dc_net.k)
             @test !isnothing(gen_idx)
 
-            net_pert = load_test_case("case5.m")
-            net_pert["gen"][string(gen_idx)]["cost"][2] += delta
-            dc_net_pert = DCNetwork(net_pert)
+            dc_net_pert = deepcopy(dc_net)
+            dc_net_pert.cl[gen_idx] += delta
             prob_pert = DCOPFProblem(dc_net_pert, d)
             sol_pert = solve!(prob_pert)
             lmp_pert = calc_lmp(sol_pert, dc_net_pert)
@@ -260,9 +259,8 @@ end
                 sol_base.pg[i] < dc_net.gmax[i] - 0.01, 1:dc_net.k)
             @test !isnothing(gen_idx)
 
-            net_pert = load_test_case("case5.m")
-            net_pert["gen"][string(gen_idx)]["cost"][1] += delta
-            dc_net_pert = DCNetwork(net_pert)
+            dc_net_pert = deepcopy(dc_net)
+            dc_net_pert.cq[gen_idx] += delta
             prob_pert = DCOPFProblem(dc_net_pert, d)
             sol_pert = solve!(prob_pert)
             lmp_pert = calc_lmp(sol_pert, dc_net_pert)

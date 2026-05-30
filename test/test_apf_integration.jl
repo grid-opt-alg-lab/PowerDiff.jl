@@ -281,7 +281,7 @@ end
         @test_skip false
     else
         # case5.m has non-sequential bus IDs when not made basic
-        raw = PowerModels.parse_file(case_path)
+        raw = PowerDiff.parse_file(case_path)
         dc_net = DCNetwork(raw)  # non-basic network
         apf_net = to_apf_network(dc_net)
 

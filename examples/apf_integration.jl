@@ -81,8 +81,10 @@ end
 
 # --- Step 2: PD for economic sensitivity ---
 println("\nStep 2: DC OPF + sensitivity analysis via PD")
-dc_net = DCNetwork(pm_data)
-d = calc_demand_vector(pm_data)
+typed_data = parse_file(case_path)
+dc_net = DCNetwork(typed_data)
+dc_net.fmax .*= 0.2
+d = calc_demand_vector(typed_data)
 prob = DCOPFProblem(dc_net, d)
 PowerDiff.solve!(prob)
 

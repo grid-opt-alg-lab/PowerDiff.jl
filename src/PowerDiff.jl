@@ -20,8 +20,6 @@ using JuMP
 using Ipopt
 using ExaModels
 using NLPModelsIpopt
-import PowerModels
-const PM = PowerModels
 
 const MOI = JuMP.MOI
 
@@ -37,8 +35,7 @@ include("parser.jl")
 
 Suppress all warning messages from PowerDiff for the rest of the session.
 
-Warnings from other packages (PowerModels, JuMP, Ipopt, etc.) are not affected.
-To suppress PowerModels output, also call `PowerModels.silence()`.
+Warnings from other packages (JuMP, Ipopt, etc.) are not affected.
 """
 function silence()
     _SILENCE_WARNINGS[] = true
@@ -105,6 +102,7 @@ export Sensitivity, silence
 export operand_symbols, parameter_symbols
 export jvp, vjp, jvp!, vjp!, dict_to_vec, vec_to_dict, kkt_dims
 export parse_file, parse_matpower, parse_matpower_struct, get_path
+export ParsedCase, ParsedBus, ParsedGen, ParsedBranch, ParsedLoad, ParsedShunt
 
 # DC Power Flow Types
 export DCNetwork, DCPowerFlowState

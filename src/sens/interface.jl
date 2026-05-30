@@ -430,19 +430,41 @@ function _voltage_phasor_single_dir(state::ACPowerFlowState, param::Symbol)
     return ∂v
 end
 
+function _branch_records(state::ACPowerFlowState)
+    if !isnothing(state.net)
+        net = state.net
+        return [(l, net.f_bus[l], net.t_bus[l]) for l in 1:net.m]
+    end
+    isnothing(state.branch_data) && throw(ArgumentError(
+        "ACPowerFlowState must have an ACNetwork or branch_data for branch sensitivities"))
+    return sort!([(br["index"], br["f_bus"], br["t_bus"]) for br in values(state.branch_data)])
+end
+
+@inline function _state_branch_current_coefficients(state::ACPowerFlowState, l::Int, f_bus::Int, t_bus::Int)
+    if !isnothing(state.net)
+        return _branch_current_coefficients(state.net, l)
+    end
+    yft = state.Y[f_bus, t_bus]
+    return yft, -yft
+end
+
+function _state_branch_currents(state::ACPowerFlowState)
+    currents = zeros(ComplexF64, state.m)
+    for (l, f_bus, t_bus) in _branch_records(state)
+        yff, yft = _state_branch_current_coefficients(state, l, f_bus, t_bus)
+        currents[l] = yff * state.v[f_bus] + yft * state.v[t_bus]
+    end
+    return currents
+end
+
 """Compute branch current phasor sensitivity from pre-computed voltage phasor sensitivity."""
 function _branch_current_from_dv(∂v, state::ACPowerFlowState)
-    !isnothing(state.branch_data) || throw(ArgumentError(
-        "ACPowerFlowState must have branch_data for current sensitivities"))
     m = state.m
     ncols = size(∂v, 2)
     ∂I = zeros(ComplexF64, m, ncols)
-    for (_, br) in state.branch_data
-        ℓ = br["index"]
-        f_bus = br["f_bus"]
-        t_bus = br["t_bus"]
-        Y_ft = state.Y[f_bus, t_bus]
-        ∂I[ℓ, :] = Y_ft .* (∂v[f_bus, :] .- ∂v[t_bus, :])
+    for (l, f_bus, t_bus) in _branch_records(state)
+        yff, yft = _state_branch_current_coefficients(state, l, f_bus, t_bus)
+        ∂I[l, :] = yff .* ∂v[f_bus, :] .+ yft .* ∂v[t_bus, :]
     end
     return ∂I
 end
@@ -450,40 +472,37 @@ end
 """
 Compute topology direct current term from explicit dependence on branch admittance.
 
-Returns a diagonal m × m matrix: ∂I_ℓ/∂(param)_e = scale · ΔV_ℓ · δ_{ℓe}, where
-scale is -1 for :g and -j for :b. Parallel branches (multiple branches between the
-same bus pair) are not supported — consistent with the Y[f,t] indexing used elsewhere.
+Returns a diagonal m × m matrix. Each diagonal entry is the explicit derivative
+of the from-side pi-model branch current with respect to that branch's series
+conductance or susceptance, including taps, phase shifts, and switching.
 """
 function _topology_branch_current_direct(state::ACPowerFlowState, param::Symbol)
     net = state.net
     isnothing(net) && throw(ArgumentError(
         "ACPowerFlowState must have an ACNetwork (net field) for topology sensitivities"))
 
-    ΔV = net.A * state.v
-    scale = param === :g ? ComplexF64(-1.0, 0.0) : ComplexF64(0.0, -1.0)
-    return Diagonal(scale .* ΔV)
+    direct = zeros(ComplexF64, net.m)
+    for l in 1:net.m
+        tap = net.tap[l] * cis(net.shift[l])
+        value = net.sw[l] * (state.v[net.f_bus[l]] / abs2(tap) - state.v[net.t_bus[l]] / conj(tap))
+        direct[l] = param === :g ? value : im * value
+    end
+    return Diagonal(direct)
 end
 
 """Project complex branch current sensitivities to current magnitude sensitivities."""
 function _current_magnitude_from_dI(∂I, state::ACPowerFlowState)
-    !isnothing(state.branch_data) || throw(ArgumentError(
-        "ACPowerFlowState must have branch_data for current sensitivities"))
-    v = state.v
     m = state.m
     ncols = size(∂I, 2)
     ∂Im = zeros(Float64, m, ncols)
     n_suppressed = 0
-    for (_, br) in state.branch_data
-        ℓ = br["index"]
-        f_bus = br["f_bus"]
-        t_bus = br["t_bus"]
-        Y_ft = state.Y[f_bus, t_bus]
-        I_ℓ = Y_ft * (v[f_bus] - v[t_bus])
-        if abs(I_ℓ) <= VOLTAGE_ZERO_TOL
+    currents = _state_branch_currents(state)
+    for l in 1:m
+        if abs(currents[l]) <= VOLTAGE_ZERO_TOL
             n_suppressed += 1
             continue
         end
-        ∂Im[ℓ, :] = real.(∂I[ℓ, :] .* conj(I_ℓ)) ./ abs(I_ℓ)
+        ∂Im[l, :] = real.(∂I[l, :] .* conj(currents[l])) ./ abs(currents[l])
     end
     if n_suppressed > 0
         @debug "Current magnitude sensitivity: $n_suppressed branches had |I| < $VOLTAGE_ZERO_TOL; their ∂|I| rows are zero."
@@ -504,20 +523,13 @@ end
 
 """Project voltage/current sensitivities to branch active power flow sensitivities."""
 function _branch_flow_from_dv_dI(∂v, ∂I, state::ACPowerFlowState)
-    !isnothing(state.branch_data) || throw(ArgumentError(
-        "ACPowerFlowState must have branch_data for flow sensitivities"))
     v = state.v
     m = state.m
     ncols = size(∂I, 2)
     df = zeros(Float64, m, ncols)
-    for (_, br) in state.branch_data
-        ℓ = br["index"]
-        f_bus = br["f_bus"]
-        t_bus = br["t_bus"]
-        Y_ft = state.Y[f_bus, t_bus]
-        I_ℓ = Y_ft * (v[f_bus] - v[t_bus])
-        v_f = v[f_bus]
-        df[ℓ, :] = real.(∂v[f_bus, :] .* conj(I_ℓ) .+ v_f .* conj.(∂I[ℓ, :]))
+    currents = _state_branch_currents(state)
+    for (l, f_bus, _) in _branch_records(state)
+        df[l, :] = real.(∂v[f_bus, :] .* conj(currents[l]) .+ v[f_bus] .* conj.(∂I[l, :]))
     end
     return df
 end

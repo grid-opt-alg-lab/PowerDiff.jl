@@ -320,13 +320,14 @@ Accepts both basic and non-basic networks; internally remaps to sequential indic
 
 # Arguments
 - `network`: ACNetwork containing topology, admittances, and typed branch/gen data
-- `optimizer`: JuMP-compatible optimizer (default: Ipopt)
+- `backend`: `:jump` (default) or CPU `:exa`
+- `optimizer`: JuMP-compatible optimizer for `backend=:jump` (default: Ipopt)
 - `silent`: Suppress solver output (default: true)
 
 # Example
 ```julia
-pm_data = PowerModels.parse_file("case5.m")
-prob = ACOPFProblem(pm_data)
+data = parse_file("case5.m")
+prob = ACOPFProblem(data)
 solve!(prob)
 ```
 """
@@ -337,6 +338,8 @@ function ACOPFProblem(
     silent::Bool=true
 )
     backend_tag = _ac_backend_tag(backend)
+    backend_tag isa ExaBackend && optimizer !== Ipopt.Optimizer && throw(ArgumentError(
+        "backend=:exa uses NLPModelsIpopt directly and does not accept a custom optimizer"))
     data = _build_acopf_data(network)
     return _acopf_problem(network, data, backend_tag; optimizer=optimizer, silent=silent)
 end
@@ -720,13 +723,12 @@ end
 """
     ACOPFProblem(pm_data::Dict; kwargs...)
 
-Convenience constructor: build ACOPFProblem directly from PowerModels dict.
+Reject the removed dictionary API with a migration hint.
 
 Accepts both basic and non-basic networks.
 """
 function ACOPFProblem(pm_data::Dict; kwargs...)
-    network = ACNetwork(pm_data)
-    return ACOPFProblem(network; kwargs...)
+    throw(ArgumentError("dictionary constructors were removed; parse a MATPOWER file with PowerDiff.parse_file"))
 end
 
 function ACOPFProblem(data::ParsedCase; kwargs...)

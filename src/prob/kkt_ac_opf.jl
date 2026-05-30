@@ -1017,8 +1017,8 @@ end
 """
 Extract per-generator cost coefficient at a given index (1=quadratic, 2=linear).
 
-AC OPF construction runs PowerModels cost standardization before this point, so
-the analytical path assumes finite numeric coefficients.
+MATPOWER parsing standardizes costs before this point, so the analytical path
+assumes finite numeric coefficients.
 """
 function _extract_gen_cost(prob::ACOPFProblem, cost_idx::Int)
     constants = _require_kkt_constants(prob)
@@ -1031,17 +1031,17 @@ _extract_gen_cq(prob::ACOPFProblem) = _extract_gen_cost(prob, 1)
 _extract_gen_cl(prob::ACOPFProblem) = _extract_gen_cost(prob, 2)
 
 """
-Extract per-branch flow limits (`rate_a`) from the problem's ref.
+Extract per-branch flow limits (`rate_a`) from cached constants.
 
-AC OPF construction runs PowerModels thermal-limit preprocessing before this
-point, so the analytical path assumes finite numeric limits.
+MATPOWER parsing normalizes thermal limits before this point, so the analytical
+path assumes finite numeric limits.
 """
 function _extract_branch_fmax(prob::ACOPFProblem)
     return copy(_require_kkt_constants(prob).fmax)
 end
 
 """
-Pre-extract all constant data from the problem's ref for efficient analytical
+Pre-extract all constant data from the problem for efficient analytical
 KKT assembly and repeated sensitivity evaluation.
 """
 function _extract_kkt_constants(prob::ACOPFProblem)

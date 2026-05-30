@@ -19,8 +19,8 @@ using Test
 @testset "Unified Architecture" begin
     # Load a test network
     case_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower", "case5.m")
-    data = PowerModels.parse_file(case_path)
-    net_data = PowerModels.make_basic_network(data)
+    net_data = PowerDiff.parse_file(case_path)
+    pm_data = PowerModels.make_basic_network(PowerModels.parse_file(case_path))
 
     @testset "Abstract Type Hierarchy" begin
         # Test that types inherit correctly
@@ -140,11 +140,10 @@ using Test
     end
 
     @testset "ACNetwork" begin
-        # Construct from PowerModels network
         ac_net = ACNetwork(net_data)
         @test ac_net isa AbstractPowerNetwork
-        @test ac_net.n == length(net_data["bus"])
-        @test ac_net.m == length(net_data["branch"])
+        @test ac_net.n == length(net_data.bus)
+        @test ac_net.m == length(net_data.branch)
 
         # Admittance matrix reconstruction
         Y = admittance_matrix(ac_net)
@@ -159,10 +158,10 @@ using Test
 
     @testset "ACPowerFlowState" begin
         # Solve AC power flow
-        PowerModels.compute_ac_pf!(net_data)
+        PowerModels.compute_ac_pf!(pm_data)
 
         # Construct state from network
-        state = ACPowerFlowState(net_data)
+        state = ACPowerFlowState(ACNetwork(net_data), PowerModels.calc_basic_bus_voltage(pm_data))
         @test state isa AbstractPowerFlowState
         @test length(state.v) == state.n
         @test size(state.Y) == (state.n, state.n)
@@ -176,8 +175,8 @@ using Test
 
     @testset "AC Power Flow Sensitivity" begin
         # Solve AC power flow
-        PowerModels.compute_ac_pf!(net_data)
-        state = ACPowerFlowState(net_data)
+        PowerModels.compute_ac_pf!(pm_data)
+        state = ACPowerFlowState(ACNetwork(net_data), PowerModels.calc_basic_bus_voltage(pm_data))
 
         dvm_dp = calc_sensitivity(state, :vm, :p)
         @test dvm_dp isa Sensitivity
@@ -210,8 +209,8 @@ using Test
         @test operand_symbols(prob) == [:va, :pg, :f, :psh, :lmp]
         @test parameter_symbols(prob) == [:d, :sw, :cq, :cl, :fmax, :b]
 
-        PowerModels.compute_ac_pf!(net_data)
-        ac_state = ACPowerFlowState(net_data)
+        PowerModels.compute_ac_pf!(pm_data)
+        ac_state = ACPowerFlowState(ACNetwork(net_data), PowerModels.calc_basic_bus_voltage(pm_data))
         @test Set(operand_symbols(ac_state)) == Set([:vm, :v, :im, :va, :f, :p, :q])
         @test Set(parameter_symbols(ac_state)) == Set([:p, :q, :va, :vm, :d, :qd, :g, :b])
 

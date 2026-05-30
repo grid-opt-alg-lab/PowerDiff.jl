@@ -20,9 +20,8 @@
 # match the materialized Sensitivity matrix path.
 
 @testset "KKT VJP/JVP" begin
-    basic = PowerModels.make_basic_network(
-        PowerModels.parse_file(joinpath(PM_DATA_DIR, "case5.m")))
-    raw = PowerModels.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
+    raw = PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
+    basic = _make_basic_case(raw)
 
     # =================================================================
     # DC OPF
@@ -174,7 +173,7 @@
     # AC OPF
     # =================================================================
     @testset "AC OPF" begin
-        ac_data = PowerModels.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
+        ac_data = PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
         ac_prob = ACOPFProblem(ac_data)
         solve!(ac_prob)
 
@@ -216,11 +215,7 @@
     @testset "DC PF" begin
         net = DCNetwork(basic)
         n = net.n
-        d = zeros(n)
-        for (_, load) in basic["load"]
-            bus = load["load_bus"]
-            d[bus] += load["pd"]
-        end
+        d = calc_demand_vector(basic)
         state = DCPowerFlowState(net, d)
 
         @testset "VJP matches S' * w" begin
@@ -282,14 +277,14 @@
     # Slow path (no cache) — AC OPF
     # =================================================================
     @testset "AC OPF slow path (no cache)" begin
-        ac_data2 = PowerModels.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
+        ac_data2 = PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
         ac_ref = ACOPFProblem(ac_data2); solve!(ac_ref)
         S = calc_sensitivity(ac_ref, :lmp, :d)
         w = randn(size(S, 1))
         v = randn(size(S, 2))
 
         # Fresh problem
-        ac_data3 = PowerModels.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
+        ac_data3 = PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
         ac_slow = ACOPFProblem(ac_data3); solve!(ac_slow)
         @test isnothing(ac_slow.cache.dz_dd)
 
@@ -325,9 +320,7 @@
         @test_throws ArgumentError jvp(prob, :lmp, :d, Dict(9999 => 1.0))
 
         # ACPowerFlowState — not supported, gives helpful error
-        pf_data = deepcopy(basic)
-        PowerModels.compute_ac_pf!(pf_data)
-        ac_state = ACPowerFlowState(pf_data)
+        ac_state = load_ac_pf_state("case5.m")
         @test_throws ArgumentError vjp(ac_state, :vm, :p, randn(5))
         @test_throws ArgumentError jvp(ac_state, :vm, :p, randn(5))
     end

@@ -54,7 +54,7 @@ NamedTuple with fields:
 
 # Example
 ```julia
-state = ACPowerFlowState(pm_net)
+state = ACPowerFlowState(net, v)
 sens = calc_sensitivity(state, :im, :p)
 # How does current on line 2 change when active power at bus 3 increases?
 dI_dp = sens[2, 3]
@@ -116,15 +116,10 @@ end
 """
     calc_current_power_sensitivities(net::Dict; full=true)
 
-Compute current-power sensitivities from a solved PowerModels network.
-
-Accepts both basic and non-basic networks. For non-basic networks, constructs
-an ACPowerFlowState internally which handles ID translation.
+Reject the removed dictionary wrapper with a migration hint.
 """
 function calc_current_power_sensitivities(net::Dict; full::Bool=true)
-    state = ACPowerFlowState(net)
-    !isnothing(state.branch_data) || throw(ArgumentError("Failed to extract branch data from network"))
-    return calc_current_power_sensitivities(state; full=full)
+    throw(ArgumentError("dictionary wrappers were removed; construct ACPowerFlowState(ACNetwork(data), v)"))
 end
 
 """
@@ -133,11 +128,21 @@ end
 Compute current-power sensitivities from an ACPowerFlowState.
 
 This method provides a unified interface consistent with DC OPF sensitivities.
-Requires that `state.branch_data` is not nothing.
+Requires either `state.net` or `state.branch_data`.
 """
 function calc_current_power_sensitivities(state::ACPowerFlowState; full::Bool=true)
-    !isnothing(state.branch_data) || throw(ArgumentError("ACPowerFlowState must have branch_data for current sensitivities"))
-    return calc_current_power_sensitivities(state.v, state.Y, state.branch_data; idx_slack=state.idx_slack, full=full)
+    ∂v_∂p, _, _ = calc_voltage_active_power_sensitivities(
+        state.v, state.Y; idx_slack=state.idx_slack, full=full)
+    ∂v_∂q, _, _ = calc_voltage_reactive_power_sensitivities(
+        state.v, state.Y; idx_slack=state.idx_slack, full=full)
+    ∂I_∂p = _branch_current_from_dv(∂v_∂p, state)
+    ∂I_∂q = _branch_current_from_dv(∂v_∂q, state)
+    return (
+        dI_dp=∂I_∂p,
+        dI_dq=∂I_∂q,
+        dIm_dp=_current_magnitude_from_dI(∂I_∂p, state),
+        dIm_dq=_current_magnitude_from_dI(∂I_∂q, state),
+    )
 end
 
 # =============================================================================
@@ -152,7 +157,7 @@ Compute sensitivity of branch active power flows w.r.t. power injections.
 Uses product rule: P_ℓ = Re(v_f · conj(I_ℓ)), so
     ∂P_ℓ/∂p_k = Re(∂v_f/∂p_k · conj(I_ℓ) + v_f · conj(∂I_ℓ/∂p_k))
 
-Requires `state.branch_data` to be set.
+Requires either `state.net` or `state.branch_data`.
 
 # Returns
 NamedTuple with:
@@ -160,41 +165,13 @@ NamedTuple with:
 - `df_dq`: ∂P_flow/∂q (m × n)
 """
 function calc_branch_flow_power_sensitivities(state::ACPowerFlowState)
-    !isnothing(state.branch_data) || throw(ArgumentError("ACPowerFlowState must have branch_data for flow sensitivities"))
-
-    v = state.v
-    Y = state.Y
-    n = state.n
-    m = state.m
-
-    # Get complex voltage sensitivities (full=true for indexing)
-    ∂v_∂p, _, _ = calc_voltage_active_power_sensitivities(v, Y; idx_slack=state.idx_slack, full=true)
-    ∂v_∂q, _, _ = calc_voltage_reactive_power_sensitivities(v, Y; idx_slack=state.idx_slack, full=true)
-
-    # Get complex current sensitivities
-    cur_sens = calc_current_power_sensitivities(state; full=true)
-    ∂I_∂p = cur_sens.dI_dp
-    ∂I_∂q = cur_sens.dI_dq
-
-    df_dp = zeros(Float64, m, n)
-    df_dq = zeros(Float64, m, n)
-
-    for (_, br) in state.branch_data
-        ℓ = br["index"]
-        f_bus = br["f_bus"]
-        t_bus = br["t_bus"]
-
-        Y_ft = Y[f_bus, t_bus]
-        I_ℓ = Y_ft * (v[f_bus] - v[t_bus])
-        v_f = v[f_bus]
-
-        for k in 1:n
-            # Product rule: ∂P_ℓ/∂p_k = Re(∂v_f/∂p_k · conj(I_ℓ) + v_f · conj(∂I_ℓ/∂p_k))
-            df_dp[ℓ, k] = real(∂v_∂p[f_bus, k] * conj(I_ℓ) + v_f * conj(∂I_∂p[ℓ, k]))
-            df_dq[ℓ, k] = real(∂v_∂q[f_bus, k] * conj(I_ℓ) + v_f * conj(∂I_∂q[ℓ, k]))
-        end
-    end
-
-    return (df_dp=df_dp, df_dq=df_dq)
+    ∂v_∂p, _, _ = calc_voltage_active_power_sensitivities(
+        state.v, state.Y; idx_slack=state.idx_slack, full=true)
+    ∂v_∂q, _, _ = calc_voltage_reactive_power_sensitivities(
+        state.v, state.Y; idx_slack=state.idx_slack, full=true)
+    return (
+        df_dp=_branch_flow_from_dv(∂v_∂p, state),
+        df_dq=_branch_flow_from_dv(∂v_∂q, state),
+    )
 end
 

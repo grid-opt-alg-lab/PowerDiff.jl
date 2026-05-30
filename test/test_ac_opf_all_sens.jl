@@ -38,8 +38,7 @@ end
 @testset "AC OPF All Sensitivities" begin
     pm_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
     file = joinpath(pm_path, "case5.m")
-    pm_data = PowerModels.parse_file(file)
-    pm_data = PowerModels.make_basic_network(pm_data)
+    pm_data = PowerDiff.parse_file(file)
 
     operands = [:va, :vm, :pg, :qg, :lmp, :qlmp]
     n, m, k = 5, 7, 5  # case5.m dimensions: 5 buses, 7 branches, 5 generators
@@ -97,24 +96,15 @@ end
         ε = 1e-5
         # Find buses with significant load (sorted for determinism)
         load_buses = Int[]
-        for (lid, load) in pm_data["load"]
-            bus = load["load_bus"]
-            if load["pd"] > 0.1 && !(bus in load_buses)
-                push!(load_buses, bus)
-            end
+        for bus in findall(>(0.1), prob.network.pd)
+            push!(load_buses, bus)
         end
         sort!(load_buses)
 
         for bus_idx in load_buses[1:min(2, length(load_buses))]
-            pm_pert = deepcopy(pm_data)
-            # Perturb all loads at this bus
-            for (lid, load) in pm_pert["load"]
-                if load["load_bus"] == bus_idx
-                    load["pd"] += ε
-                end
-            end
-
-            prob_pert = ACOPFProblem(pm_pert; silent=true)
+            net_pert = deepcopy(prob.network)
+            net_pert.pd[bus_idx] += ε
+            prob_pert = ACOPFProblem(net_pert; silent=true)
             sol_pert = solve!(prob_pert)
 
             for op in [:va, :vm, :pg, :qg]
@@ -143,22 +133,14 @@ end
         ε = 1e-5
         # Find buses with reactive load
         load_buses = Int[]
-        for (lid, load) in pm_data["load"]
-            bus = load["load_bus"]
-            if abs(load["qd"]) > 0.001 && !(bus in load_buses)
-                push!(load_buses, bus)
-            end
+        for bus in findall(>(0.001), abs.(prob.network.qd))
+            push!(load_buses, bus)
         end
 
         for bus_idx in load_buses[1:min(2, length(load_buses))]
-            pm_pert = deepcopy(pm_data)
-            for (lid, load) in pm_pert["load"]
-                if load["load_bus"] == bus_idx
-                    load["qd"] += ε
-                end
-            end
-
-            prob_pert = ACOPFProblem(pm_pert; silent=true)
+            net_pert = deepcopy(prob.network)
+            net_pert.qd[bus_idx] += ε
+            prob_pert = ACOPFProblem(net_pert; silent=true)
             sol_pert = solve!(prob_pert)
 
             for op in [:va, :vm, :pg, :qg]
@@ -186,10 +168,9 @@ end
 
         ε = 1e-5
         for gen_idx in 1:min(2, k)
-            pm_pert = deepcopy(pm_data)
-            pm_pert["gen"][string(gen_idx)]["cost"][1] += ε
-
-            prob_pert = ACOPFProblem(pm_pert; silent=true)
+            net_pert = deepcopy(prob.network)
+            net_pert.cq[gen_idx] += ε
+            prob_pert = ACOPFProblem(net_pert; silent=true)
             sol_pert = solve!(prob_pert)
 
             for op in [:va, :vm, :pg, :qg]
@@ -217,10 +198,9 @@ end
 
         ε = 1e-5
         for gen_idx in 1:min(2, k)
-            pm_pert = deepcopy(pm_data)
-            pm_pert["gen"][string(gen_idx)]["cost"][2] += ε
-
-            prob_pert = ACOPFProblem(pm_pert; silent=true)
+            net_pert = deepcopy(prob.network)
+            net_pert.cl[gen_idx] += ε
+            prob_pert = ACOPFProblem(net_pert; silent=true)
             sol_pert = solve!(prob_pert)
 
             for op in [:va, :vm, :pg, :qg]
@@ -248,10 +228,10 @@ end
 
         ε = 1e-5
         for branch_idx in 1:min(2, m)
-            pm_pert = deepcopy(pm_data)
-            pm_pert["branch"][string(branch_idx)]["rate_a"] += ε
-
-            prob_pert = ACOPFProblem(pm_pert; silent=true)
+            net_pert = deepcopy(prob.network)
+            net_pert.rate_a[branch_idx] += ε
+            net_pert.i_max[branch_idx] += ε
+            prob_pert = ACOPFProblem(net_pert; silent=true)
             sol_pert = solve!(prob_pert)
 
             for op in [:va, :vm, :pg, :qg]

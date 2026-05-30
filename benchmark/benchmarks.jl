@@ -1,7 +1,8 @@
 using BenchmarkTools
 using PowerDiff
+import PowerModels
 
-const PM = PowerDiff.PM
+const PM = PowerModels
 const SUITE = BenchmarkGroup()
 
 PM.silence()
@@ -12,17 +13,30 @@ function _load_benchmark_case()
     for case_name in ("case30.m", "case24.m", "case14.m", "case9.m", "case5.m")
         case_path = joinpath(pm_dir, case_name)
         isfile(case_path) || continue
-        raw = PM.parse_file(case_path)
-        return case_name, PM.make_basic_network(raw)
+        net_data = if isdefined(PowerDiff, :ParsedCase)
+            PowerDiff.parse_file(case_path)
+        else
+            PM.make_basic_network(PM.parse_file(case_path))
+        end
+        return case_name, case_path, net_data
     end
     error("No bundled PowerModels MATPOWER benchmark case found")
 end
 
-case_name, net_data = _load_benchmark_case()
+case_name, case_path, net_data = _load_benchmark_case()
 prob = DCOPFProblem(net_data)
 sol = solve!(prob)
 ac_prob = ACOPFProblem(deepcopy(net_data); silent=true)
 ac_sol = solve!(ac_prob)
+
+SUITE["parser"] = BenchmarkGroup()
+SUITE["parser"][case_name] = @benchmarkable begin
+    if isdefined(PowerDiff, :ParsedCase)
+        PowerDiff.parse_file($case_path)
+    else
+        PM.make_basic_network(PM.parse_file($case_path))
+    end
+end
 
 SUITE["dc_opf"] = BenchmarkGroup()
 SUITE["dc_opf"]["kkt_jacobian"] = BenchmarkGroup()

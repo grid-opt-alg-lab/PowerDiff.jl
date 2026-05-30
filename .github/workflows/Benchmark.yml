@@ -21,3 +21,4 @@ jobs:
           julia-version: '1'
           mode: 'time,memory'
           script: benchmark/benchmarks.jl
+          extra-pkgs: PowerModels

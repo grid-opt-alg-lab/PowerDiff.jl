@@ -49,42 +49,37 @@ function _build_topology_rhs(state::ACPowerFlowState, param::Symbol)
     net = state.net
     isnothing(net) && throw(ArgumentError(
         "ACPowerFlowState must have an ACNetwork (net field) for topology " *
-        "sensitivities (:g, :b). Construct via ACPowerFlowState(pm_net::Dict) " *
-        "or ACPowerFlowState(net::ACNetwork, v)."))
+        "sensitivities (:g, :b). Construct via ACPowerFlowState(net::ACNetwork, v)."))
 
     n = state.n
     m = state.m
     v = state.v
-    A = net.A  # m × n sparse incidence matrix
-
     ns = _non_slack_indices(n, state.idx_slack)
     d = length(ns)
-
-    # Edge voltage drops: ΔV = A * V (m-vector, complex)
-    ΔV = A * v
-
-    # M = Diag(conj(V_r)) * A_r' * Diag(ΔV)
-    # where _r denotes reduced (slack rows removed)
-    # A_r' is n×m with slack row removed → d×m
-    # M is d × m complex
-    At_r = transpose(A)[ns, :]  # d × m sparse transpose slice
-
-    M = Diagonal(conj.(v[ns])) * At_r * Diagonal(ΔV)
-
-    # Assemble RHS based on parameter
-    # Sign convention: the power flow equations are F = [P; Q] - [p_spec; q_spec] = 0
-    # where P = Re(conj(V)·Y·V) and Q = -Im(conj(V)·Y·V).
-    # The Jacobian solve is: J_v · dv = -∂F/∂param = -∂[P;Q]/∂param.
-    # We return the RHS = ∂[P;Q]/∂param, and the caller negates in the solve.
     RHS = Matrix{Float64}(undef, 2d, m)
-    if param === :g
-        RHS[1:d, :]     = real.(M)   # ∂P/∂g
-        RHS[d+1:2d, :] = -imag.(M)  # ∂Q/∂g
-    else  # :b
-        RHS[1:d, :]     = -imag.(M)  # ∂P/∂b
-        RHS[d+1:2d, :] = -real.(M)   # ∂Q/∂b
+    fill!(RHS, 0.0)
+    reduced_idx = Dict(bus => i for (i, bus) in enumerate(ns))
+    for l in 1:m
+        fb, tb = net.f_bus[l], net.t_bus[l]
+        tap = net.tap[l] * cis(net.shift[l])
+        scale = net.sw[l] * (param === :g ? 1.0 : im)
+        dYff = scale / abs2(tap)
+        dYft = -scale / conj(tap)
+        dYtf = -scale / tap
+        dYtt = scale
+        if haskey(reduced_idx, fb)
+            i = reduced_idx[fb]
+            value = conj(v[fb]) * (dYff * v[fb] + dYft * v[tb])
+            RHS[i, l] = real(value)
+            RHS[d + i, l] = -imag(value)
+        end
+        if haskey(reduced_idx, tb)
+            i = reduced_idx[tb]
+            value = conj(v[tb]) * (dYtf * v[fb] + dYtt * v[tb])
+            RHS[i, l] = real(value)
+            RHS[d + i, l] = -imag(value)
+        end
     end
-
     return RHS
 end
 

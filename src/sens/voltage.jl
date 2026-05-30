@@ -98,14 +98,10 @@ end
 """
     calc_voltage_power_sensitivities(net::Dict; full=true)
 
-Compute voltage-power sensitivities from a solved PowerModels network.
-
-Accepts both basic and non-basic networks. For non-basic networks, constructs
-an ACPowerFlowState internally which handles ID translation.
+Reject the removed dictionary wrapper with a migration hint.
 """
 function calc_voltage_power_sensitivities(net::Dict; full::Bool=true)
-    state = ACPowerFlowState(net)
-    return calc_voltage_power_sensitivities(state; full=full)
+    throw(ArgumentError("dictionary wrappers were removed; construct ACPowerFlowState(ACNetwork(data), v)"))
 end
 
 """

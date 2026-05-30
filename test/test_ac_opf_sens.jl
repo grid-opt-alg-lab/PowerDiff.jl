@@ -28,8 +28,7 @@ using Test
     pm_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
     file = joinpath(pm_path, "case5.m")
 
-    pm_data = PowerModels.parse_file(file)
-    pm_data = PowerModels.make_basic_network(pm_data)
+    pm_data = PowerDiff.parse_file(file)
 
     # Create and solve AC OPF
     @testset "ACOPFProblem construction and solving" begin
@@ -48,8 +47,8 @@ using Test
         @test length(sol.qg) == 5
 
         # Voltage magnitudes should be within limits
-        @test all(sol.vm .>= 0.9)
-        @test all(sol.vm .<= 1.1)
+        @test all(sol.vm .>= prob.network.vm_min .- 1e-6)
+        @test all(sol.vm .<= prob.network.vm_max .+ 1e-6)
 
     end
 
@@ -285,9 +284,9 @@ using Test
     end
 
     @testset "Single ∂K/∂sw column includes angle-limit terms" begin
-        pm_tight = deepcopy(pm_data)
-        pm_tight["branch"]["1"]["angmax"] = 0.05
-        prob = ACOPFProblem(pm_tight; silent=true)
+        net_tight = ACNetwork(pm_data)
+        net_tight.angmax[1] = 0.05
+        prob = ACOPFProblem(net_tight; silent=true)
         sol = solve!(prob)
 
         @test abs(sol.lam_angle_lb[1]) + abs(sol.lam_angle_ub[1]) > 1e-3

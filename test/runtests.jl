@@ -44,9 +44,9 @@ include("common.jl")
     else
         dc_net = DCNetwork(net)
 
-        @test dc_net.n == length(net["bus"])
-        @test dc_net.m == length(net["branch"])
-        @test dc_net.k == length(net["gen"])
+        @test dc_net.n == length(net.bus)
+        @test dc_net.m == length(net.branch)
+        @test dc_net.k == length(net.gen)
         @test size(dc_net.A) == (dc_net.m, dc_net.n)
         @test size(dc_net.G_inc) == (dc_net.n, dc_net.k)
         @test length(dc_net.b) == dc_net.m
@@ -312,8 +312,9 @@ end
 
         # Solve with our implementation
         # Use small τ for numerical stability in KKT system
-        dc_net = DCNetwork(net; tau=1e-3)
-        prob = DCOPFProblem(dc_net, calc_demand_vector(net))
+        typed = load_test_case("case5.m")
+        dc_net = DCNetwork(typed; tau=1e-3)
+        prob = DCOPFProblem(dc_net, calc_demand_vector(typed))
         sol = solve!(prob)
 
         # For LMPs, use the power balance duals directly (ν_bal)
@@ -735,9 +736,7 @@ end
         end
 
         # AC power flow on case14
-        pf_data = deepcopy(net)
-        PowerModels.compute_ac_pf!(pf_data)
-        state = ACPowerFlowState(pf_data)
+        state = load_ac_pf_state("case14.m")
 
         dvm_dp = calc_sensitivity(state, :vm, :p)
         dvm_dq = calc_sensitivity(state, :vm, :q)

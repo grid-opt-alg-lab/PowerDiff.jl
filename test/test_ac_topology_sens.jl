@@ -30,30 +30,8 @@ import PowerDiff: admittance_matrix
 # PQ Newton solver: pf_residual_pq / solve_pf_pq from common.jl
 @isdefined(pf_residual_pq) || include("common.jl")
 
-function _branch_flows(v, Y, branch_data)
-    pf = zeros(length(branch_data))
-    for (_, br) in branch_data
-        ℓ = br["index"]
-        f_bus = br["f_bus"]
-        t_bus = br["t_bus"]
-        Y_ft = Y[f_bus, t_bus]
-        I_ℓ = Y_ft * (v[f_bus] - v[t_bus])
-        pf[ℓ] = real(v[f_bus] * conj(I_ℓ))
-    end
-    return pf
-end
-
-function _branch_currents_mag(v, Y, branch_data)
-    im_vec = zeros(length(branch_data))
-    for (_, br) in branch_data
-        ℓ = br["index"]
-        f_bus = br["f_bus"]
-        t_bus = br["t_bus"]
-        Y_ft = Y[f_bus, t_bus]
-        im_vec[ℓ] = abs(Y_ft * (v[f_bus] - v[t_bus]))
-    end
-    return im_vec
-end
+_branch_flows(v, net) = real.(branch_power(net, v))
+_branch_currents_mag(v, net) = abs.(branch_current(net, v))
 
 function _perturbed_voltage(state::ACPowerFlowState, param::Symbol, branch_idx::Int, epsilon::Float64,
                             p_target, q_target)
@@ -65,7 +43,7 @@ function _perturbed_voltage(state::ACPowerFlowState, param::Symbol, branch_idx::
     end
     Y_pert = admittance_matrix(net_pert)
     v_pert = solve_pf_pq(Y_pert, state.v, p_target, q_target, state.idx_slack)
-    return v_pert, Y_pert
+    return v_pert, Y_pert, net_pert
 end
 
 @testset "AC PF Topology Sensitivities (:g, :b)" begin
@@ -73,10 +51,7 @@ end
 
     @testset "Finite-difference verification — case5" begin
         file = joinpath(pm_path, "case5.m")
-        pm_data = PowerModels.parse_file(file)
-        net_data = PowerModels.make_basic_network(pm_data)
-        PowerModels.compute_ac_pf!(net_data)
-        state = ACPowerFlowState(net_data)
+        state = load_ac_pf_state("case5.m")
 
         n = state.n
         m = state.m
@@ -110,8 +85,8 @@ end
 
             for e in test_branches
                 @testset "∂/∂$(param)_$e" begin
-                    v_p, Y_p = _perturbed_voltage(state, param, e, ε, p_base, q_base)
-                    v_m, Y_m = _perturbed_voltage(state, param, e, -ε, p_base, q_base)
+                    v_p, Y_p, net_p = _perturbed_voltage(state, param, e, ε, p_base, q_base)
+                    v_m, Y_m, net_m = _perturbed_voltage(state, param, e, -ε, p_base, q_base)
 
                     fd_vm = (abs.(v_p) - abs.(v_m)) / (2ε)
                     if norm(fd_vm) > 1e-6
@@ -125,15 +100,15 @@ end
                         @test rel_err_va < 1e-2
                     end
 
-                    fd_f = (_branch_flows(v_p, Y_p, state.branch_data) -
-                            _branch_flows(v_m, Y_m, state.branch_data)) / (2ε)
+                    fd_f = (_branch_flows(v_p, net_p) -
+                            _branch_flows(v_m, net_m)) / (2ε)
                     if norm(fd_f) > 1e-6
                         rel_err_f = norm(Matrix(S_f)[:, e] - fd_f) / norm(fd_f)
                         @test rel_err_f < 1e-2
                     end
 
-                    fd_im = (_branch_currents_mag(v_p, Y_p, state.branch_data) -
-                             _branch_currents_mag(v_m, Y_m, state.branch_data)) / (2ε)
+                    fd_im = (_branch_currents_mag(v_p, net_p) -
+                             _branch_currents_mag(v_m, net_m)) / (2ε)
                     if norm(fd_im) > 1e-6
                         rel_err_im = norm(Matrix(S_im)[:, e] - fd_im) / norm(fd_im)
                         @test rel_err_im < 1e-2
@@ -143,12 +118,47 @@ end
         end
     end
 
+    @testset "Transformer, phase shift, and parallel-line finite differences" begin
+        buses = [
+            ParsedBus(1, 3, 0.0, 0.0, 0.0, 0.0, 1, 1.0, 0.0, 230.0, 1, 1.1, 0.9),
+            ParsedBus(2, 1, 0.0, 0.0, 0.0, 0.0, 1, 1.0, 0.0, 230.0, 1, 1.1, 0.9),
+            ParsedBus(3, 1, 0.0, 0.0, 0.0, 0.0, 1, 1.0, 0.0, 230.0, 1, 1.1, 0.9),
+        ]
+        gens = [
+            ParsedGen(1, 1, 0.5, 0.0, 1.0, -1.0, 1.0, 100.0, 1, 2.0, 0.0, (1.0, 1.0, 0.0)),
+        ]
+        branches = [
+            ParsedBranch(1, 1, 2, 0.01, 0.10, 0.02, 2.0, 2.0, 2.0, 1.05, 0.12, 1, -π / 3, π / 3),
+            ParsedBranch(2, 1, 2, 0.02, 0.20, 0.01, 2.0, 2.0, 2.0, 1.00, 0.00, 1, -π / 3, π / 3),
+            ParsedBranch(3, 2, 3, 0.01, 0.15, 0.03, 2.0, 2.0, 2.0, 0.97, -0.08, 1, -π / 3, π / 3),
+        ]
+        net = ACNetwork(ParsedCase("topology_fd", "2", 100.0, buses, gens, branches, ParsedLoad[], ParsedShunt[]))
+        state = ACPowerFlowState(net, [1.01 + 0.02im, 0.98 - 0.04im, 1.02 + 0.01im])
+        non_slack = [i for i in 1:state.n if i != state.idx_slack]
+        injections = state.v .* conj.(state.Y * state.v)
+        p_target = real.(injections)[non_slack]
+        q_target = imag.(injections)[non_slack]
+        ε = 1e-6
+
+        for param in (:g, :b)
+            S_vm = calc_sensitivity(state, :vm, param)
+            S_va = calc_sensitivity(state, :va, param)
+            S_f = calc_sensitivity(state, :f, param)
+            S_im = calc_sensitivity(state, :im, param)
+            for e in 1:net.m
+                v_p, _, net_p = _perturbed_voltage(state, param, e, ε, p_target, q_target)
+                v_m, _, net_m = _perturbed_voltage(state, param, e, -ε, p_target, q_target)
+                @test Matrix(S_vm)[:, e] ≈ (abs.(v_p) - abs.(v_m)) / (2ε) atol=1e-6 rtol=1e-4
+                @test Matrix(S_va)[:, e] ≈ (angle.(v_p) - angle.(v_m)) / (2ε) atol=1e-6 rtol=1e-4
+                @test Matrix(S_f)[:, e] ≈ (_branch_flows(v_p, net_p) - _branch_flows(v_m, net_m)) / (2ε) atol=1e-6 rtol=1e-4
+                @test Matrix(S_im)[:, e] ≈ (_branch_currents_mag(v_p, net_p) - _branch_currents_mag(v_m, net_m)) / (2ε) atol=1e-6 rtol=1e-4
+            end
+        end
+    end
+
     @testset "Smoke tests — all 10 combinations" begin
         file = joinpath(pm_path, "case5.m")
-        pm_data = PowerModels.parse_file(file)
-        net_data = PowerModels.make_basic_network(pm_data)
-        PowerModels.compute_ac_pf!(net_data)
-        state = ACPowerFlowState(net_data)
+        state = load_ac_pf_state("case5.m")
 
         n = state.n
         m = state.m
@@ -175,10 +185,7 @@ end
 
     @testset "Error: state without ACNetwork" begin
         file = joinpath(pm_path, "case5.m")
-        pm_data = PowerModels.parse_file(file)
-        net_data = PowerModels.make_basic_network(pm_data)
-        PowerModels.compute_ac_pf!(net_data)
-        full_state = ACPowerFlowState(net_data)
+        full_state = load_ac_pf_state("case5.m")
 
         raw_state = ACPowerFlowState(full_state.v, full_state.Y;
             idx_slack=full_state.idx_slack, branch_data=full_state.branch_data)
@@ -189,9 +196,7 @@ end
 
     @testset "Non-basic network — col_to_id maps to branch IDs" begin
         file = joinpath(pm_path, "case5.m")
-        pm_data = PowerModels.parse_file(file)
-        PowerModels.compute_ac_pf!(pm_data)
-        state = ACPowerFlowState(pm_data)
+        state = load_ac_pf_state("case5.m")
 
         S = calc_sensitivity(state, :vm, :g)
         @test S.formulation == :acpf
@@ -202,10 +207,7 @@ end
 
     @testset "Sensitivity metadata" begin
         file = joinpath(pm_path, "case14.m")
-        pm_data = PowerModels.parse_file(file)
-        net_data = PowerModels.make_basic_network(pm_data)
-        PowerModels.compute_ac_pf!(net_data)
-        state = ACPowerFlowState(net_data)
+        state = load_ac_pf_state("case14.m")
 
         for param in (:g, :b)
             S = calc_sensitivity(state, :vm, param)

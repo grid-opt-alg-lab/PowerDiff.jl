@@ -12,12 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-using PowerDiff, PowerModels
-const PM = PowerModels
+using PowerDiff
 
-case_path = joinpath(dirname(pathof(PM)), "..", "test", "data", "matpower", "case14.m")
-pm_data = PM.parse_file(case_path)
-PM.make_basic_network!(pm_data)
+case_path = joinpath(get_path(:pglib), "pglib_opf_case14_ieee.m")
+pm_data = parse_file(case_path)
 
 net = DCNetwork(pm_data)
 d = PowerDiff.calc_demand_vector(pm_data)

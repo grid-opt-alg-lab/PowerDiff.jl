@@ -72,7 +72,7 @@ q_{g,\min,i} \leq q_{g,i} &\leq q_{g,\max,i} & (\rho_{qg,lb,i}, \rho_{qg,ub,i}) 
 The implementation uses a **reduced-space** formulation where branch flows ``p_{fr}``, ``q_{fr}``, ``p_{to}``, ``q_{to}`` are treated as functions of the voltage state ``(\theta, |V|)`` rather than separate primal variables. This means:
 
 - The flow definition constraints are eliminated
-- Stationarity conditions automatically include all chain-rule terms via ForwardDiff on the reduced Lagrangian
+- Stationarity conditions include all reduced-space chain-rule terms analytically
 - Flow bound complementary slackness uses the computed flow expressions
 
 ## KKT System
@@ -89,7 +89,7 @@ with total dimension ``6n + 12m + 6k + n_{\text{ref}}``, where ``n`` is the numb
 
 ### KKT Conditions
 
-1. **Stationarity** (``2n + 2k`` conditions): Computed via `ForwardDiff.gradient` on the reduced-space Lagrangian ``\mathcal{L}(\theta, |V|, p_g, q_g)`` which automatically handles chain-rule terms through flow expressions.
+1. **Stationarity** (``2n + 2k`` conditions): Assembled analytically from the reduced-space Lagrangian ``\mathcal{L}(\theta, |V|, p_g, q_g)`` and branch-flow derivatives.
 
 2. **Primal feasibility** (``2n + n_{\text{ref}}`` conditions):
    - Active power balance at each bus
@@ -107,11 +107,15 @@ with total dimension ``6n + 12m + 6k + n_{\text{ref}}``, where ``n`` is the numb
 
 ### KKT Jacobian
 
-The KKT Jacobian ``\partial K / \partial z`` is computed via ForwardDiff (dense matrix). This is applied to the KKT operator which includes stationarity via the reduced-space Lagrangian, making it self-consistent with the flow chain-rule terms.
+The KKT Jacobian ``\partial K / \partial z`` is assembled analytically as a
+sparse matrix. Branch-flow derivatives and Hessians are evaluated only where
+the reduced-space KKT terms require them.
 
 ### Parameter Jacobians
 
-For each parameter ``p``, the parameter Jacobian ``\partial K / \partial p`` is also computed via ForwardDiff. The parameter is injected into the KKT operator through keyword arguments, and ForwardDiff propagates dual numbers through the entire computation.
+For each parameter ``p``, the parameter Jacobian ``\partial K / \partial p`` is
+also assembled analytically. Single-column, JVP, and VJP paths avoid
+materializing the full parameter Jacobian when only one direction is needed.
 
 The full derivative is:
 

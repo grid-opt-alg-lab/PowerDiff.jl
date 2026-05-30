@@ -156,39 +156,33 @@ const DEFAULT_SHED_COST_MULTIPLIER = 10
 # =============================================================================
 
 """
-    DCNetwork(net::Dict; tau=DEFAULT_TAU, ref_bus=nothing)
+    DCNetwork(data::ParsedCase; tau=DEFAULT_TAU, ref_bus=nothing)
 
-Construct a DCNetwork from a PowerModels network dictionary.
-
-Accepts both basic and non-basic networks. Non-basic networks (with arbitrary
-bus/branch/gen IDs) are automatically translated to sequential indices internally.
-The original IDs are preserved in `id_map` for result interpretation.
+Construct a DCNetwork from normalized typed MATPOWER data.
 
 # Example
 ```julia
-raw = PowerModels.parse_file("case14.m")
-dc_net = DCNetwork(raw)  # non-basic OK
-# or
-net = PowerModels.make_basic_network(raw)
-dc_net = DCNetwork(net)  # basic also OK
+data = parse_file("case14.m")
+dc_net = DCNetwork(data)
 ```
 """
-function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
-    pm_data, id_map = _prepare_network_data(net)
+function DCNetwork(data::ParsedCase; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
+    id_map = IDMapping(data)
 
     n = length(id_map.bus_ids)
     m = length(id_map.branch_ids)
     k = length(id_map.gen_ids)
-    branch_tbl = pm_data["branch"]
-    gen_tbl = pm_data["gen"]
+    bus_tbl = Dict(bus.bus_i => bus for bus in data.bus)
+    branch_tbl = Dict(branch.index => branch for branch in data.branch)
+    gen_tbl = Dict(gen.index => gen for gen in data.gen)
 
     # Incidence matrix A (m × n) from active branches using id_map translation
     A = spzeros(m, n)
     for orig_id in id_map.branch_ids
-        br = branch_tbl[string(orig_id)]
+        br = branch_tbl[orig_id]
         row = id_map.branch_to_idx[orig_id]
-        f_col = id_map.bus_to_idx[br["f_bus"]]
-        t_col = id_map.bus_to_idx[br["t_bus"]]
+        f_col = id_map.bus_to_idx[br.f_bus]
+        t_col = id_map.bus_to_idx[br.t_bus]
         A[row, f_col] = 1.0
         A[row, t_col] = -1.0
     end
@@ -196,19 +190,19 @@ function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,I
     # Generator-bus incidence matrix G_inc (n × k)
     G_inc = spzeros(n, k)
     for orig_id in id_map.gen_ids
-        gen = gen_tbl[string(orig_id)]
+        gen = gen_tbl[orig_id]
         col = id_map.gen_to_idx[orig_id]
-        row = id_map.bus_to_idx[gen["gen_bus"]]
+        row = id_map.bus_to_idx[gen.gen_bus]
         G_inc[row, col] = 1.0
     end
 
     # Branch susceptances: b = imag(1/z)
     b = zeros(m)
     for orig_id in id_map.branch_ids
-        br = branch_tbl[string(orig_id)]
+        br = branch_tbl[orig_id]
         idx = id_map.branch_to_idx[orig_id]
-        r = br["br_r"]
-        x = br["br_x"]
+        r = br.br_r
+        x = br.br_x
         z2 = r^2 + x^2
         if z2 > 1e-10
             b[idx] = -x / z2
@@ -221,19 +215,19 @@ function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,I
     sw = ones(m)
 
     # Limits (iterate in sequential order via sorted IDs)
-    fmax = [branch_tbl[string(id_map.branch_ids[i])]["rate_a"] for i in 1:m]
-    gmax = [gen_tbl[string(id_map.gen_ids[i])]["pmax"] for i in 1:k]
-    gmin = [gen_tbl[string(id_map.gen_ids[i])]["pmin"] for i in 1:k]
+    fmax = [branch_tbl[id_map.branch_ids[i]].rate_a for i in 1:m]
+    gmax = [gen_tbl[id_map.gen_ids[i]].pmax for i in 1:k]
+    gmin = [gen_tbl[id_map.gen_ids[i]].pmin for i in 1:k]
 
     # Phase angle difference limits
-    angmax = [branch_tbl[string(id_map.branch_ids[i])]["angmax"] for i in 1:m]
-    angmin = [branch_tbl[string(id_map.branch_ids[i])]["angmin"] for i in 1:m]
+    angmax = [branch_tbl[id_map.branch_ids[i]].angmax for i in 1:m]
+    angmin = [branch_tbl[id_map.branch_ids[i]].angmin for i in 1:m]
 
     # Cost coefficients (assumes polynomial cost with at least 2 terms)
-    cq = [gen_tbl[string(id_map.gen_ids[i])]["cost"][1] for i in 1:k]
-    cl = [gen_tbl[string(id_map.gen_ids[i])]["cost"][2] for i in 1:k]
-    demand = _calc_demand_vector(pm_data, id_map)
-    pg_init = _calc_generation_vector(pm_data, id_map)
+    cq = [gen_tbl[id_map.gen_ids[i]].cost[1] for i in 1:k]
+    cl = [gen_tbl[id_map.gen_ids[i]].cost[2] for i in 1:k]
+    demand = calc_demand_vector(data)
+    pg_init = _calc_generation_vector(data, id_map)
 
     # Load-shedding cost: high penalty to discourage shedding when feasible
     marginal_cost_ub = max(maximum(2cq .* gmax .+ cl), 1.0)
@@ -241,7 +235,7 @@ function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,I
 
     # Reference bus (translate original ID to sequential index)
     if isnothing(ref_bus)
-        ref_candidates = [id for id in id_map.bus_ids if get(pm_data["bus"][string(id)], "bus_type", 1) == 3]
+        ref_candidates = [id for id in id_map.bus_ids if bus_tbl[id].bus_type == 3]
         orig_ref = isempty(ref_candidates) ? id_map.bus_ids[1] : ref_candidates[1]
         ref_bus = id_map.bus_to_idx[orig_ref]
     else
@@ -256,10 +250,6 @@ function DCNetwork(net::Dict; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,I
 
     return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, angmax, angmin,
                      cq, cl, c_shed, demand, pg_init, ref_bus, tau, id_map)
-end
-
-function DCNetwork(data::ParsedCase; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
-    return DCNetwork(_parsedcase_to_pm_data(data); tau=tau, ref_bus=ref_bus)
 end
 
 """
@@ -308,18 +298,6 @@ end
 # =============================================================================
 
 """
-    calc_demand_vector(net::Dict)
-
-Extract demand vector from PowerModels network dictionary.
-
-Works with both basic and non-basic networks.
-"""
-function calc_demand_vector(net::Dict)
-    pm_data, id_map = _prepare_network_data(net)
-    return _calc_demand_vector(pm_data, id_map)
-end
-
-"""
     calc_demand_vector(network::DCNetwork)
 
 Extract demand vector from a DCNetwork.
@@ -336,26 +314,6 @@ calc_demand_vector(data::ParsedCase) = begin
         d[bus_to_idx[load.load_bus]] += load.pd
     end
     d
-end
-
-"""
-Internal demand vector extraction from standardized network data.
-"""
-function _calc_demand_vector(pm_data::Dict, id_map::IDMapping)
-    n = length(id_map.bus_ids)
-    d = zeros(n)
-    if haskey(pm_data, "load")
-        for load_orig_id in id_map.load_ids
-            load = pm_data["load"][string(load_orig_id)]
-            bus_idx = id_map.bus_to_idx[load["load_bus"]]
-            d[bus_idx] += get(load, "pd", 0.0)
-        end
-    else
-        for (i, bus_orig_id) in enumerate(id_map.bus_ids)
-            d[i] = get(pm_data["bus"][string(bus_orig_id)], "pd", 0.0)
-        end
-    end
-    return d
 end
 
 """
@@ -402,14 +360,13 @@ end
 """
 Aggregate generation to bus-level vector.
 """
-function _calc_generation_vector(pm_data::Dict, id_map::IDMapping)
+function _calc_generation_vector(data::ParsedCase, id_map::IDMapping)
     n = length(id_map.bus_ids)
     g = zeros(n)
-    for gen_orig_id in id_map.gen_ids
-        gen_data = pm_data["gen"][string(gen_orig_id)]
-        bus_idx = id_map.bus_to_idx[gen_data["gen_bus"]]
-        pg = get(gen_data, "pg", (gen_data["pmin"] + gen_data["pmax"]) / 2)
-        g[bus_idx] += pg
+    for gen in data.gen
+        gen.gen_status != 0 || continue
+        bus_idx = id_map.bus_to_idx[gen.gen_bus]
+        g[bus_idx] += gen.pg
     end
     return g
 end
@@ -495,16 +452,14 @@ function DCPowerFlowState(net::DCNetwork, d::AbstractVector{<:Real})
 end
 
 """
-    DCPowerFlowState(net::Dict; g=nothing, d=nothing)
+    DCPowerFlowState(data::ParsedCase; g=nothing, d=nothing)
 
-Construct DCPowerFlowState from PowerModels network dictionary.
-
-Accepts both basic and non-basic networks.
+Construct DCPowerFlowState from typed MATPOWER data.
 If `d` is not provided, extracts demand from the network.
 If `g` is not provided, aggregates generation from gen data to buses.
 """
-function DCPowerFlowState(pm_net::Dict; g::Union{Nothing,AbstractVector}=nothing, d::Union{Nothing,AbstractVector}=nothing)
-    net = DCNetwork(pm_net)
+function DCPowerFlowState(data::ParsedCase; g::Union{Nothing,AbstractVector}=nothing, d::Union{Nothing,AbstractVector}=nothing)
+    net = DCNetwork(data)
 
     if isnothing(d)
         d = net.demand

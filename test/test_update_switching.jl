@@ -96,20 +96,18 @@
 
     # =========================================================================
     @testset "DC OPF: open lines do not enforce angle bounds" begin
-        dc_data = deepcopy(net_data)
+        dc_net = DCNetwork(net_data)
         # case5 has parallel lines 5 and 6 between the same buses
-        dc_data["branch"]["5"]["angmin"] = 1.0
-        dc_data["branch"]["5"]["angmax"] = 2.0
-        dc_data["branch"]["6"]["angmin"] = -2.0
-        dc_data["branch"]["6"]["angmax"] = -1.0
-
-        dc_net = DCNetwork(dc_data)
+        dc_net.angmin[5] = 1.0
+        dc_net.angmax[5] = 2.0
+        dc_net.angmin[6] = -2.0
+        dc_net.angmax[6] = -1.0
         sw_new = copy(dc_net.sw)
         sw_new[5] = 0.0
         sw_new[6] = 0.0
         dc_net.sw .= sw_new
 
-        prob = DCOPFProblem(dc_net, calc_demand_vector(dc_data))
+        prob = DCOPFProblem(dc_net, calc_demand_vector(net_data))
         sol = solve!(prob)
 
         @test all(isfinite, sol.va)
@@ -170,14 +168,14 @@
 
     # =========================================================================
     @testset "AC OPF: open lines do not enforce angle bounds" begin
-        ac_data = deepcopy(net_data)
+        ac_net = ACNetwork(net_data)
         # case5 has parallel lines 5 and 6 between the same buses
-        ac_data["branch"]["5"]["angmin"] = 1.0
-        ac_data["branch"]["5"]["angmax"] = 2.0
-        ac_data["branch"]["6"]["angmin"] = -2.0
-        ac_data["branch"]["6"]["angmax"] = -1.0
+        ac_net.angmin[5] = 1.0
+        ac_net.angmax[5] = 2.0
+        ac_net.angmin[6] = -2.0
+        ac_net.angmax[6] = -1.0
 
-        prob = ACOPFProblem(ac_data)
+        prob = ACOPFProblem(ac_net)
         sw_new = copy(prob.network.sw)
         sw_new[5] = 0.0
         sw_new[6] = 0.0

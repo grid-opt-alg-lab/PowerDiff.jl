@@ -22,8 +22,8 @@
 # round-trip dict_to_vec/vec_to_dict, and error handling for invalid IDs.
 
 @testset "JVP / VJP" begin
-    raw = PowerModels.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
-    basic = PowerModels.make_basic_network(deepcopy(raw))
+    raw = PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
+    basic = _make_basic_case(raw)
 
     # =================================================================
     # Basic network JVP
@@ -177,9 +177,7 @@
     # Complex sensitivity (AC PF :v operand)
     # =================================================================
     @testset "Complex sensitivity JVP/VJP" begin
-        pf_data = deepcopy(basic)
-        PowerModels.compute_ac_pf!(pf_data)
-        state = ACPowerFlowState(pf_data)
+        state = load_ac_pf_state("case5.m")
 
         S = calc_sensitivity(state, :v, :p)
 

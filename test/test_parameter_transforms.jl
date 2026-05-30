@@ -26,13 +26,10 @@ using Test
 @testset "Parameter Transforms" begin
     pm_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
     file = joinpath(pm_path, "case5.m")
-    pm_data = PowerModels.parse_file(file)
-    net_data = PowerModels.make_basic_network(pm_data)
+    net_data = PowerDiff.parse_file(file)
 
     @testset "AC PF: ∂/∂d = -∂/∂p (algebraic)" begin
-        pf_data = deepcopy(net_data)
-        PowerModels.compute_ac_pf!(pf_data)
-        state = ACPowerFlowState(pf_data)
+        state = load_ac_pf_state("case5.m")
 
         # Test all operands that work with :p
         for op in [:vm, :v, :im, :va, :f]
@@ -45,9 +42,7 @@ using Test
     end
 
     @testset "AC PF: ∂/∂qd = -∂/∂q (algebraic)" begin
-        pf_data = deepcopy(net_data)
-        PowerModels.compute_ac_pf!(pf_data)
-        state = ACPowerFlowState(pf_data)
+        state = load_ac_pf_state("case5.m")
 
         for op in [:vm, :v, :im, :va, :f]
             S_q = calc_sensitivity(state, op, :q)
@@ -58,9 +53,7 @@ using Test
     end
 
     @testset "AC PF: Jacobian blocks + demand transform is invalid" begin
-        pf_data = deepcopy(net_data)
-        PowerModels.compute_ac_pf!(pf_data)
-        state = ACPowerFlowState(pf_data)
+        state = load_ac_pf_state("case5.m")
 
         # :p and :q as operands don't have :p/:q as native params,
         # so the :d/:qd transforms cannot apply
@@ -95,9 +88,7 @@ using Test
     end
 
     @testset "Introspection includes transform-derived symbols" begin
-        pf_data = deepcopy(net_data)
-        PowerModels.compute_ac_pf!(pf_data)
-        state = ACPowerFlowState(pf_data)
+        state = load_ac_pf_state("case5.m")
 
         params = parameter_symbols(state)
         @test :d in params

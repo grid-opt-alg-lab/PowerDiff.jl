@@ -1,5 +1,20 @@
 # API Reference
 
+## MATPOWER Parser
+
+```@docs
+ParsedCase
+ParsedBus
+ParsedGen
+ParsedBranch
+ParsedLoad
+ParsedShunt
+parse_file
+parse_matpower
+parse_matpower_struct
+get_path
+```
+
 ## Sensitivity Interface
 
 ```@docs

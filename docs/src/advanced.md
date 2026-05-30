@@ -40,9 +40,9 @@ Stores the DC network topology and parameters.
 | `ref_bus` | `Int` | Reference bus index (sequential) |
 | `tau` | `Float64` | Regularization parameter |
 | `id_map` | `IDMapping` | Bidirectional element ID mapping (original ↔ sequential) |
-| `ref` | `Union{Nothing,Dict}` | Stored `build_ref` result (nothing for programmatic constructors) |
 
-Construct from PowerModels data: `DCNetwork(net)` (accepts both basic and non-basic networks) or with explicit parameters: `DCNetwork(n, m, k, A, G_inc, b; ...)`.
+Construct from typed MATPOWER data with `DCNetwork(parse_file("case14.m"))`, or
+with explicit parameters: `DCNetwork(n, m, k, A, G_inc, b; ...)`.
 
 ### ACNetwork
 
@@ -61,7 +61,6 @@ Stores the AC network with vectorized admittance representation.
 | `vm_min`, `vm_max` | `Vector{Float64}` | Voltage magnitude limits per bus |
 | `i_max` | `Vector{Float64}` | Branch current magnitude limits |
 | `id_map` | `IDMapping` | Bidirectional element ID mapping (original ↔ sequential) |
-| `ref` | `Union{Nothing,Dict}` | Stored `build_ref` result (nothing for Y-matrix constructors) |
 
 ## Sensitivity Caching
 
@@ -100,10 +99,13 @@ prob = DCOPFProblem(dc_net, d; optimizer=HiGHS.Optimizer)
 
 ### AC OPF
 
-Default solver is Ipopt. The `silent` keyword suppresses solver output:
+The default `:jump` backend uses Ipopt. The opt-in CPU `:exa` backend uses
+ExaModels and NLPModelsIpopt. Custom JuMP optimizer objects are accepted only
+by `:jump`.
 
 ```julia
 prob = ACOPFProblem(net; silent=true)
+exa_prob = ACOPFProblem(net; backend=:exa, silent=true)
 ```
 
 ## KKT System Access (Qualified)
@@ -124,7 +126,7 @@ idx = PD.kkt_indices(dc_net)           # Named index ranges
 
 # AC OPF — same unified API
 z = PD.flatten_variables(sol, ac_prob)
-J = PD.calc_kkt_jacobian(ac_prob)       # Dense Jacobian via ForwardDiff
+J = PD.calc_kkt_jacobian(ac_prob)       # Sparse analytical Jacobian
 dim = PD.kkt_dims(ac_prob)             # KKT dimension
 idx = PD.kkt_indices(ac_prob)          # Named index ranges
 ```

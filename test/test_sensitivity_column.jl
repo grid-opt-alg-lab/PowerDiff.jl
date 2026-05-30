@@ -126,8 +126,7 @@
     @testset "AC PF" begin
         pm_data = load_test_case("case5.m")
         @test !isnothing(pm_data)
-        ac_net = ACNetwork(pm_data)
-        ac_state = ACPowerFlowState(pm_data)
+        ac_state = load_ac_pf_state("case5.m")
 
         for (op, param) in [(:vm, :p), (:va, :q), (:im, :p), (:f, :q)]
             S = calc_sensitivity(ac_state, op, param)
@@ -194,7 +193,7 @@
     # Non-basic network (arbitrary element IDs)
     # =========================================================================
     @testset "Non-basic network" begin
-        pm_data = load_raw_case("case5.m")
+        pm_data = load_test_case("case5.m")
         @test !isnothing(pm_data)
 
         # case5.m has bus IDs [1, 2, 3, 4, 10]

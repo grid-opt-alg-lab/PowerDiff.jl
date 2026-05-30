@@ -27,8 +27,7 @@ using Test
 
     # Load a test network
     case_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower", "case5.m")
-    data = PowerModels.parse_file(case_path)
-    net_data = PowerModels.make_basic_network(data)
+    net_data = PowerDiff.parse_file(case_path)
 
     @testset "DC Power Flow Switching Sensitivity" begin
         net = DCNetwork(net_data)
@@ -254,8 +253,7 @@ using Test
 
     @testset "AC Voltage-Power Sensitivity" begin
         # Solve AC power flow
-        PowerModels.compute_ac_pf!(net_data)
-        state = ACPowerFlowState(net_data)
+        state = load_ac_pf_state("case5.m")
 
         # Get analytical sensitivity via new API
         dvm_dp = calc_sensitivity(state, :vm, :p)

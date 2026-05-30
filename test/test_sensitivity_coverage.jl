@@ -27,8 +27,7 @@ using Test
     # Load test case
     pm_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower")
     file = joinpath(pm_path, "case5.m")
-    pm_data = PowerModels.parse_file(file)
-    net_data = PowerModels.make_basic_network(pm_data)
+    net_data = PowerDiff.parse_file(file)
 
     @testset "DC Power Flow — all 6 combinations" begin
         net = DCNetwork(net_data)
@@ -98,9 +97,7 @@ using Test
 
     @testset "AC Power Flow — 24 native + 10 transform = 34 combinations" begin
         # Solve AC power flow first
-        pf_data = deepcopy(net_data)
-        PowerModels.compute_ac_pf!(pf_data)
-        state = ACPowerFlowState(pf_data)
+        state = load_ac_pf_state("case5.m")
 
         # 24 native combinations
         native_combos = [

@@ -21,9 +21,39 @@
 # arbitrary element IDs. Uses case5.m with bus IDs [1,2,3,4,10] — bus 10
 # maps to sequential index 5 via IDMapping.
 
+function _make_basic_case(data::ParsedCase)
+    bus_map = Dict(id => i for (i, id) in enumerate(sort([bus.bus_i for bus in data.bus])))
+    buses = [
+        ParsedBus(bus_map[bus.bus_i], bus.bus_type, bus.pd, bus.qd, bus.gs, bus.bs,
+            bus.area, bus.vm, bus.va, bus.base_kv, bus.zone, bus.vmax, bus.vmin)
+        for bus in data.bus
+    ]
+    gens = [
+        ParsedGen(gen.index, bus_map[gen.gen_bus], gen.pg, gen.qg, gen.qmax, gen.qmin,
+            gen.vg, gen.mbase, gen.gen_status, gen.pmax, gen.pmin, gen.cost)
+        for gen in data.gen
+    ]
+    branches = [
+        ParsedBranch(branch.index, bus_map[branch.f_bus], bus_map[branch.t_bus],
+            branch.br_r, branch.br_x, branch.br_b, branch.rate_a, branch.rate_b,
+            branch.rate_c, branch.tap, branch.shift, branch.br_status,
+            branch.angmin, branch.angmax)
+        for branch in data.branch
+    ]
+    loads = [
+        ParsedLoad(load.index, bus_map[load.load_bus], load.pd, load.qd, load.status)
+        for load in data.load
+    ]
+    shunts = [
+        ParsedShunt(shunt.index, bus_map[shunt.shunt_bus], shunt.gs, shunt.bs, shunt.status)
+        for shunt in data.shunt
+    ]
+    return ParsedCase(data.name, data.source_version, data.baseMVA, buses, gens, branches, loads, shunts)
+end
+
 @testset "Non-Basic Network Support" begin
-    raw = PowerModels.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
-    basic = PowerModels.make_basic_network(deepcopy(raw))
+    raw = PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
+    basic = _make_basic_case(raw)
 
     # =================================================================
     # IDMapping
@@ -150,7 +180,7 @@
 
         # Generator sensitivity: row_to_id should be gen IDs
         dpg_dd_nb = calc_sensitivity(prob_nb, :pg, :d)
-        @test dpg_dd_nb.row_to_id == sort(collect(parse(Int, k) for k in keys(raw["gen"])))
+        @test dpg_dd_nb.row_to_id == sort([gen.index for gen in raw.gen])
 
         # Branch sensitivity: row_to_id should be branch IDs
         df_dsw_nb = calc_sensitivity(prob_nb, :f, :sw)
@@ -203,10 +233,7 @@
     # AC Power Flow
     # =================================================================
     @testset "AC power flow non-basic" begin
-        # Solve AC PF using PowerModels on non-basic network
-        pf_data_nb = deepcopy(raw)
-        PowerModels.compute_ac_pf!(pf_data_nb)
-        state_nb = ACPowerFlowState(pf_data_nb)
+        state_nb = load_ac_pf_state("case5.m")
 
         # Voltage sensitivity should be finite
         dvm_dp = calc_sensitivity(state_nb, :vm, :p)
@@ -244,7 +271,7 @@
 
         dpg_dsw = calc_sensitivity(prob_nb, :pg, :sw)
         @test all(isfinite, Matrix(dpg_dsw))
-        @test dpg_dsw.row_to_id == sort(collect(parse(Int, k) for k in keys(raw["gen"])))
+        @test dpg_dsw.row_to_id == sort([gen.index for gen in raw.gen])
     end
 
     # =================================================================

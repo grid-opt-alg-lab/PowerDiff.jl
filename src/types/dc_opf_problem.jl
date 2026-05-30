@@ -266,7 +266,7 @@ If `d` is not provided, demand is read from the network's typed cache.
 
 # Example
 ```julia
-net = DCNetwork(pm_data)
+net = DCNetwork(data)
 prob = DCOPFProblem(net)       # demand extracted from network data
 prob = DCOPFProblem(net; d=d)  # explicit demand
 ```
@@ -278,26 +278,10 @@ function DCOPFProblem(network::DCNetwork; d::Union{Nothing,AbstractVector}=nothi
     return DCOPFProblem(network, d; kwargs...)
 end
 
-"""
-    DCOPFProblem(net::Dict; d=nothing, kwargs...)
-
-Convenience constructor: build DCOPFProblem directly from PowerModels dict.
-
-Accepts both basic and non-basic networks.
-If `d` is not provided, extracts demand from the network data.
-"""
-function DCOPFProblem(net::Dict; d::Union{Nothing,AbstractVector}=nothing, tau::Float64=DEFAULT_TAU, kwargs...)
-    network = DCNetwork(net; tau=tau)
-    if isnothing(d)
-        d = network.demand
-    end
-    return DCOPFProblem(network, d; kwargs...)
-end
-
 function DCOPFProblem(data::ParsedCase; d::Union{Nothing,AbstractVector}=nothing, tau::Float64=DEFAULT_TAU, kwargs...)
     network = DCNetwork(data; tau=tau)
     if isnothing(d)
-        d = calc_demand_vector(data)
+        d = calc_demand_vector(network)
     end
     return DCOPFProblem(network, d; kwargs...)
 end

@@ -20,9 +20,8 @@
 # which defines its own load_test_case inline).
 #
 # Data loaders:
-#   load_test_case  — parse MATPOWER case from PowerModels' bundled test data,
-#                     returns a basic (sequentially-renumbered) network dict
-#   load_raw_case   — same, but returns the raw (non-basic) network dict
+#   load_test_case  — parse MATPOWER case into PowerDiff's typed representation
+#   load_pm_case    — parse a PowerModels dictionary for oracle comparisons only
 #
 # Programmatic networks:
 #   create_2bus_network          — minimal 2-bus DC network with known closed-form solution
@@ -55,14 +54,12 @@ const PD_PGLIB_DIR = PowerDiff.get_path(:pglib)
 """
     load_test_case(case_name::String)
 
-Load and prepare a PowerModels test case.
-Returns a basic network dictionary or nothing if not found.
+Load a PowerModels test fixture through PowerDiff's typed parser.
 """
 function load_test_case(case_name::String)
     case_path = joinpath(PM_DATA_DIR, case_name)
     if isfile(case_path)
-        raw = PowerModels.parse_file(case_path)
-        return PowerModels.make_basic_network(raw)
+        return PowerDiff.parse_file(case_path)
     else
         @warn "Test case not found: $case_path"
         return nothing
@@ -70,17 +67,38 @@ function load_test_case(case_name::String)
 end
 
 """
-    load_raw_case(case_name::String)
+    load_pm_case(case_name::String; basic=false)
 
-Load a raw (non-basic) PowerModels network.
+Load a PowerModels dictionary for oracle comparisons.
 """
-function load_raw_case(case_name::String)
+function load_pm_case(case_name::String; basic::Bool=false)
     case_path = joinpath(PM_DATA_DIR, case_name)
     if isfile(case_path)
-        return PowerModels.parse_file(case_path)
+        data = PowerModels.parse_file(case_path)
+        return basic ? PowerModels.make_basic_network(data) : data
     else
         return nothing
     end
+end
+
+load_raw_case(case_name::String) = load_pm_case(case_name)
+
+"""
+    load_ac_pf_state(case_name::String)
+
+Solve an AC power flow with PowerModels, then wrap the resulting voltage vector
+in PowerDiff's typed AC network representation.
+"""
+function load_ac_pf_state(case_name::String)
+    data = load_test_case(case_name)
+    pm_data = load_pm_case(case_name; basic=true)
+    if isnothing(data) || isnothing(pm_data)
+        return nothing
+    end
+
+    PowerModels.compute_ac_pf!(pm_data)
+    v = PowerModels.calc_basic_bus_voltage(pm_data)
+    return ACPowerFlowState(ACNetwork(data), v)
 end
 
 """
