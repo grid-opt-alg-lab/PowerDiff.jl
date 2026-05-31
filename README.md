@@ -67,6 +67,7 @@ formats to MATPOWER before constructing PowerDiff networks.
 ## Dependencies
 
 - [JuMP.jl](https://github.com/jump-dev/JuMP.jl) — Optimization modeling
+- [ExaModels.jl](https://github.com/exanauts/ExaModels.jl) — Alternative optimization modeling for GPU parallelization
 - [Ipopt.jl](https://github.com/jump-dev/Ipopt.jl) — Default solver for DC and AC OPF
 
 ## License
