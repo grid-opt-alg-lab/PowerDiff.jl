@@ -285,7 +285,11 @@ The KKT system includes:
 
 Total: 5n + 6m + 3k + n_ref
 """
-kkt_dims(prob::DCOPFProblem) = kkt_dims(prob.network)
+function kkt_dims(prob::DCOPFProblem)
+    net = getfield(prob, :network)
+    return _dc_kkt_dims(getfield(net, :n), getfield(net, :m), getfield(net, :k),
+                        length(getfield(prob, :cons).ref))
+end
 kkt_dims(n::Int, m::Int, k::Int) = _dc_kkt_dims(n, m, k, 1)
 _dc_kkt_dims(n::Int, m::Int, k::Int, n_ref::Int) = 5n + 6m + 3k + n_ref
 
@@ -293,7 +297,7 @@ function kkt_dims(net::DCNetwork)
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    n_ref = length(reference_buses(net))
+    n_ref = length(_reference_buses(net))
     # va(n) + pg(k) + f(m) + psh(n) + lam_lb(m) + lam_ub(m) + gamma_lb(m) + gamma_ub(m) + rho_lb(k) + rho_ub(k) + mu_lb(n) + mu_ub(n) + nu_bal(n) + nu_flow(m) + ref(n_ref)
     return _dc_kkt_dims(n, m, k, n_ref)
 end
@@ -340,8 +344,30 @@ function _dc_kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
     )
 end
 
-kkt_indices(net::DCNetwork) = _dc_kkt_indices(net.n, net.m, net.k, length(reference_buses(net)))
-kkt_indices(prob::DCOPFProblem) = kkt_indices(prob.network)
+kkt_indices(net::DCNetwork) = _dc_kkt_indices(net.n, net.m, net.k, length(_reference_buses(net)))
+
+function kkt_indices(prob::DCOPFProblem)
+    net = getfield(prob, :network)
+    return _dc_kkt_indices(getfield(net, :n), getfield(net, :m), getfield(net, :k),
+                           length(getfield(prob, :cons).ref))
+end
+
+function _dc_kkt_layout(net::DCNetwork)
+    n_ref = length(_reference_buses(net))
+    n = getfield(net, :n)
+    m = getfield(net, :m)
+    k = getfield(net, :k)
+    return _dc_kkt_dims(n, m, k, n_ref), _dc_kkt_indices(n, m, k, n_ref)
+end
+
+function _dc_kkt_layout(prob::DCOPFProblem)
+    net = getfield(prob, :network)
+    n_ref = length(getfield(prob, :cons).ref)
+    n = getfield(net, :n)
+    m = getfield(net, :m)
+    k = getfield(net, :k)
+    return _dc_kkt_dims(n, m, k, n_ref), _dc_kkt_indices(n, m, k, n_ref)
+end
 
 # =============================================================================
 # Variable Flattening/Unflattening
@@ -464,7 +490,7 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     B_mat = net.A' * W * net.A
     WA = W * net.A
 
-    refs = reference_buses(net)
+    refs = _reference_buses(net)
 
     # KKT conditions
     # 1. Stationarity w.r.t. θ
@@ -586,7 +612,7 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    refs = reference_buses(net)
+    refs = _reference_buses(net)
     n_ref = length(refs)
     dim = _dc_kkt_dims(n, m, k, n_ref)
     A = getfield(net, :A)
@@ -832,8 +858,7 @@ function calc_kkt_jacobian_demand(net::DCNetwork, d::AbstractVector, sol::DCOPFS
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim = kkt_dims(net)
-    idx = kkt_indices(net)
+    dim, idx = _dc_kkt_layout(net)
     mu_ub = getfield(sol, :mu_ub)
 
     colptr = Vector{Int}(undef, n + 1)
@@ -861,8 +886,8 @@ Compute column `j` of the KKT parameter Jacobian ∂K/∂d.
 Only 1-2 nonzeros: always `nu_bal[j]`, plus `mu_ub[j]` if `d[j] > 0`.
 """
 function calc_kkt_jacobian_demand_column(net::DCNetwork, d::AbstractVector, sol::DCOPFSolution, j::Int)
-    col = zeros(kkt_dims(net))
-    idx = kkt_indices(net)
+    dim, idx = _dc_kkt_layout(net)
+    col = zeros(dim)
     col[idx.nu_bal[j]] = -1.0
     col[idx.mu_ub[j]] = sol.mu_ub[j] * _shed_capacity_derivative(d[j])
     return col
@@ -896,7 +921,7 @@ enabling gradient-based optimization for topology control.
 function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
-    dim = kkt_dims(net)
+    dim, idx = _dc_kkt_layout(prob)
 
     θ = sol.va
 
@@ -906,9 +931,6 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
     A = net.A
 
     J_s = spzeros(dim, m)
-
-    # Use centralized index calculation
-    idx = kkt_indices(net)
 
     # Precompute A * θ once (invariant across branches)
     Aθ = A * θ
@@ -963,8 +985,8 @@ Compute column `e` of the KKT parameter Jacobian ∂K/∂sw.
 """
 function calc_kkt_jacobian_switching_column(prob::DCOPFProblem, sol::DCOPFSolution, e::Int)
     net = prob.network
-    col = zeros(kkt_dims(net))
-    idx = kkt_indices(net)
+    dim, idx = _dc_kkt_layout(prob)
+    col = zeros(dim)
     A = net.A; b = net.b; θ = sol.va
     Aθ_e = dot(A[e, :], θ)
     f_bus, t_bus = _branch_bus_indices(A, e)

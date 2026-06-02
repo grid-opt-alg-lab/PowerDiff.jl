@@ -119,6 +119,29 @@ end
         @test all(isfinite, Matrix(calc_sensitivity(state, :f, :d)))
     end
 
+    @testset "reference bus cache follows direct topology mutation" begin
+        net = _make_bridge_network()
+        dim_connected = kkt_dims(net)
+        @test reference_buses(net) == [1]
+
+        # Returned references are defensive copies of the internal cache.
+        refs = reference_buses(net)
+        refs[1] = 4
+        @test reference_buses(net) == [1]
+
+        net.sw[2] = 0.0
+        @test reference_buses(net) == [1, 3]
+        @test kkt_dims(net) == dim_connected + 1
+
+        net.sw[2] = 1.0
+        @test reference_buses(net) == [1]
+        @test kkt_dims(net) == dim_connected
+
+        net.b[2] = 0.0
+        @test reference_buses(net) == [1, 3]
+        @test kkt_dims(net) == dim_connected + 1
+    end
+
     @testset "bundled PowerModels disconnected cases" begin
         for case_name in ["case5_db.m", "case6.m"]
             @testset "$case_name" begin

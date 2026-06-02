@@ -50,8 +50,7 @@ Derivatives:
 function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
-    dim = kkt_dims(net)
-    idx = kkt_indices(net)
+    dim, idx = _dc_kkt_layout(prob)
 
     theta = sol.va
     nu_bal = sol.nu_bal
@@ -91,8 +90,8 @@ Compute column `e` of ∂K/∂b. ~6 nonzeros from the incidence structure of bra
 """
 function calc_kkt_jacobian_susceptance_column(prob::DCOPFProblem, sol::DCOPFSolution, e::Int)
     net = prob.network
-    col = zeros(kkt_dims(net))
-    idx = kkt_indices(net)
+    dim, idx = _dc_kkt_layout(prob)
+    col = zeros(dim)
     A = net.A; sw = net.sw; θ = sol.va
     Aθ_e = dot(A[e, :], θ)
     f_bus, t_bus = _branch_bus_indices(A, e)

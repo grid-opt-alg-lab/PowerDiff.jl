@@ -61,6 +61,7 @@ update_switching!
 update_fmax!
 calc_demand_vector
 calc_susceptance_matrix
+reference_buses
 calc_lmp
 calc_qlmp
 calc_congestion_component

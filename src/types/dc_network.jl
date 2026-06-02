@@ -20,6 +20,21 @@
 # Laplacian B = A' * Diag(-b .* sw) * A.
 
 """
+Internal cache for the energized DC topology. The incidence matrix structure is
+fixed after construction, while `b` and `sw` may change in place.
+"""
+mutable struct _DCTopologyCache
+    from_bus::Vector{Int}
+    to_bus::Vector{Int}
+    energized::BitVector
+    refs::Vector{Int}
+    non_ref::Vector{Int}
+    initialized::Bool
+end
+
+_DCTopologyCache() = _DCTopologyCache(Int[], Int[], BitVector(), Int[], Int[], false)
+
+"""
     DCNetwork <: AbstractPowerNetwork
 
 DC network data for B-theta OPF formulation. Uses susceptance-weighted Laplacian
@@ -63,6 +78,7 @@ struct DCNetwork <: AbstractPowerNetwork
     ref_bus::Int
     tau::Float64
     id_map::IDMapping
+    topology_cache::_DCTopologyCache
 end
 
 # =============================================================================
@@ -536,7 +552,8 @@ function DCNetwork(data::NamedTuple; tau::Float64=DEFAULT_TAU, ref_bus::Union{No
     end
 
     return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, angmax, angmin,
-                     cq, cl, c_shed, demand, pg_init, ref_bus, tau, id_map)
+                     cq, cl, c_shed, demand, pg_init, ref_bus, tau, id_map,
+                     _DCTopologyCache())
 end
 
 """
@@ -576,7 +593,8 @@ function DCNetwork(
         Float64.(c_shed),
         Float64.(demand), Float64.(pg_init),
         ref_bus, tau,
-        IDMapping(n, m, k)
+        IDMapping(n, m, k),
+        _DCTopologyCache()
     )
 end
 
@@ -624,16 +642,23 @@ function calc_susceptance_matrix(network::DCNetwork)
     return sparse(network.A' * W * network.A)
 end
 
-"""
-    reference_buses(net::DCNetwork) → Vector{Int}
+@inline _is_energized(net::DCNetwork, e::Int) =
+    !iszero(getfield(net, :b)[e] * getfield(net, :sw)[e])
 
-Return one deterministic reference bus for each energized island.
+function _topology_cache_valid(net::DCNetwork)
+    cache = getfield(net, :topology_cache)
+    cache.initialized || return false
+    energized = cache.energized
+    m = getfield(net, :m)
+    length(energized) == m || return false
+    @inbounds for e in 1:m
+        energized[e] == _is_energized(net, e) || return false
+    end
+    return true
+end
 
-The configured `net.ref_bus` is preserved for its island. Every other island,
-including an isolated bus, uses its lowest sequential bus index. A branch is
-energized when `b[e] * sw[e] != 0`.
-"""
-function reference_buses(net::DCNetwork)
+function _refresh_topology_cache!(net::DCNetwork)
+    cache = net.topology_cache
     parent = collect(1:net.n)
 
     function find_root(i::Int)
@@ -656,22 +681,26 @@ function reference_buses(net::DCNetwork)
         return nothing
     end
 
-    from_bus = zeros(Int, net.m)
-    to_bus = zeros(Int, net.m)
-    rows, cols, nz_values = findnz(net.A)
-    @inbounds for p in eachindex(rows)
-        if nz_values[p] > 0
-            from_bus[rows[p]] = cols[p]
-        else
-            to_bus[rows[p]] = cols[p]
+    if length(cache.from_bus) != net.m
+        cache.from_bus = zeros(Int, net.m)
+        cache.to_bus = zeros(Int, net.m)
+        rows, cols, nz_values = findnz(net.A)
+        @inbounds for p in eachindex(rows)
+            if nz_values[p] > 0
+                cache.from_bus[rows[p]] = cols[p]
+            else
+                cache.to_bus[rows[p]] = cols[p]
+            end
         end
     end
 
+    resize!(cache.energized, net.m)
     @inbounds for e in 1:net.m
-        iszero(net.b[e] * net.sw[e]) && continue
-        from_bus[e] > 0 && to_bus[e] > 0 ||
+        cache.energized[e] = _is_energized(net, e)
+        cache.energized[e] || continue
+        cache.from_bus[e] > 0 && cache.to_bus[e] > 0 ||
             error("Incidence matrix row $e must have exactly two nonzero entries")
-        union_roots!(from_bus[e], to_bus[e])
+        union_roots!(cache.from_bus[e], cache.to_bus[e])
     end
 
     refs_by_root = Dict{Int,Int}()
@@ -680,11 +709,32 @@ function reference_buses(net::DCNetwork)
         refs_by_root[root] = min(get(refs_by_root, root, bus), bus)
     end
     refs_by_root[find_root(net.ref_bus)] = net.ref_bus
-    return sort!(collect(values(refs_by_root)))
+    cache.refs = sort!(collect(values(refs_by_root)))
+    cache.non_ref = setdiff(1:net.n, cache.refs)
+    cache.initialized = true
+    return cache
 end
 
+function _topology_cache(net::DCNetwork)
+    _topology_cache_valid(net) || _refresh_topology_cache!(net)
+    return getfield(net, :topology_cache)
+end
+
+_reference_buses(net::DCNetwork) = _topology_cache(net).refs
+
+"""
+    reference_buses(net::DCNetwork) → Vector{Int}
+
+Return one deterministic reference bus for each energized island.
+
+The configured `net.ref_bus` is preserved for its island. Every other island,
+including an isolated bus, uses its lowest sequential bus index. A branch is
+energized when `b[e] * sw[e] != 0`.
+"""
+reference_buses(net::DCNetwork) = copy(_reference_buses(net))
+
 """Return bus indices after removing one reference bus per energized island."""
-_non_reference_buses(net::DCNetwork) = setdiff(1:net.n, reference_buses(net))
+_non_reference_buses(net::DCNetwork) = copy(_topology_cache(net).non_ref)
 
 """
     _factorize_B_r(net::DCNetwork) → (factor, non_ref)

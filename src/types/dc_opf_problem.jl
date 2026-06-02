@@ -246,7 +246,7 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     shed_ub = @constraint(model, psh .<= _shed_capacity.(d))
 
     # One angle reference per energized island removes the Laplacian nullspace.
-    refs = reference_buses(network)
+    refs = _reference_buses(network)
     ref_con = @constraint(model, [i in refs], va[i] == 0.0)
 
     # Open lines should not constrain angle differences.
