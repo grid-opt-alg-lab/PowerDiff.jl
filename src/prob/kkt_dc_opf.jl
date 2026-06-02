@@ -72,7 +72,8 @@ function _ensure_kkt_factor!(prob::DCOPFProblem)
 end
 
 # Must match solve!'s snap tolerance so the canonicalized duals agree with the KKT system.
-@inline _is_fixed_zero_shed(d::Real) = abs(d) < COMPLEMENTARITY_SNAP_TOL
+@inline _is_fixed_zero_shed(d::Real) = _shed_capacity(d) < COMPLEMENTARITY_SNAP_TOL
+@inline _shed_capacity_derivative(d::Real) = _is_fixed_zero_shed(d) ? zero(d) : one(d)
 
 # =============================================================================
 # Cached Derivative Computation Functions
@@ -421,7 +422,7 @@ s.t. G_inc * g + psh - d = B * θ   (ν_bal)
      g ≥ gmin                       (ρ_lb)
      g ≤ gmax                       (ρ_ub)
      0 ≤ psh                        (μ_lb)
-     psh ≤ d                        (μ_ub)
+     psh ≤ max(d, 0)                (μ_ub)
      θ[ref] = 0                     (η_ref)
 ```
 
@@ -492,9 +493,9 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     K_ρ_ub = ρ_ub .* (net.gmax - g)
 
     # 8. Load shedding bounds
-    # If d[i] == 0, psh[i] is structurally fixed to zero and the upper-bound
-    # dual is redundant. Replace the degenerate complementarity pair by
-    # psh[i] = 0 and μ_ub[i] = 0 to avoid an exactly singular KKT block.
+    # If max(d[i], 0) == 0, psh[i] is structurally fixed to zero and the
+    # upper-bound dual is redundant. Replace the degenerate complementarity
+    # pair by psh[i] = 0 and μ_ub[i] = 0 to avoid an exactly singular KKT block.
     K_μ_lb = similar(psh)
     K_μ_ub = similar(psh)
     @inbounds for i in 1:n
@@ -503,7 +504,7 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
             K_μ_ub[i] = μ_ub[i]
         else
             K_μ_lb[i] = μ_lb[i] * psh[i]
-            K_μ_ub[i] = μ_ub[i] * (d[i] - psh[i])
+            K_μ_ub[i] = μ_ub[i] * (_shed_capacity(d[i]) - psh[i])
         end
     end
 
@@ -762,7 +763,7 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     # ∂K_psh/∂μ_lb = -I
     # ∂K_μ_lb/∂μ_lb = Diag(psh), except fixed zero-shed buses omit this term
     # ∂K_psh/∂μ_ub = I
-    # ∂K_μ_ub/∂μ_ub = Diag(d - psh), except fixed zero-shed buses use I
+    # ∂K_μ_ub/∂μ_ub = Diag(max(d, 0) - psh), except fixed zero-shed buses use I
     @inbounds for i in 1:n
         start_col!(idx.mu_lb[i])
         _push_csc_entry!(rowval, nzval, idx.psh[i], -1.0)
@@ -774,7 +775,7 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         if _is_fixed_zero_shed(d[i])
             _push_csc_entry!(rowval, nzval, idx.mu_ub[i], 1.0)
         else
-            _push_csc_entry!(rowval, nzval, idx.mu_ub[i], d[i] - psh[i])
+            _push_csc_entry!(rowval, nzval, idx.mu_ub[i], _shed_capacity(d[i]) - psh[i])
         end
     end
 
@@ -835,10 +836,11 @@ function calc_kkt_jacobian_demand(net::DCNetwork, d::AbstractVector, sol::DCOPFS
     sizehint!(rowval, 2n)
     sizehint!(nzval, 2n)
 
-    # ∂K_power_bal/∂d = -I and ∂K_μ_ub/∂d = Diag(μ_ub) for positive-demand buses.
+    # ∂K_power_bal/∂d = -I and ∂K_μ_ub/∂d = Diag(μ_ub .* ∂max(d, 0)/∂d).
     @inbounds for i in 1:n
         colptr[i] = length(rowval) + 1
-        _is_fixed_zero_shed(d[i]) || _push_csc_entry!(rowval, nzval, idx.mu_ub[i], mu_ub[i])
+        shed_capacity_derivative = _shed_capacity_derivative(d[i])
+        _push_csc_entry!(rowval, nzval, idx.mu_ub[i], mu_ub[i] * shed_capacity_derivative)
         _push_csc_entry!(rowval, nzval, idx.nu_bal[i], -1.0)
     end
     colptr[n + 1] = length(rowval) + 1
@@ -856,7 +858,7 @@ function calc_kkt_jacobian_demand_column(net::DCNetwork, d::AbstractVector, sol:
     col = zeros(kkt_dims(net))
     idx = kkt_indices(net)
     col[idx.nu_bal[j]] = -1.0
-    _is_fixed_zero_shed(d[j]) || (col[idx.mu_ub[j]] = sol.mu_ub[j])
+    col[idx.mu_ub[j]] = sol.mu_ub[j] * _shed_capacity_derivative(d[j])
     return col
 end
 

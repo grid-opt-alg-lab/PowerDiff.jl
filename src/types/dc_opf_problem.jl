@@ -144,6 +144,14 @@ end
 # =============================================================================
 
 """
+    _shed_capacity(d::Real)
+
+Return the curtailable portion of bus demand. Negative net demand represents an
+injection, so it remains in power balance but cannot be shed.
+"""
+@inline _shed_capacity(d::Real) = max(d, zero(d))
+
+"""
     DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Ipopt.Optimizer, silent=true)
 
 Build a B-θ DC OPF problem for the given network and demand.
@@ -165,7 +173,7 @@ solve!(prob)
 function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Ipopt.Optimizer, silent::Bool=true)
     length(d) == network.n || throw(DimensionMismatch("Demand vector length $(length(d)) must match number of buses $(network.n)"))
 
-    _warn_negative_demand(d)
+    _debug_negative_demand(d)
 
     prob = DCOPFProblem(
         JuMP.Model(), network, VariableRef[], VariableRef[], VariableRef[], VariableRef[],
@@ -232,9 +240,10 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     gen_lb = @constraint(model, pg .>= network.gmin)
     gen_ub = @constraint(model, pg .<= network.gmax)
 
-    # Load shedding bounds: 0 ≤ psh ≤ d
+    # Load shedding bounds: 0 ≤ psh ≤ max(d, 0). Signed net demand remains in
+    # power balance, but negative net demand is an injection and cannot be shed.
     shed_lb = @constraint(model, psh .>= 0)
-    shed_ub = @constraint(model, psh .<= d)
+    shed_ub = @constraint(model, psh .<= _shed_capacity.(d))
 
     # Reference bus
     ref_con = @constraint(model, va[network.ref_bus] == 0.0)

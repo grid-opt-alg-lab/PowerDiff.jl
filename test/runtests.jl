@@ -870,16 +870,16 @@ include("test_apf_integration.jl")
 @testset "silence()" begin
     PowerDiff._SILENCE_WARNINGS[] = false
 
-    # Before silence: negative demand warning should fire
+    # Negative net demand is supported and should not warn.
     net5 = load_test_case("case5.m")
     if !isnothing(net5)
         dc_net = DCNetwork(net5)
         d = calc_demand_vector(dc_net)
         d_neg = copy(d)
         d_neg[1] = -1.0
-        @test_warn "Negative demand" DCOPFProblem(dc_net, d_neg)
+        @test_nowarn DCOPFProblem(dc_net, d_neg)
 
-        # After silence: same call should be quiet
+        # silence() still toggles package warning suppression.
         PowerDiff.silence()
         @test PowerDiff._SILENCE_WARNINGS[] == true
         @test_nowarn DCOPFProblem(dc_net, d_neg)
