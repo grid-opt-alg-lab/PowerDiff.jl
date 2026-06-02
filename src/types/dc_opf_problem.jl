@@ -123,6 +123,7 @@ B-θ formulation of DC OPF wrapped around a JuMP model.
 - `d`: Demand parameter (can be updated for sensitivity analysis)
 - `cons`: Named tuple of constraint references
 - `cache`: Mutable sensitivity cache for avoiding redundant KKT solves
+- `_n_ref`: Number of energized-island reference constraints (internal)
 - `_optimizer`: Optimizer factory for model rebuilds (internal)
 - `_silent`: Whether to suppress solver output (internal)
 """
@@ -136,6 +137,7 @@ mutable struct DCOPFProblem{O} <: AbstractOPFProblem
     d::Vector{Float64}
     cons::NamedTuple
     cache::DCSensitivityCache
+    _n_ref::Int
     _optimizer::O
     _silent::Bool
 end
@@ -178,7 +180,7 @@ function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Ipopt.Opt
 
     prob = DCOPFProblem(
         JuMP.Model(), network, VariableRef[], VariableRef[], VariableRef[], VariableRef[],
-        Float64.(d), (;), DCSensitivityCache(), optimizer, silent
+        Float64.(d), (;), DCSensitivityCache(), 0, optimizer, silent
     )
     _rebuild_jump_model!(prob)
     return prob
@@ -258,6 +260,7 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     prob.pg = pg
     prob.f = f
     prob.psh = psh
+    prob._n_ref = length(refs)
     prob.cons = (
         power_bal = power_bal,
         flow_def = flow_def,

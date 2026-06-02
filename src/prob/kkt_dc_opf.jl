@@ -288,7 +288,7 @@ Total: 5n + 6m + 3k + n_ref
 function kkt_dims(prob::DCOPFProblem)
     net = getfield(prob, :network)
     return _dc_kkt_dims(getfield(net, :n), getfield(net, :m), getfield(net, :k),
-                        length(getfield(prob, :cons).ref))
+                        getfield(prob, :_n_ref))
 end
 kkt_dims(n::Int, m::Int, k::Int) = _dc_kkt_dims(n, m, k, 1)
 _dc_kkt_dims(n::Int, m::Int, k::Int, n_ref::Int) = 5n + 6m + 3k + n_ref
@@ -349,7 +349,7 @@ kkt_indices(net::DCNetwork) = _dc_kkt_indices(net.n, net.m, net.k, length(_refer
 function kkt_indices(prob::DCOPFProblem)
     net = getfield(prob, :network)
     return _dc_kkt_indices(getfield(net, :n), getfield(net, :m), getfield(net, :k),
-                           length(getfield(prob, :cons).ref))
+                           getfield(prob, :_n_ref))
 end
 
 function _dc_kkt_layout(net::DCNetwork)
@@ -362,7 +362,7 @@ end
 
 function _dc_kkt_layout(prob::DCOPFProblem)
     net = getfield(prob, :network)
-    n_ref = length(getfield(prob, :cons).ref)
+    n_ref = getfield(prob, :_n_ref)
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
