@@ -51,7 +51,7 @@ precomputed at construction time).
 - `dz_dfmax`: Full KKT derivative w.r.t. flow limits (or nothing)
 - `dz_db`: Full KKT derivative w.r.t. susceptances (or nothing)
 - `b_r_factor`: Cached reduced susceptance factorization (topology-dependent, survives demand changes)
-- `work`: Scratch workspace for VJP/JVP KKT solves (lazily allocated on first call, survives invalidation since its size depends only on `(n, m, k)` which are fixed at construction)
+- `work`: Scratch workspace for VJP/JVP KKT solves (lazily allocated on first call)
 """
 mutable struct DCSensitivityCache
     solution::Union{Nothing,DCOPFSolution}
@@ -97,12 +97,13 @@ end
 """
     invalidate_topology!(cache::DCSensitivityCache)
 
-Clear all cached data including topology-dependent `b_r_factor`.
+Clear all cached data including topology-dependent `b_r_factor` and `work`.
 Called when network topology changes (switching, susceptances).
 """
 function invalidate_topology!(cache::DCSensitivityCache)
     invalidate!(cache)
     cache.b_r_factor = nothing
+    cache.work = nothing
     return nothing
 end
 
@@ -244,8 +245,9 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     shed_lb = @constraint(model, psh .>= 0)
     shed_ub = @constraint(model, psh .<= _shed_capacity.(d))
 
-    # Reference bus
-    ref_con = @constraint(model, va[network.ref_bus] == 0.0)
+    # One angle reference per energized island removes the Laplacian nullspace.
+    refs = reference_buses(network)
+    ref_con = @constraint(model, [i in refs], va[i] == 0.0)
 
     # Open lines should not constrain angle differences.
     phase_diff_lb = @constraint(model, network.sw .* (network.A * va) .>= network.sw .* network.angmin)

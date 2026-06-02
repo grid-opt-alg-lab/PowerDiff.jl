@@ -36,7 +36,7 @@ topology sensitivity analysis.
 - `angmax`, `angmin`: Phase angle difference limits
 - `cq`, `cl`: Quadratic and linear generation cost coefficients
 - `c_shed`: Load-shedding cost per bus (penalty for involuntary load curtailment)
-- `ref_bus`: Reference bus index (phase angle = 0)
+- `ref_bus`: Preferred reference bus index (phase angle = 0)
 - `tau`: Regularization parameter for strong convexity
 - `id_map`: Bidirectional mapping between original and sequential element IDs
 - `demand`: Real power demand aggregated per bus
@@ -85,7 +85,7 @@ Solution container for DC OPF problem, storing both primal and dual variables.
 - `rho_ub`, `rho_lb`: Generator upper/lower bound duals
 - `mu_lb`, `mu_ub`: Load shedding lower/upper bound duals
 - `gamma_lb`, `gamma_ub`: Phase angle difference lower/upper bound duals
-- `eta_ref`: Reference bus constraint dual (`va[ref_bus] == 0`)
+- `eta_ref`: Reference bus constraint duals (`va[reference_buses(net)] == 0`)
 - `objective`: Optimal objective value
 - `B_r_factor`: Cached factorization of reduced susceptance matrix `B[non_ref, non_ref]`
 """
@@ -104,7 +104,7 @@ struct DCOPFSolution{F<:Factorization{Float64}} <: AbstractOPFSolution
     mu_ub::Vector{Float64}
     gamma_lb::Vector{Float64}
     gamma_ub::Vector{Float64}
-    eta_ref::Float64
+    eta_ref::Vector{Float64}
     objective::Float64
     B_r_factor::F
 end
@@ -116,19 +116,19 @@ DC power flow solution (phase angles from reduced-Laplacian solve, no optimizati
 Supports both generation and demand for flexible sensitivity analysis.
 
 Unlike DCOPFSolution, this represents a simple power flow solution
-`θ_r = B_r \\ p_r` where `B_r` is the susceptance matrix with the reference bus row and
-column deleted (invertible for a connected network), without optimal dispatch or
+`θ_r = B_r \\ p_r` where `B_r` is the susceptance matrix with one reference row and
+column deleted per energized island, without optimal dispatch or
 constraint handling.
 
 # Fields
 - `net`: DCNetwork data
-- `va`: Phase angles (rad), with `va[ref_bus] = 0`
+- `va`: Phase angles (rad), with `va[reference_buses(net)] = 0`
 - `p`: Net injection vector (p = pg - d)
 - `pg`: Generation vector
 - `d`: Demand vector
 - `f`: Branch flows (computed from va)
 - `B_r_factor`: Factorization of `B[non_ref, non_ref]` (Cholesky for inductive networks, LU fallback)
-- `non_ref`: Indices of non-reference buses
+- `non_ref`: Indices excluding one reference bus per energized island
 """
 struct DCPowerFlowState{F<:Factorization{Float64}} <: AbstractPowerFlowState
     net::DCNetwork
@@ -625,23 +625,86 @@ function calc_susceptance_matrix(network::DCNetwork)
 end
 
 """
+    reference_buses(net::DCNetwork) → Vector{Int}
+
+Return one deterministic reference bus for each energized island.
+
+The configured `net.ref_bus` is preserved for its island. Every other island,
+including an isolated bus, uses its lowest sequential bus index. A branch is
+energized when `b[e] * sw[e] != 0`.
+"""
+function reference_buses(net::DCNetwork)
+    parent = collect(1:net.n)
+
+    function find_root(i::Int)
+        while parent[i] != i
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        end
+        return i
+    end
+
+    function union_roots!(i::Int, j::Int)
+        root_i = find_root(i)
+        root_j = find_root(j)
+        root_i == root_j && return nothing
+        if root_i < root_j
+            parent[root_j] = root_i
+        else
+            parent[root_i] = root_j
+        end
+        return nothing
+    end
+
+    from_bus = zeros(Int, net.m)
+    to_bus = zeros(Int, net.m)
+    rows, cols, nz_values = findnz(net.A)
+    @inbounds for p in eachindex(rows)
+        if nz_values[p] > 0
+            from_bus[rows[p]] = cols[p]
+        else
+            to_bus[rows[p]] = cols[p]
+        end
+    end
+
+    @inbounds for e in 1:net.m
+        iszero(net.b[e] * net.sw[e]) && continue
+        from_bus[e] > 0 && to_bus[e] > 0 ||
+            error("Incidence matrix row $e must have exactly two nonzero entries")
+        union_roots!(from_bus[e], to_bus[e])
+    end
+
+    refs_by_root = Dict{Int,Int}()
+    @inbounds for bus in 1:net.n
+        root = find_root(bus)
+        refs_by_root[root] = min(get(refs_by_root, root, bus), bus)
+    end
+    refs_by_root[find_root(net.ref_bus)] = net.ref_bus
+    return sort!(collect(values(refs_by_root)))
+end
+
+"""Return bus indices after removing one reference bus per energized island."""
+_non_reference_buses(net::DCNetwork) = setdiff(1:net.n, reference_buses(net))
+
+"""
     _factorize_B_r(net::DCNetwork) → (factor, non_ref)
 
 Factorize the reduced susceptance matrix `B[non_ref, non_ref]`.
 
 Uses Cholesky for standard inductive networks (~2x faster), with LU fallback
-for edge cases (capacitive branches or disconnected networks) where B_r is not
-positive definite. Follows the approach of AcceleratedDCPowerFlows.jl.
+for edge cases such as capacitive branches where B_r is not positive definite.
+One reference row and column is removed per energized island, so disconnected
+networks and isolated buses remain well-defined.
 """
 function _factorize_B_r(net::DCNetwork)
     B = calc_susceptance_matrix(net)
-    non_ref = setdiff(1:net.n, net.ref_bus)
+    non_ref = _non_reference_buses(net)
     B_r = B[non_ref, non_ref]
     factor = try
         cholesky(Symmetric(B_r))
     catch e
         e isa PosDefException || rethrow()
-        _SILENCE_WARNINGS[] || @warn "Reduced susceptance matrix B_r is not positive definite (e.g., capacitive branches or disconnected subnetwork); falling back to LU factorization. Results remain correct."
+        _SILENCE_WARNINGS[] || @warn "Reduced susceptance matrix B_r is not positive definite (e.g., capacitive branches); falling back to LU factorization. Results remain correct."
         lu(B_r)
     end
     return factor, non_ref
@@ -670,9 +733,9 @@ Solve DC power flow for given generation and demand.
 
 Computes phase angles θ by solving the reduced system:
     B_r * θ_r = p_r
-where B_r is the susceptance-weighted Laplacian with the reference bus row and
-column deleted (invertible for a connected network), and p_r is the net injection
-with the reference entry removed. The reference bus angle is zero by construction.
+where B_r is the susceptance-weighted Laplacian with one reference bus row and
+column deleted per energized island, and p_r is the net injection with those
+reference entries removed. Reference bus angles are zero by construction.
 
 # Arguments
 - `net`: DCNetwork containing topology and parameters
@@ -701,7 +764,7 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
     # Factorize reduced susceptance matrix (Cholesky with LU fallback)
     F, non_ref = _factorize_B_r(net)
 
-    # Solve reduced system: θ[non_ref] = B_r \ p[non_ref], θ[ref] = 0
+    # Solve reduced system: θ[non_ref] = B_r \ p[non_ref], θ[refs] = 0
     θ = zeros(n)
     θ[non_ref] = F \ p[non_ref]
 

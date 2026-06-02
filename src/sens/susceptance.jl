@@ -38,7 +38,7 @@ Susceptance b affects:
 - Flow definition: f = W * A * theta
 
 The affected KKT conditions are:
-- K_theta = B' * nu_bal + (WA)' * nu_flow + e_ref * eta_ref + A'*(gamma_ub - gamma_lb)
+- K_theta = B' * nu_bal + (WA)' * nu_flow + E_ref * eta_ref + A'*(gamma_ub - gamma_lb)
   (gamma term has no b-dependence, so ∂K_theta/∂b only comes from B and WA terms)
 - K_power_bal = G_inc * g + psh - d - B * theta
 - K_flow_def = f - W * A * theta
@@ -51,7 +51,7 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
     dim = kkt_dims(net)
-    idx = kkt_indices(n, m, k)
+    idx = kkt_indices(net)
 
     theta = sol.va
     nu_bal = sol.nu_bal

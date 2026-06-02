@@ -281,19 +281,21 @@ The KKT system includes:
 - Primal: va (n), pg (k), f (m), psh (n)
 - Dual (inequality): lam_lb (m), lam_ub (m), gamma_lb (m), gamma_ub (m), rho_lb (k), rho_ub (k), mu_lb (n), mu_ub (n)
 - Dual (equality): nu_bal (n), nu_flow (m)
-- Reference bus constraint: 1
+- Reference bus constraints: n_ref
 
-Total: 5n + 6m + 3k + 1
+Total: 5n + 6m + 3k + n_ref
 """
 kkt_dims(prob::DCOPFProblem) = kkt_dims(prob.network)
-kkt_dims(n::Int, m::Int, k::Int) = 5n + 6m + 3k + 1
+kkt_dims(n::Int, m::Int, k::Int) = _dc_kkt_dims(n, m, k, 1)
+_dc_kkt_dims(n::Int, m::Int, k::Int, n_ref::Int) = 5n + 6m + 3k + n_ref
 
 function kkt_dims(net::DCNetwork)
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    # va(n) + pg(k) + f(m) + psh(n) + lam_lb(m) + lam_ub(m) + gamma_lb(m) + gamma_ub(m) + rho_lb(k) + rho_ub(k) + mu_lb(n) + mu_ub(n) + nu_bal(n) + nu_flow(m) + ref(1)
-    return kkt_dims(n, m, k)
+    n_ref = length(reference_buses(net))
+    # va(n) + pg(k) + f(m) + psh(n) + lam_lb(m) + lam_ub(m) + gamma_lb(m) + gamma_ub(m) + rho_lb(k) + rho_ub(k) + mu_lb(n) + mu_ub(n) + nu_bal(n) + nu_flow(m) + ref(n_ref)
+    return _dc_kkt_dims(n, m, k, n_ref)
 end
 
 """
@@ -303,12 +305,14 @@ Compute all KKT variable indices from network dimensions.
 Single source of truth for index calculations.
 
 # Variable ordering
-[va(n), pg(k), f(m), psh(n), lam_lb(m), lam_ub(m), gamma_lb(m), gamma_ub(m), rho_lb(k), rho_ub(k), mu_lb(n), mu_ub(n), nu_bal(n), nu_flow(m), eta(1)]
+[va(n), pg(k), f(m), psh(n), lam_lb(m), lam_ub(m), gamma_lb(m), gamma_ub(m), rho_lb(k), rho_ub(k), mu_lb(n), mu_ub(n), nu_bal(n), nu_flow(m), eta(n_ref)]
 
 # Returns
 NamedTuple with index ranges for each variable block.
 """
-function kkt_indices(n::Int, m::Int, k::Int)
+kkt_indices(n::Int, m::Int, k::Int) = _dc_kkt_indices(n, m, k, 1)
+
+function _dc_kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
     i = 0
     idx_θ = (i+1):(i+n); i += n
     idx_g = (i+1):(i+k); i += k
@@ -324,7 +328,7 @@ function kkt_indices(n::Int, m::Int, k::Int)
     idx_μ_ub = (i+1):(i+n); i += n
     idx_ν_bal = (i+1):(i+n); i += n
     idx_ν_flow = (i+1):(i+m); i += m
-    idx_η = i + 1
+    idx_η = (i+1):(i+n_ref); i += n_ref
 
     return (
         va = idx_θ, pg = idx_g, f = idx_f, psh = idx_psh,
@@ -336,7 +340,7 @@ function kkt_indices(n::Int, m::Int, k::Int)
     )
 end
 
-kkt_indices(net::DCNetwork) = kkt_indices(net.n, net.m, net.k)
+kkt_indices(net::DCNetwork) = _dc_kkt_indices(net.n, net.m, net.k, length(reference_buses(net)))
 kkt_indices(prob::DCOPFProblem) = kkt_indices(prob.network)
 
 # =============================================================================
@@ -351,8 +355,8 @@ Flatten solution primal and dual variables into a single vector for KKT evaluati
 # Variable ordering
 [va; pg; f; psh; lam_lb; lam_ub; gamma_lb; gamma_ub; rho_lb; rho_ub; mu_lb; mu_ub; nu_bal; nu_flow; eta]
 
-where eta is the dual for the reference bus constraint `va[ref_bus] == 0`, packed
-from the recovered `sol.eta_ref` (the KKT operator includes this entry).
+where eta contains one dual per energized island reference constraint, packed
+from the recovered `sol.eta_ref` vector.
 """
 function flatten_variables(sol::DCOPFSolution, prob::DCOPFProblem)
     return vcat(
@@ -370,7 +374,7 @@ function flatten_variables(sol::DCOPFSolution, prob::DCOPFProblem)
         sol.mu_ub,
         sol.nu_bal,
         sol.nu_flow,
-        [sol.eta_ref]
+        sol.eta_ref
     )
 end
 
@@ -421,12 +425,12 @@ s.t. G_inc * g + psh - d = B * θ   (ν_bal)
      g ≤ gmax                       (ρ_ub)
      0 ≤ psh                        (μ_lb)
      psh ≤ max(d, 0)                (μ_ub)
-     θ[ref] = 0                     (η_ref)
+     θ[refs] = 0                    (η_ref)
 ```
 
 # Returns
 Vector of KKT residuals (should be zero at optimum):
-1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + e_ref * η_ref + A'*(γ_ub - γ_lb) = 0
+1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + E_ref * η_ref + A'*(γ_ub - γ_lb) = 0
 2. Stationarity w.r.t. g: 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub = 0
 3. Stationarity w.r.t. f: τ² * f - ν_flow - λ_lb + λ_ub = 0
 4. Stationarity w.r.t. psh: c_shed - ν_bal - μ_lb + μ_ub = 0
@@ -460,13 +464,12 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     B_mat = net.A' * W * net.A
     WA = W * net.A
 
-    # Reference bus indicator
-    e_ref = zeros(n)
-    e_ref[net.ref_bus] = 1.0
+    refs = reference_buses(net)
 
     # KKT conditions
     # 1. Stationarity w.r.t. θ
-    K_θ = B_mat' * ν_bal + WA' * ν_flow + e_ref * η_ref + net.A' * (net.sw .* (γ_ub - γ_lb))
+    K_θ = B_mat' * ν_bal + WA' * ν_flow + net.A' * (net.sw .* (γ_ub - γ_lb))
+    K_θ[refs] .+= η_ref
 
     # 2. Stationarity w.r.t. g
     K_g = 2 * Diagonal(net.cq) * g + net.cl - net.G_inc' * ν_bal - ρ_lb + ρ_ub
@@ -512,10 +515,10 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     # 10. Primal feasibility: flow definition
     K_flow_def = f - WA * θ
 
-    # 11. Reference bus
-    K_ref = θ[net.ref_bus]
+    # 11. Reference buses
+    K_ref = θ[refs]
 
-    return vcat(K_θ, K_g, K_f, K_psh, K_λ_lb, K_λ_ub, K_γ_lb, K_γ_ub, K_ρ_lb, K_ρ_ub, K_μ_lb, K_μ_ub, K_power_bal, K_flow_def, [K_ref])
+    return vcat(K_θ, K_g, K_f, K_psh, K_λ_lb, K_λ_ub, K_γ_lb, K_γ_ub, K_ρ_lb, K_ρ_ub, K_μ_lb, K_μ_ub, K_power_bal, K_flow_def, K_ref)
 end
 
 # =============================================================================
@@ -583,7 +586,9 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim = kkt_dims(n, m, k)
+    refs = reference_buses(net)
+    n_ref = length(refs)
+    dim = _dc_kkt_dims(n, m, k, n_ref)
     A = getfield(net, :A)
     G_inc = getfield(net, :G_inc)
     b = getfield(net, :b)
@@ -594,7 +599,6 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     cq = getfield(net, :cq)
     angmin = getfield(net, :angmin)
     angmax = getfield(net, :angmax)
-    ref_bus = getfield(net, :ref_bus)
     tau = getfield(net, :tau)
     va = getfield(sol, :va)
     pg = getfield(sol, :pg)
@@ -614,16 +618,18 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     B_mat = sparse(A' * W * A)
 
     # Build Jacobian blocks using centralized index calculation
-    idx = kkt_indices(n, m, k)
+    idx = _dc_kkt_indices(n, m, k, n_ref)
     A_rowptr, A_rowcols, A_rowvals = _sparse_row_storage(A)
     G_rowptr, G_rowcols, G_rowvals = _sparse_row_storage(G_inc)
     rowval = Int[]
     nzval = Float64[]
-    entry_hint = 4 * nnz(A) + 2 * nnz(B_mat) + 2 * nnz(G_inc) + 5n + 10m + 7k + 1
+    entry_hint = 4 * nnz(A) + 2 * nnz(B_mat) + 2 * nnz(G_inc) + 5n + 10m + 7k + 2n_ref
     sizehint!(rowval, entry_hint)
     sizehint!(nzval, entry_hint)
     colptr = Vector{Int}(undef, dim + 1)
     Aθ = A * va
+    ref_pos = zeros(Int, n)
+    ref_pos[refs] .= eachindex(refs)
 
     @inline function start_col!(col::Int)
         colptr[col] = length(rowval) + 1
@@ -659,7 +665,7 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
             e = rowvals(A)[p]
             _push_csc_entry!(rowval, nzval, idx.nu_flow[e], b[e] * sw[e] * nonzeros(A)[p])
         end
-        j == ref_bus && _push_csc_entry!(rowval, nzval, idx.η, 1.0)
+        ref_pos[j] > 0 && _push_csc_entry!(rowval, nzval, idx.η[ref_pos[j]], 1.0)
     end
 
     # pg columns:
@@ -803,10 +809,12 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         _push_csc_entry!(rowval, nzval, idx.f[e], -1.0)
     end
 
-    # eta column:
-    # ∂K_θ/∂η = e_ref
-    start_col!(idx.η)
-    _push_csc_entry!(rowval, nzval, idx.va[ref_bus], 1.0)
+    # eta columns:
+    # ∂K_θ/∂η = E_ref
+    @inbounds for (i, ref_bus) in enumerate(refs)
+        start_col!(idx.η[i])
+        _push_csc_entry!(rowval, nzval, idx.va[ref_bus], 1.0)
+    end
     colptr[dim + 1] = length(rowval) + 1
 
     return SparseMatrixCSC(dim, dim, colptr, rowval, nzval)
@@ -824,8 +832,8 @@ function calc_kkt_jacobian_demand(net::DCNetwork, d::AbstractVector, sol::DCOPFS
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim = kkt_dims(n, m, k)
-    idx = kkt_indices(n, m, k)
+    dim = kkt_dims(net)
+    idx = kkt_indices(net)
     mu_ub = getfield(sol, :mu_ub)
 
     colptr = Vector{Int}(undef, n + 1)
@@ -900,7 +908,7 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
     J_s = spzeros(dim, m)
 
     # Use centralized index calculation
-    idx = kkt_indices(n, m, k)
+    idx = kkt_indices(net)
 
     # Precompute A * θ once (invariant across branches)
     Aθ = A * θ

@@ -171,6 +171,11 @@ APF = AcceleratedDCPowerFlows
     end
 end
 
+@testset "to_apf_network rejects multiple islands" begin
+    net = DCNetwork(2, 0, 0, spzeros(0, 2), spzeros(2, 0), Float64[])
+    @test_throws ArgumentError to_apf_network(net)
+end
+
 # =========================================================================
 # Index alignment
 # =========================================================================

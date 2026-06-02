@@ -27,7 +27,7 @@ For DC power flow `θ_r = B_r⁻¹ p_r`, the sensitivity of angles w.r.t. switch
 
 where `∂B_r/∂swₑ = -bₑ · a_{e,r} · a_{e,r}'` is a rank-1 update from the incidence
 column of branch `e` restricted to non-reference buses, and `B_r` is the susceptance
-matrix with the reference bus row and column deleted.
+matrix with one reference row and column deleted per energized island.
 
 # Arguments
 - `state`: DCPowerFlowState containing the solved power flow

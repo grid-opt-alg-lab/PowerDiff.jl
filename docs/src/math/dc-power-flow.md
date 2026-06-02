@@ -4,16 +4,17 @@
 
 For non-OPF power flow with fixed generation, the DC approximation linearizes
 the power flow equations using the susceptance-weighted Laplacian. The voltage
-angles satisfy the reduced system obtained by eliminating the reference (slack) bus:
+angles satisfy the reduced system obtained by eliminating one reference bus per
+energized island:
 
 ```math
 \theta_r = B_r^{-1} \, p_r
 ```
 
 where:
-- ``B_r`` is the susceptance-weighted Laplacian with the reference bus row and column deleted (invertible for a connected network)
-- ``p_r = g_r - d_r`` is the net injection vector with the reference entry removed
-- ``\theta_{\text{ref}} = 0`` by convention
+- ``B_r`` is the susceptance-weighted Laplacian with one reference row and column deleted per energized island, including isolated buses
+- ``p_r = g_r - d_r`` is the net injection vector with the reference entries removed
+- ``\theta_{\text{refs}} = 0`` by convention
 
 The susceptance-weighted Laplacian is:
 
@@ -38,6 +39,10 @@ where the perturbation is a rank-1 update from the incidence column of branch ``
 \frac{\partial B_r}{\partial \mathrm{sw}_e} = -b_e \, a_{e,r} \, a_{e,r}^\top
 ```
 
+These derivatives apply while the energized-island partition is fixed. A
+bridge opening or closing changes the reference set, so sensitivities are
+non-smooth at the split or merge boundary.
+
 ### Flow Sensitivity to Switching
 
 Branch flows are ``f = W A \theta`` where ``W = \operatorname{diag}(-b \circ \mathrm{sw})``. The flow sensitivity has both indirect (via angle changes) and direct (via the switching coefficient) contributions:
@@ -54,7 +59,7 @@ Since ``p = g - d`` and generation is fixed, ``\partial p / \partial d = -I``. T
 \frac{\partial \theta}{\partial d} = -B_r^{-1}
 ```
 
-embedded in the non-reference block (with zero rows/columns for the reference bus). The flow sensitivity follows as:
+embedded in the non-reference block (with zero rows/columns for the reference buses). The flow sensitivity follows as:
 
 ```math
 \frac{\partial f}{\partial d} = W A \frac{\partial \theta}{\partial d}

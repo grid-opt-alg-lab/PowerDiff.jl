@@ -76,7 +76,7 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", net::DCNetwork)
     println(io, "DCNetwork ($(net.n) buses, $(net.m) branches, $(net.k) gens)")
-    println(io, "  Reference bus: $(net.ref_bus)")
+    println(io, "  Reference buses: $(reference_buses(net))")
     n_open = count(x -> x < 1.0, net.sw)
     println(io, "  Open branches: $n_open/$(net.m)")
     println(io, "  Flow limits:   [$(round(minimum(net.fmax); digits=2)), $(round(maximum(net.fmax); digits=2))]")

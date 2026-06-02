@@ -111,7 +111,7 @@ export DCNetwork, DCPowerFlowState
 export DCOPFProblem, DCOPFSolution
 export DCSensitivityCache, invalidate!
 export solve!, update_demand!, update_fmax!, update_switching!
-export calc_demand_vector, calc_susceptance_matrix
+export calc_demand_vector, calc_susceptance_matrix, reference_buses
 
 # DC Sensitivity Functions (convenience wrappers)
 export calc_generation_participation_factors, calc_ptdf_from_sensitivity

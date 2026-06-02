@@ -37,12 +37,16 @@ Stores the DC network topology and parameters.
 | `angmax`, `angmin` | `Vector{Float64}` | Phase angle difference limits |
 | `cq`, `cl` | `Vector{Float64}` | Cost coefficients (quadratic, linear) |
 | `c_shed` | `Vector{Float64}` | Load-shedding cost per bus |
-| `ref_bus` | `Int` | Reference bus index (sequential) |
+| `ref_bus` | `Int` | Preferred reference bus index (sequential) |
 | `tau` | `Float64` | Regularization parameter |
 | `id_map` | `IDMapping` | Bidirectional element ID mapping (original ↔ sequential) |
 
 Construct from a parsed MATPOWER network with `DCNetwork(parse_file("case14.m"))`, or
 with explicit parameters: `DCNetwork(n, m, k, A, G_inc, b; ...)`.
+
+Use `reference_buses(net)` to obtain the effective reference set. It preserves
+`ref_bus` for its energized island and deterministically adds one reference for
+each additional island, including isolated buses.
 
 ### ACNetwork
 

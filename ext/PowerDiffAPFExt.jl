@@ -58,6 +58,7 @@ end
 Convert a `DCNetwork` to an `APF.Network`.
 
 APF networks lack generators, costs, and limits, so this is one-way.
+APF exposes one slack bus, so disconnected `DCNetwork`s are rejected.
 Bus demand is set to zero (PD separates demand from network topology).
 Branch `status` is derived from switching state: `sw[e] > 0.5`.
 
@@ -67,6 +68,10 @@ use `APF.from_power_models(pm_data)` directly instead.
 """
 function PowerDiff.to_apf_network(net::PowerDiff.DCNetwork)
     n, m = net.n, net.m
+    refs = PowerDiff.reference_buses(net)
+    length(refs) == 1 || throw(ArgumentError(
+        "AcceleratedDCPowerFlows conversion requires one energized island; found $(length(refs))"
+    ))
 
     # All buses are active: DCNetwork is built from PM.build_ref() which filters
     # out inactive buses, so every bus in net.n is active by construction.
@@ -89,7 +94,7 @@ function PowerDiff.to_apf_network(net::PowerDiff.DCNetwork)
         branches[e] = APF.Branch(e, net.sw[e] > 0.5, net.b[e], net.fmax[e], from_bus[e], to_bus[e])
     end
 
-    return APF.Network("PowerDiff", buses, net.ref_bus, branches)
+    return APF.Network("PowerDiff", buses, only(refs), branches)
 end
 
 # -----------------------------------------------------------------------------

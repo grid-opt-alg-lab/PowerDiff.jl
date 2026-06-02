@@ -37,8 +37,8 @@ function calc_kkt_jacobian_cost_linear(net::DCNetwork)
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim = kkt_dims(n, m, k)
-    idx = kkt_indices(n, m, k)
+    dim = kkt_dims(net)
+    idx = kkt_indices(net)
 
     colptr = Vector{Int}(undef, k + 1)
     rowval = Int[]
@@ -93,8 +93,8 @@ function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem, sol::DCOPFSolution
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim = kkt_dims(n, m, k)
-    idx = kkt_indices(n, m, k)
+    dim = kkt_dims(net)
+    idx = kkt_indices(net)
 
     g = getfield(sol, :pg)
 
