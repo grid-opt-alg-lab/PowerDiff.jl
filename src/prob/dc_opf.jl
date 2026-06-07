@@ -32,7 +32,7 @@ function _check_solve_status(model::JuMP.Model, label::String)
     status = termination_status(model)
     status in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED) && return status
     if status == MOI.ALMOST_LOCALLY_SOLVED
-        @warn "$label converged at acceptable tolerance (ALMOST_LOCALLY_SOLVED)"
+        _SILENCE_WARNINGS[] || @warn "$label converged at acceptable tolerance (ALMOST_LOCALLY_SOLVED)"
         return status
     end
     if status == MOI.INFEASIBLE

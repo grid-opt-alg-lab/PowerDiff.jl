@@ -56,6 +56,27 @@ include("common.jl")
     end
 end
 
+# Regression: calc_demand_vector(::ParsedCase) must index by the sorted IDMapping,
+# not by file order, so loads land on the right bus when bus IDs are unsorted.
+@testset "calc_demand_vector aligns with sorted IDMapping" begin
+    # Only bus_i varies; the other fields are identical across the three buses.
+    buses = [PowerDiff.ParsedBus(id, 1, 0.0, 0.0, 0.0, 0.0, 1, 1.0, 0.0, 100.0, 1, 1.1, 0.9)
+             for id in (10, 2, 5)]
+    loads = [PowerDiff.ParsedLoad(1, 10, 1.0, 0.0, 1),
+             PowerDiff.ParsedLoad(2, 5,  3.0, 0.0, 1)]
+    data = PowerDiff.ParsedCase("unsorted", "2", 100.0, buses,
+        PowerDiff.ParsedGen[], PowerDiff.ParsedBranch[], loads, PowerDiff.ParsedShunt[])
+
+    d = calc_demand_vector(data)
+    id_map = PowerDiff.IDMapping(data)
+
+    # Sorted bus order is [2, 5, 10]; demand attaches per the IDMapping, not enumerate order.
+    @test d == [0.0, 3.0, 1.0]
+    @test d[id_map.bus_to_idx[10]] == 1.0
+    @test d[id_map.bus_to_idx[5]] == 3.0
+    @test d[id_map.bus_to_idx[2]] == 0.0
+end
+
 # Verify DCOPFProblem builds, solves, and satisfies basic feasibility.
 # Bound tolerances are ~1e-6: Ipopt converges to ~1e-8 complementarity,
 # but bound projection adds O(1e-6) slack.

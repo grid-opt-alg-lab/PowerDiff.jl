@@ -230,7 +230,6 @@ end
         for branch_idx in 1:min(2, m)
             net_pert = deepcopy(prob.network)
             net_pert.rate_a[branch_idx] += ε
-            net_pert.i_max[branch_idx] += ε
             prob_pert = ACOPFProblem(net_pert; silent=true)
             sol_pert = solve!(prob_pert)
 

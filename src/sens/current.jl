@@ -39,7 +39,7 @@ where I_ℓ is the current on branch ℓ connecting buses i and j.
 # Arguments
 - `v::Vector{ComplexF64}`: Voltage phasors at all buses
 - `Y::AbstractMatrix{ComplexF64}`: Bus admittance matrix
-- `branch_data::Dict`: PowerModels branch dictionary
+- `branch_data::Dict`: branch dictionary keyed by sequential branch index, each entry holding `index`/`f_bus`/`t_bus`
 
 # Keyword Arguments
 - `idx_slack::Int=1`: Index of the slack (reference) bus

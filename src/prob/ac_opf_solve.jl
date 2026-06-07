@@ -18,19 +18,26 @@
 #
 # Functions for solving AC OPF problems and updating parameters.
 
+"""
+    _check_solve_status(stats, label::String)
+
+Check the NLPModelsIpopt solve status and throw informative errors for common failure modes.
+"""
 function _check_solve_status(stats, label::String)
     status = getproperty(stats, :status)
     status == :first_order && return status
     if status == :acceptable
-        @warn "$label converged at acceptable tolerance"
+        # Solved only to the looser acceptable tolerance, not first-order optimality.
+        # The duals feed calc_sensitivity, so a nonzero KKT residual here degrades sensitivities.
+        _SILENCE_WARNINGS[] || @warn "$label converged only to acceptable tolerance, not first-order optimality; duals may carry a nonzero KKT residual and degrade sensitivities"
         return status
     end
     if status == :infeasible
         error("$label is infeasible. Check that demand is feasible given generator capacities and network constraints.")
-    elseif status == :max_iter
-        error("$label solver reached iteration limit.")
-    elseif status == :max_time
-        error("$label solver reached time limit.")
+    elseif status == :unbounded
+        error("$label is unbounded. Check cost coefficients and variable bounds.")
+    elseif status in (:max_iter, :max_time)
+        error("$label solver reached $status. Try increasing solver limits or simplifying the problem.")
     else
         error("$label failed with status: $status")
     end

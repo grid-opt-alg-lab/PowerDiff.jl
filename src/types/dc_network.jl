@@ -85,6 +85,7 @@ Solution container for DC OPF problem, storing both primal and dual variables.
 - `rho_ub`, `rho_lb`: Generator upper/lower bound duals
 - `mu_lb`, `mu_ub`: Load shedding lower/upper bound duals
 - `gamma_lb`, `gamma_ub`: Phase angle difference lower/upper bound duals
+- `eta_ref`: Reference bus constraint dual (`va[ref_bus] == 0`)
 - `objective`: Optimal objective value
 - `B_r_factor`: Cached factorization of reduced susceptance matrix `B[non_ref, non_ref]`
 """
@@ -226,7 +227,7 @@ function DCNetwork(data::ParsedCase; tau::Float64=DEFAULT_TAU, ref_bus::Union{No
     # Cost coefficients (assumes polynomial cost with at least 2 terms)
     cq = [gen_tbl[id_map.gen_ids[i]].cost[1] for i in 1:k]
     cl = [gen_tbl[id_map.gen_ids[i]].cost[2] for i in 1:k]
-    demand = calc_demand_vector(data)
+    demand = calc_demand_vector(data, id_map)
     pg_init = _calc_generation_vector(data, id_map)
 
     # Load-shedding cost: high penalty to discourage shedding when feasible
@@ -306,14 +307,17 @@ function calc_demand_vector(network::DCNetwork)
     return copy(network.demand)
 end
 
-calc_demand_vector(data::ParsedCase) = begin
-    bus_to_idx = Dict(b.bus_i => i for (i, b) in enumerate(data.bus))
-    d = zeros(length(data.bus))
+calc_demand_vector(data::ParsedCase) = calc_demand_vector(data, IDMapping(data))
+
+function calc_demand_vector(data::ParsedCase, id_map::IDMapping)
+    # Index by the sorted IDMapping, matching every other DCNetwork(::ParsedCase) path.
+    # Keying off enumerate(data.bus) (file order) misaligns loads when bus IDs are unsorted.
+    d = zeros(length(id_map.bus_ids))
     for load in data.load
         load.status != 0 || continue
-        d[bus_to_idx[load.load_bus]] += load.pd
+        d[id_map.bus_to_idx[load.load_bus]] += load.pd
     end
-    d
+    return d
 end
 
 """

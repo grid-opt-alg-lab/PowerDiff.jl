@@ -59,7 +59,6 @@ Stores the AC network with vectorized admittance representation.
 | `is_switchable` | `BitVector` | Which branches can be switched |
 | `idx_slack` | `Int` | Slack bus index (sequential) |
 | `vm_min`, `vm_max` | `Vector{Float64}` | Voltage magnitude limits per bus |
-| `i_max` | `Vector{Float64}` | Branch current magnitude limits |
 | `id_map` | `IDMapping` | Bidirectional element ID mapping (original ↔ sequential) |
 
 ## Sensitivity Caching

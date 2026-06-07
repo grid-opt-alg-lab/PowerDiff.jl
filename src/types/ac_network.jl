@@ -42,7 +42,6 @@ charging, transformer taps, phase shifts, switching, and parallel lines.
 - `is_switchable`: Which branches can be switched
 - `idx_slack`: Slack bus index (sequential)
 - `vm_min`, `vm_max`: Voltage magnitude limits per bus
-- `i_max`: Branch current magnitude limits
 - `id_map`: Bidirectional mapping between original and sequential element IDs
 - typed branch, bus, and generator arrays used by PF/OPF constructors
 """
@@ -71,7 +70,6 @@ struct ACNetwork <: AbstractPowerNetwork
     # Limits
     vm_min::Vector{Float64}
     vm_max::Vector{Float64}
-    i_max::Vector{Float64}
 
     # ID mapping
     id_map::IDMapping
@@ -319,7 +317,7 @@ function ACNetwork(data::ParsedCase; idx_slack::Union{Nothing,Int}=nothing)
 
     return ACNetwork(
         n_bus, n_branch, sparse(A), incidences, g, b, g_shunt, b_shunt,
-        ones(n_branch), trues(n_branch), idx_slack, vm_min, vm_max, copy(rate_a),
+        ones(n_branch), trues(n_branch), idx_slack, vm_min, vm_max,
         id_map, f_bus, t_bus, br_r, br_x, br_b, g_fr, b_fr, g_to, b_to,
         tap, shift, tm, angmin, angmax, rate_a, pd, qd, gs, bs, pg, qg,
         gen_bus, pmin, pmax, qmin, qmax, cq, cl, cc, ref_bus_keys
@@ -332,7 +330,7 @@ end
 Construct ACNetwork from a complex admittance matrix.
 
 Extracts edge-based representation from the full admittance matrix.
-Useful for direct construction without PowerModels.
+Useful for direct construction from a raw admittance matrix.
 """
 function ACNetwork(Y::AbstractMatrix{<:Complex}; idx_slack::Int=1)
     n = size(Y, 1)
@@ -376,14 +374,13 @@ function ACNetwork(Y::AbstractMatrix{<:Complex}; idx_slack::Int=1)
     is_switchable = trues(m)
     vm_min = fill(0.9, n)
     vm_max = fill(1.1, n)
-    i_max = fill(Inf, m)
     return ACNetwork(
         n, m,
         A, edges,
         g, b, g_shunt, b_shunt,
         sw, is_switchable,
         idx_slack,
-        vm_min, vm_max, i_max,
+        vm_min, vm_max,
         IDMapping(n, m, 0, 0),
         [edge[1] for edge in edges], [edge[2] for edge in edges],
         zeros(m), zeros(m), zeros(m), zeros(m), zeros(m), zeros(m), zeros(m),
@@ -580,18 +577,6 @@ Reject the removed dictionary API with a migration hint.
 """
 function ACPowerFlowState(pm_net::Dict)
     throw(ArgumentError("dictionary constructors were removed; construct ACPowerFlowState(ACNetwork(data), v)"))
-end
-
-function _branch_data_dict(net::ACNetwork)
-    branch_data = Dict{String,Any}()
-    for l in 1:net.m
-        branch_data[string(l)] = Dict{String,Any}(
-            "index" => l,
-            "f_bus" => net.f_bus[l],
-            "t_bus" => net.t_bus[l],
-        )
-    end
-    return branch_data
 end
 
 """

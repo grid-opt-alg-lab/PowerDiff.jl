@@ -15,10 +15,10 @@
 using PowerDiff
 
 case_path = joinpath(get_path(:pglib), "pglib_opf_case14_ieee.m")
-pm_data = parse_file(case_path)
+typed_data = parse_file(case_path)
 
-net = DCNetwork(pm_data)
-d = PowerDiff.calc_demand_vector(pm_data)
+net = DCNetwork(typed_data)
+d = PowerDiff.calc_demand_vector(typed_data)
 
 pf = DCPowerFlowState(net, d)
 
