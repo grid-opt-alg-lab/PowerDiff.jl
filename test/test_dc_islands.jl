@@ -121,6 +121,7 @@ end
 
     @testset "reference bus cache follows direct topology mutation" begin
         net = _make_bridge_network()
+        @test getfield(net, :topology_cache).initialized
         dim_connected = kkt_dims(net)
         @test reference_buses(net) == [1]
 
@@ -157,6 +158,7 @@ end
 
                 net = DCNetwork(raw)
                 d = calc_demand_vector(raw)
+                @test getfield(net, :topology_cache).initialized
                 @test length(reference_buses(net)) > 1
                 sol = solve!(DCOPFProblem(net, d))
                 @test all(isfinite, sol.va)

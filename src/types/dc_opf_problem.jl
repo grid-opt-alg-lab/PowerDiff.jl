@@ -123,7 +123,9 @@ B-θ formulation of DC OPF wrapped around a JuMP model.
 - `d`: Demand parameter (can be updated for sensitivity analysis)
 - `cons`: Named tuple of constraint references
 - `cache`: Mutable sensitivity cache for avoiding redundant KKT solves
-- `_n_ref`: Number of energized-island reference constraints (internal)
+- `_n_ref`: Number of energized-island reference constraints in the currently
+  built JuMP model (internal). Invariant after `_rebuild_jump_model!`:
+  `_n_ref == length(cons.ref)`.
 - `_optimizer`: Optimizer factory for model rebuilds (internal)
 - `_silent`: Whether to suppress solver output (internal)
 """
@@ -195,6 +197,12 @@ _is_ipopt_optimizer(opt::MOI.OptimizerWithAttributes) = opt.optimizer_constructo
 
 Build (or rebuild) the JuMP model from current network parameters.
 Called by the constructor and by `update_switching!` after mutating `network.sw`.
+
+This function owns the `_n_ref == length(prob.cons.ref)` invariant. Directly
+mutating `prob.network.sw` or moving `prob.network.b` across zero changes the
+energized-island topology without rebuilding the JuMP model, so callers must use
+`update_switching!` for switch changes and rebuild the problem after
+topology-changing susceptance edits.
 """
 function _rebuild_jump_model!(prob::DCOPFProblem)
     network = prob.network
@@ -260,6 +268,8 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     prob.pg = pg
     prob.f = f
     prob.psh = psh
+    # Cache the reference-constraint count for KKT layout hot paths. This value
+    # belongs to the built JuMP model and must stay equal to length(ref_con).
     prob._n_ref = length(refs)
     prob.cons = (
         power_bal = power_bal,

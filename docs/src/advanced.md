@@ -48,6 +48,15 @@ Use `reference_buses(net)` to obtain the effective reference set. It preserves
 `ref_bus` for its energized island and deterministically adds one reference for
 each additional island, including isolated buses.
 
+`DCNetwork` precomputes an internal energized-topology cache and refreshes it
+when topology readers observe a direct `b` or `sw` change. This cache is not a
+thread-safety mechanism. Sharing a `DCNetwork` across threads is supported only
+when topology fields are treated as read-only; callers that mutate `b` or `sw`
+directly must serialize the mutation and the next topology-dependent read. For
+`DCOPFProblem`, switch changes should go through [`update_switching!`](@ref), and
+topology-changing susceptance edits require rebuilding the problem so the JuMP
+model and KKT layout keep the same reference constraints.
+
 ### ACNetwork
 
 Stores the AC network with vectorized admittance representation.
@@ -77,7 +86,7 @@ The [`DCOPFProblem`](@ref) maintains a `DCSensitivityCache` that avoids redundan
 
 Calling `calc_sensitivity` with different operands for the same parameter reuses the cached KKT solve. For example, computing both `:va` and `:pg` w.r.t. `:d` only solves the KKT system once.
 
-Cache invalidation happens automatically when `solve!`, `update_demand!`, `update_switching!`, or `update_fmax!` is called.
+Cache invalidation happens automatically when `solve!`, `update_demand!`, `update_switching!`, or `update_fmax!` is called. Direct mutation of fields inside `prob.network` bypasses this contract.
 
 ### ACSensitivityCache
 

@@ -34,6 +34,12 @@ where:
 - ``\tau`` is a small regularization parameter for numerical conditioning
 - ``\text{refs}`` contains one deterministic reference bus per energized island, including isolated buses; the configured ``\text{ref_bus}`` remains the reference for its island
 
+The built OPF model stores one reference constraint for each entry of
+``\text{refs}``. Consequently, topology changes that can alter the energized
+island partition must rebuild the model: use [`update_switching!`](@ref) for
+switch changes, and rebuild the `DCOPFProblem` after direct susceptance edits
+that move a branch across zero.
+
 ## KKT System for Implicit Differentiation
 
 OPF sensitivities are computed via the implicit function theorem applied to the KKT conditions. At an optimal solution ``z^*``, the KKT residual satisfies ``K(z^*, p) = 0`` where ``z`` collects all primal and dual variables and ``p`` is a parameter.

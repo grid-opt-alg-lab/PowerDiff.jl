@@ -22,6 +22,11 @@
 """
 Internal cache for the energized DC topology. The incidence matrix structure is
 fixed after construction, while `b` and `sw` may change in place.
+
+The cache is prewarmed by constructors and refreshed by topology readers when
+`b` or `sw` changes. It is not a synchronization primitive: callers sharing a
+`DCNetwork` across threads must treat topology fields as read-only, or serialize
+mutations and the first topology read after each mutation.
 """
 mutable struct _DCTopologyCache
     from_bus::Vector{Int}
@@ -56,6 +61,9 @@ topology sensitivity analysis.
 - `id_map`: Bidirectional mapping between original and sequential element IDs
 - `demand`: Real power demand aggregated per bus
 - `pg_init`: Initial real generation aggregated per bus
+- `topology_cache`: Internal energized island cache. This cache is mutable even
+  though `DCNetwork` is an immutable struct; concurrent direct mutations of
+  `b`/`sw` are unsupported.
 """
 struct DCNetwork <: AbstractPowerNetwork
     n::Int
@@ -551,9 +559,11 @@ function DCNetwork(data::NamedTuple; tau::Float64=DEFAULT_TAU, ref_bus::Union{No
         end
     end
 
-    return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, angmax, angmin,
-                     cq, cl, c_shed, demand, pg_init, ref_bus, tau, id_map,
-                     _DCTopologyCache())
+    net = DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, angmax, angmin,
+                    cq, cl, c_shed, demand, pg_init, ref_bus, tau, id_map,
+                    _DCTopologyCache())
+    _refresh_topology_cache!(net)
+    return net
 end
 
 """
@@ -583,7 +593,7 @@ function DCNetwork(
     length(demand) == n || throw(DimensionMismatch("demand length $(length(demand)) must match number of buses $n"))
     length(pg_init) == n || throw(DimensionMismatch("pg_init length $(length(pg_init)) must match number of buses $n"))
     all(c_shed .> 0) || throw(ArgumentError("c_shed must be strictly positive at all buses"))
-    return DCNetwork(
+    net = DCNetwork(
         n, m, k,
         sparse(Float64.(A)), sparse(Float64.(G_inc)),
         Float64.(b), Float64.(sw),
@@ -596,6 +606,8 @@ function DCNetwork(
         IDMapping(n, m, k),
         _DCTopologyCache()
     )
+    _refresh_topology_cache!(net)
+    return net
 end
 
 # =============================================================================
@@ -716,6 +728,10 @@ function _refresh_topology_cache!(net::DCNetwork)
 end
 
 function _topology_cache(net::DCNetwork)
+    # Refresh mutates `net.topology_cache`. Constructors prewarm this cache, so
+    # normal read-only sharing across threads does not first-touch it. If callers
+    # mutate `b` or `sw` directly, they must serialize that mutation and the next
+    # topology read; the exposed vectors themselves are not thread-safe.
     _topology_cache_valid(net) || _refresh_topology_cache!(net)
     return getfield(net, :topology_cache)
 end
