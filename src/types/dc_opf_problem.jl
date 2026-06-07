@@ -197,6 +197,13 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     # Create model
     model = JuMP.Model(prob._optimizer)
     prob._silent && set_silent(model)
+    # Tighten Ipopt tolerances for accurate dual recovery (needed by sensitivity analysis).
+    if _is_ipopt_optimizer(prob._optimizer)
+        set_optimizer_attribute(model, "tol", 1e-10)
+        set_optimizer_attribute(model, "acceptable_tol", 1e-8)
+        set_optimizer_attribute(model, "max_cpu_time", 30.0)
+    end
+
     @variable(model, va[1:n])
     @variable(model, pg[1:k])
     @variable(model, f[1:m])

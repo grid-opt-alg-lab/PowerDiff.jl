@@ -119,7 +119,7 @@ function parse_file(io::Union{IO,String}; library=nothing, validate=true, filety
     resolved_type = resolved isa String ? lowercase(splitext(resolved)[2]) : ".$(lowercase(filetype))"
     resolved_type == ".m" || throw(ArgumentError(
         "unsupported network file type $resolved_type; PowerDiff supports MATPOWER v2 .m files only"))
-    return resolved isa String ? parse_matpower(resolved; validate) : parse_matpower(resolved; validate)
+    return parse_matpower(resolved; validate)
 end
 
 """

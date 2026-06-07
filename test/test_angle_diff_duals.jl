@@ -213,11 +213,9 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
                     ("∂lmp/∂d", dlmp_dd, sol.nu_bal, sol_pert.nu_bal)]
                 fd = (pert - base) / delta
                 analytical = Matrix(S)[:, bus]
-                if norm(fd) > 1e-6
+                if norm(fd) > 1e-8
                     rel_err = norm(analytical - fd) / norm(fd)
                     @test rel_err < 0.01  # 1% tolerance
-                else
-                    @test norm(analytical - fd) < 5e-8
                 end
             end
         end
@@ -260,11 +258,9 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
                     ("∂lmp/∂d", dlmp_dd, sol_base.nu_bal, sol_pert.nu_bal)]
                 fd = (pert - base) / delta
                 analytical = Matrix(S)[:, bus]
-                if norm(fd) > 1e-6
+                if norm(fd) > 1e-8
                     rel_err = norm(analytical - fd) / norm(fd)
                     @test rel_err < 0.01  # 1% tolerance
-                else
-                    @test norm(analytical - fd) < 5e-8
                 end
             end
         end

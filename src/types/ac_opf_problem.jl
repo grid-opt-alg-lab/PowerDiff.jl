@@ -645,10 +645,8 @@ function _build_ac_exa_records(network::ACNetwork, data::ACOPFData)
         arc = arc,
         branch = branch,
         ref_bus_keys = copy(data.ref_bus_keys),
-        angmin_scaled = [b.angmin_scaled for b in branch],
-        angmax_scaled = [b.angmax_scaled for b in branch],
-        thermal_lcon = fill(-Inf, m),
-        thermal_ucon = zeros(m),
+        nonpositive_lcon = fill(-Inf, m),
+        nonpositive_ucon = zeros(m),
     )
 end
 
@@ -693,16 +691,16 @@ function _build_examodel(network::ACNetwork, data::ACOPFData, optimizer, silent:
         for b in exa.branch)
     core, angle_diff_lb = _exa_add_con(core,
         b.angmin_scaled - b.sw * va[b.f_bus] + b.sw * va[b.t_bus] for b in exa.branch;
-        lcon=exa.thermal_lcon, ucon=exa.thermal_ucon)
+        lcon=exa.nonpositive_lcon, ucon=exa.nonpositive_ucon)
     core, angle_diff_ub = _exa_add_con(core,
         b.sw * va[b.f_bus] - b.sw * va[b.t_bus] - b.angmax_scaled for b in exa.branch;
-        lcon=exa.thermal_lcon, ucon=exa.thermal_ucon)
+        lcon=exa.nonpositive_lcon, ucon=exa.nonpositive_ucon)
     core, thermal_fr = _exa_add_con(core,
         p[b.f_idx]^2 + q[b.f_idx]^2 - b.rate_a_sq for b in exa.branch;
-        lcon=exa.thermal_lcon, ucon=exa.thermal_ucon)
+        lcon=exa.nonpositive_lcon, ucon=exa.nonpositive_ucon)
     core, thermal_to = _exa_add_con(core,
         p[b.t_idx]^2 + q[b.t_idx]^2 - b.rate_a_sq for b in exa.branch;
-        lcon=exa.thermal_lcon, ucon=exa.thermal_ucon)
+        lcon=exa.nonpositive_lcon, ucon=exa.nonpositive_ucon)
 
     core, p_bal = _exa_add_con(core,
         b.pd + b.gs * vm[b.i]^2 for b in exa.bus)
