@@ -29,7 +29,7 @@ where:
 - ``G_{\text{inc}}`` is the ``n \times k`` generator-bus incidence matrix
 - ``C_q = \operatorname{diag}(c_q)`` contains quadratic cost coefficients
 - ``c_l`` contains linear cost coefficients
-- ``c_{\text{shed}}`` is the load-shedding cost vector
+- ``c_{\text{shed}}`` is the load shedding cost vector
 - ``d_+ = \max(d, 0)`` is the curtailable portion of signed net demand; negative net demand remains in power balance as an injection
 - ``\tau`` is a small regularization parameter for numerical conditioning
 
@@ -78,7 +78,7 @@ For each parameter type, we compute ``\partial K / \partial p`` and then the ful
 
 ### Demand (``d``)
 
-Demand enters the power balance and the upper shedding bound through
+Demand enters the power balance and the load shed upper bound constraints through the clipped demand
 ``d_+ = \max(d, 0)``:
 
 ```math
@@ -88,8 +88,8 @@ Demand enters the power balance and the upper shedding bound through
 ```
 
 For strictly positive demand, ``\partial d_+ / \partial d = 1``. For negative
-demand, it is ``0``. At zero demand, the positive-part function is non-smooth;
-the implementation uses the fixed-zero shedding convention already required by
+demand, it is ``0``. At zero demand, the clipping function is non-smooth;
+the implementation uses the fixed zero shedding convention already required by
 the collapsed bound ``0 \leq \text{psh} \leq 0``.
 
 ### Switching (``\mathrm{sw}``)
