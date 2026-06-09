@@ -55,7 +55,7 @@ function _dc_param_vjp!(out::AbstractVector, prob::DCOPFProblem,
                         sol::DCOPFSolution, param::Symbol,
                         u::AbstractVector, idx::NamedTuple)
     if param === :d
-        _dc_demand_vjp!(out, sol, u, idx, prob.network.n)
+        _dc_demand_vjp!(out, prob.d, sol, u, idx, prob.network.n)
     elseif param === :cl
         _dc_cost_linear_vjp!(out, u, idx, prob.network.k)
     elseif param === :cq
@@ -70,10 +70,11 @@ function _dc_param_vjp!(out::AbstractVector, prob::DCOPFProblem,
     return out
 end
 
-# `:d` — 2 nonzeros/col at nu_bal[j]=-1, mu_ub[j]=sol.mu_ub[j]
-function _dc_demand_vjp!(out, sol, u, idx, n)
+# `:d` — nu_bal[j]=-1, plus mu_ub[j]=sol.mu_ub[j] where max(d[j], 0) is differentiable.
+function _dc_demand_vjp!(out, d, sol, u, idx, n)
     @inbounds for j in 1:n
-        out[j] = u[idx.nu_bal[j]] - sol.mu_ub[j] * u[idx.mu_ub[j]]
+        out[j] = u[idx.nu_bal[j]] -
+                 sol.mu_ub[j] * _shed_capacity_derivative(d[j]) * u[idx.mu_ub[j]]
     end
 end
 
@@ -122,7 +123,7 @@ function _dc_param_jvp!(v::AbstractVector, prob::DCOPFProblem,
                         sol::DCOPFSolution, param::Symbol,
                         tang::AbstractVector, idx::NamedTuple)
     if param === :d
-        _dc_demand_jvp!(v, sol, tang, idx, prob.network.n)
+        _dc_demand_jvp!(v, prob.d, sol, tang, idx, prob.network.n)
     elseif param === :cl
         _dc_cost_linear_jvp!(v, tang, idx, prob.network.k)
     elseif param === :cq
@@ -137,11 +138,11 @@ function _dc_param_jvp!(v::AbstractVector, prob::DCOPFProblem,
     return v
 end
 
-# `:d` — scatter -tang[j] into nu_bal, mu_ub[j]*tang[j] into mu_ub
-function _dc_demand_jvp!(v, sol, tang, idx, n)
+# `:d` — scatter -tang[j] into nu_bal and the positive-part bound derivative into mu_ub.
+function _dc_demand_jvp!(v, d, sol, tang, idx, n)
     @inbounds for j in 1:n
         v[idx.nu_bal[j]] += -tang[j]
-        v[idx.mu_ub[j]] += sol.mu_ub[j] * tang[j]
+        v[idx.mu_ub[j]] += sol.mu_ub[j] * _shed_capacity_derivative(d[j]) * tang[j]
     end
 end
 

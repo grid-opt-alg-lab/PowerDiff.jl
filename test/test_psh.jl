@@ -420,12 +420,55 @@ end
         end
     end
 
-    @testset "Negative demand warning" begin
-        dc_net = _make_2bus_psh(gmax=10.0)
-        @test_warn "Negative demand" DCOPFProblem(dc_net, [0.0, -0.5])
+    @testset "Negative net demand is a non-curtailable injection" begin
+        dc_net = _make_2bus_psh(gmax=10.0, cq=1.0, tau=0.01)
+        d = [-0.5, 1.0]
+        prob = DCOPFProblem(dc_net, d)
+        sol = solve!(prob)
 
-        prob = DCOPFProblem(dc_net, [0.0, 1.0])
-        @test_warn "Negative demand" update_demand!(prob, [0.0, -0.5])
+        # Bus 1 injects 0.5 MW, so the generator only needs to provide the
+        # remaining 0.5 MW. Negative net demand cannot be shed.
+        @test sol.pg[1] ≈ 0.5 atol=1e-4
+        @test all(abs.(sol.psh) .< 1e-6)
+
+        B_mat = PowerDiff.calc_susceptance_matrix(dc_net)
+        residual = dc_net.G_inc * sol.pg + sol.psh - d - B_mat * sol.va
+        @test norm(residual) < 1e-4
+
+        # The fixed-zero shedding convention must remain consistent with the
+        # KKT system and with demand derivatives away from the d=0 kink.
+        z = flatten_variables(sol, prob)
+        @test norm(kkt(z, prob, d)) < 1e-4
+
+        dpg_dd = calc_sensitivity(prob, :pg, :d)
+        dpsh_dd = calc_sensitivity(prob, :psh, :d)
+        @test all(isfinite, Matrix(dpg_dd))
+        @test all(isfinite, Matrix(dpsh_dd))
+
+        dlmp_dd = calc_sensitivity(prob, :lmp, :d)
+        adj = [0.3, -0.2]
+        tang = [0.1, -0.4]
+        prob_vjp = DCOPFProblem(dc_net, d)
+        solve!(prob_vjp)
+        @test vjp(prob_vjp, :lmp, :d, adj) ≈ dlmp_dd.matrix' * adj atol=1e-8
+        prob_jvp = DCOPFProblem(dc_net, d)
+        solve!(prob_jvp)
+        @test jvp(prob_jvp, :lmp, :d, tang) ≈ dlmp_dd.matrix * tang atol=1e-8
+
+        delta = 1e-5
+        d_pert = copy(d)
+        d_pert[1] += delta
+        sol_pert = solve!(DCOPFProblem(dc_net, d_pert))
+        fd = (sol_pert.pg - sol.pg) / delta
+        @test Matrix(dpg_dd)[:, 1] ≈ fd atol=1e-3
+
+        # Updating an existing problem must rewrite the shedding cap to max(d, 0).
+        prob_updated = DCOPFProblem(dc_net, [0.0, 1.0])
+        solve!(prob_updated)
+        update_demand!(prob_updated, d)
+        sol_updated = solve!(prob_updated)
+        @test sol_updated.pg ≈ sol.pg atol=1e-5
+        @test sol_updated.psh ≈ sol.psh atol=1e-6
     end
 
     @testset "Degenerate complementarity (d=0 everywhere)" begin

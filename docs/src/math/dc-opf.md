@@ -16,7 +16,7 @@ G_{\text{inc}} g + \text{psh} - d &= B \theta & (\nu_{\text{bal}}) \\
 f &= W A \theta & (\nu_{\text{flow}}) \\
 -f_{\max} \leq f &\leq f_{\max} & (\lambda_{\text{lb}}, \lambda_{\text{ub}}) \\
 g_{\min} \leq g &\leq g_{\max} & (\rho_{\text{lb}}, \rho_{\text{ub}}) \\
-0 \leq \text{psh} &\leq d & (\mu_{\text{lb}}, \mu_{\text{ub}}) \\
+0 \leq \text{psh} &\leq d_+ & (\mu_{\text{lb}}, \mu_{\text{ub}}) \\
 \alpha_{\min} \leq A\theta &\leq \alpha_{\max} & (\gamma_{\text{lb}}, \gamma_{\text{ub}}) \\
 \theta_{\text{ref}} &= 0 & (\eta_{\text{ref}})
 \end{aligned}
@@ -29,7 +29,8 @@ where:
 - ``G_{\text{inc}}`` is the ``n \times k`` generator-bus incidence matrix
 - ``C_q = \operatorname{diag}(c_q)`` contains quadratic cost coefficients
 - ``c_l`` contains linear cost coefficients
-- ``c_{\text{shed}}`` is the load-shedding cost vector
+- ``c_{\text{shed}}`` is the load shedding cost vector
+- ``d_+ = \max(d, 0)`` is the curtailable portion of signed net demand; negative net demand remains in power balance as an injection
 - ``\tau`` is a small regularization parameter for numerical conditioning
 
 ## KKT System for Implicit Differentiation
@@ -77,12 +78,19 @@ For each parameter type, we compute ``\partial K / \partial p`` and then the ful
 
 ### Demand (``d``)
 
-Demand enters the power balance and the upper shedding bound:
+Demand enters the power balance and the load shed upper bound constraints through the clipped demand
+``d_+ = \max(d, 0)``:
 
 ```math
 \frac{\partial K_{\nu_{\text{bal}}}}{\partial d} = -I, \qquad
-\frac{\partial K_{\mu_{\text{ub}}}}{\partial d} = \operatorname{diag}(\mu_{\text{ub}})
+\frac{\partial K_{\mu_{\text{ub}}}}{\partial d} =
+\operatorname{diag}\left(\mu_{\text{ub}} \circ \frac{\partial d_+}{\partial d}\right)
 ```
+
+For strictly positive demand, ``\partial d_+ / \partial d = 1``. For negative
+demand, it is ``0``. At zero demand, the clipping function is non-smooth;
+the implementation uses the fixed zero shedding convention already required by
+the collapsed bound ``0 \leq \text{psh} \leq 0``.
 
 ### Switching (``\mathrm{sw}``)
 
