@@ -1,3 +1,5 @@
+import PowerIO
+
 const _INLINE_CASE = """
 function mpc = case_inline
 mpc.version = '2';
@@ -60,6 +62,68 @@ mpc.bus_name = ['one'; 'two'];
 
         quartic = replace(_INLINE_CASE, "2 0 0 3 0.01 2 3" => "2 0 0 4 1 0.01 2 3")
         @test_throws ArgumentError PowerDiff.parse_matpower(IOBuffer(quartic))
+    end
+
+    @testset "Parser contract" begin
+        @test PowerDiff.parse_file(IOBuffer(_INLINE_CASE)) isa ParsedCase
+        @test_throws ArgumentError PowerDiff.parse_file(IOBuffer(_INLINE_CASE); backend=:native)
+    end
+end
+
+# Field-for-field equality of two ParsedCase values; floats compared with ≈, ints with ==.
+function _assert_parsedcase_equal(a::ParsedCase, b::ParsedCase, label)
+    @testset "$label" begin
+        @test a.baseMVA ≈ b.baseMVA
+        @test length(a.bus) == length(b.bus)
+        @test length(a.gen) == length(b.gen)
+        @test length(a.branch) == length(b.branch)
+        @test length(a.load) == length(b.load)
+        @test length(a.shunt) == length(b.shunt)
+        for (x, y) in zip(a.bus, b.bus)
+            @test x.bus_i == y.bus_i
+            @test x.bus_type == y.bus_type
+            @test x.area == y.area && x.zone == y.zone
+            @test x.vm ≈ y.vm && x.va ≈ y.va && x.base_kv ≈ y.base_kv
+            @test x.vmax ≈ y.vmax && x.vmin ≈ y.vmin
+        end
+        for (x, y) in zip(a.gen, b.gen)
+            @test x.gen_bus == y.gen_bus && x.gen_status == y.gen_status
+            @test x.pg ≈ y.pg && x.qg ≈ y.qg && x.vg ≈ y.vg && x.mbase ≈ y.mbase
+            @test x.pmax ≈ y.pmax && x.pmin ≈ y.pmin && x.qmax ≈ y.qmax && x.qmin ≈ y.qmin
+            @test all(x.cost .≈ y.cost)
+        end
+        for (x, y) in zip(a.branch, b.branch)
+            @test x.f_bus == y.f_bus && x.t_bus == y.t_bus && x.br_status == y.br_status
+            @test x.br_r ≈ y.br_r && x.br_x ≈ y.br_x && x.br_b ≈ y.br_b
+            @test x.rate_a ≈ y.rate_a && x.rate_b ≈ y.rate_b && x.rate_c ≈ y.rate_c
+            @test x.tap ≈ y.tap && x.shift ≈ y.shift && x.angmin ≈ y.angmin && x.angmax ≈ y.angmax
+        end
+        for (x, y) in zip(a.load, b.load)
+            @test x.load_bus == y.load_bus && x.status == y.status
+            @test x.pd ≈ y.pd && x.qd ≈ y.qd
+        end
+        for (x, y) in zip(a.shunt, b.shunt)
+            @test x.shunt_bus == y.shunt_bus && x.status == y.status
+            @test x.gs ≈ y.gs && x.bs ≈ y.bs
+        end
+    end
+end
+
+@testset "PowerIO parser path and IO parity" begin
+    # PowerIO is the only parser/data layer. Path parsing and IO parsing must
+    # land on the same PowerDiff ParsedCase after normalization.
+    if !PowerIO.library_available()
+        @info "libpowerio_capi not found (set POWERIO_CAPI to a local build); skipping parser parity"
+        @test_skip false
+    else
+        cases = filter(c -> isfile(joinpath(PD_PGLIB_DIR, c)),
+                       ["pglib_opf_case5_pjm.m", "pglib_opf_case14_ieee.m", "pglib_opf_case30_ieee.m"])
+        @test !isempty(cases)
+        for c in cases
+            path_case = PowerDiff.parse_file(c; library=:pglib)
+            io_case = PowerDiff.parse_file(IOBuffer(read(joinpath(PD_PGLIB_DIR, c), String)))
+            _assert_parsedcase_equal(path_case, io_case, c)
+        end
     end
 end
 
