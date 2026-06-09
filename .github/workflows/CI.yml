@@ -8,18 +8,44 @@ on:
     - cron: '0 4 * * 0'
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  JULIA_PKG_USE_CLI_GIT: true
 jobs:
   # Runs on every PR and push — single fast job
   test:
     runs-on: ubuntu-latest
+    env:
+      # PowerIO.jl is private until release; surface the secret as env so steps can
+      # skip cleanly when CI does not have cross-repo read access.
+      POWERIO_JL_TOKEN: ${{ secrets.POWERIO_JL_REPO_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
+      - name: Probe PowerIO.jl access
+        id: powerio-jl
+        env:
+          GIT_TERMINAL_PROMPT: 0
+        run: |
+          if [ -n "${POWERIO_JL_TOKEN}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          elif git ls-remote https://github.com/eigenergy/PowerIO.jl.git >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Skip notice (PowerIO.jl unavailable)
+        if: steps.powerio-jl.outputs.available != 'true'
+        run: echo "PowerIO.jl is not publicly readable and POWERIO_JL_REPO_TOKEN is not set; skipping PowerDiff tests until PowerIO.jl is public or the token is configured."
+      - name: Configure PowerIO.jl access
+        if: env.POWERIO_JL_TOKEN != ''
+        run: git config --global url."https://x-access-token:${POWERIO_JL_TOKEN}@github.com/eigenergy/".insteadOf "https://github.com/eigenergy/"
       - uses: julia-actions/cache@v3
+        if: steps.powerio-jl.outputs.available == 'true'
       - uses: julia-actions/julia-buildpkg@v1
+        if: steps.powerio-jl.outputs.available == 'true'
       - uses: julia-actions/julia-runtest@v1
+        if: steps.powerio-jl.outputs.available == 'true'
 
   # Full matrix — only on main push and scheduled runs
   test-full:
@@ -36,14 +62,37 @@ jobs:
           - julia-version: 'nightly'
             os: ubuntu-latest
     continue-on-error: ${{ matrix.julia-version == 'nightly' }}
+    env:
+      POWERIO_JL_TOKEN: ${{ secrets.POWERIO_JL_REPO_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.julia-version }}
+      - name: Probe PowerIO.jl access
+        id: powerio-jl
+        env:
+          GIT_TERMINAL_PROMPT: 0
+        run: |
+          if [ -n "${POWERIO_JL_TOKEN}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          elif git ls-remote https://github.com/eigenergy/PowerIO.jl.git >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Skip notice (PowerIO.jl unavailable)
+        if: steps.powerio-jl.outputs.available != 'true'
+        run: echo "PowerIO.jl is not publicly readable and POWERIO_JL_REPO_TOKEN is not set; skipping PowerDiff tests until PowerIO.jl is public or the token is configured."
+      - name: Configure PowerIO.jl access
+        if: env.POWERIO_JL_TOKEN != ''
+        run: git config --global url."https://x-access-token:${POWERIO_JL_TOKEN}@github.com/eigenergy/".insteadOf "https://github.com/eigenergy/"
       - uses: julia-actions/cache@v3
+        if: steps.powerio-jl.outputs.available == 'true'
       - uses: julia-actions/julia-buildpkg@v1
+        if: steps.powerio-jl.outputs.available == 'true'
       - uses: julia-actions/julia-runtest@v1
+        if: steps.powerio-jl.outputs.available == 'true'
 
   # APF extension — only on main push and scheduled runs.
   # Pinned to Julia 1.12 because upstream AcceleratedDCPowerFlows restricted
@@ -52,13 +101,37 @@ jobs:
     if: github.event_name != 'pull_request'
     name: APF Extension (Julia 1.12)
     runs-on: ubuntu-latest
+    env:
+      POWERIO_JL_TOKEN: ${{ secrets.POWERIO_JL_REPO_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12'
+      - name: Probe PowerIO.jl access
+        id: powerio-jl
+        env:
+          GIT_TERMINAL_PROMPT: 0
+        run: |
+          if [ -n "${POWERIO_JL_TOKEN}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          elif git ls-remote https://github.com/eigenergy/PowerIO.jl.git >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Skip notice (PowerIO.jl unavailable)
+        if: steps.powerio-jl.outputs.available != 'true'
+        run: echo "PowerIO.jl is not publicly readable and POWERIO_JL_REPO_TOKEN is not set; skipping PowerDiff tests until PowerIO.jl is public or the token is configured."
+      - name: Configure PowerIO.jl access
+        if: env.POWERIO_JL_TOKEN != ''
+        run: git config --global url."https://x-access-token:${POWERIO_JL_TOKEN}@github.com/eigenergy/".insteadOf "https://github.com/eigenergy/"
       - uses: julia-actions/cache@v3
+        if: steps.powerio-jl.outputs.available == 'true'
       - name: Install APF (unregistered)
+        if: steps.powerio-jl.outputs.available == 'true'
         run: julia --project=. -e 'using Pkg; Pkg.add(url="https://github.com/mtanneau/AcceleratedDCPowerFlows.jl.git")'
       - uses: julia-actions/julia-buildpkg@v1
+        if: steps.powerio-jl.outputs.available == 'true'
       - uses: julia-actions/julia-runtest@v1
+        if: steps.powerio-jl.outputs.available == 'true'

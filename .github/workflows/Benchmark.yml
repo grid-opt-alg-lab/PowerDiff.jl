@@ -7,6 +7,8 @@ on:
 permissions:
   contents: read
   pull-requests: write
+env:
+  JULIA_PKG_USE_CLI_GIT: true
 
 concurrency:
   group: benchmark-${{ github.event.pull_request.number }}
@@ -15,8 +17,29 @@ concurrency:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
+    env:
+      POWERIO_JL_TOKEN: ${{ secrets.POWERIO_JL_REPO_TOKEN }}
     steps:
+      - name: Probe PowerIO.jl access
+        id: powerio-jl
+        env:
+          GIT_TERMINAL_PROMPT: 0
+        run: |
+          if [ -n "${POWERIO_JL_TOKEN}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          elif git ls-remote https://github.com/eigenergy/PowerIO.jl.git >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Skip notice (PowerIO.jl unavailable)
+        if: steps.powerio-jl.outputs.available != 'true'
+        run: echo "PowerIO.jl is not publicly readable and POWERIO_JL_REPO_TOKEN is not set; skipping benchmarks until PowerIO.jl is public or the token is configured."
+      - name: Configure PowerIO.jl access
+        if: env.POWERIO_JL_TOKEN != ''
+        run: git config --global url."https://x-access-token:${POWERIO_JL_TOKEN}@github.com/eigenergy/".insteadOf "https://github.com/eigenergy/"
       - uses: MilesCranmer/AirspeedVelocity.jl@315c11b51ceee8ebd6063d70cff6ae499a040d28
+        if: steps.powerio-jl.outputs.available == 'true'
         with:
           julia-version: '1'
           mode: 'time,memory'
