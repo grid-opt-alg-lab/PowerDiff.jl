@@ -17,7 +17,7 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 # here. Once PowerIO registers, drop this [sources] block and add a [compat] entry.
 # The PowerIO branch named in `rev` must be pushed before this branch's CI runs.
 [sources]
-PowerIO = {url = "https://github.com/eigenergy/PowerIO.jl.git", rev = "codex/release-prep-2026-06-09"}
+PowerIO = {url = "https://github.com/eigenergy/PowerIO.jl.git", rev = "main"}
 
 [weakdeps]
 AcceleratedDCPowerFlows = "c32744f1-403b-4af7-9195-1da907387c09"
@@ -32,7 +32,7 @@ Ipopt = "1"
 JuMP = "1"
 LazyArtifacts = "1"
 NLPModelsIpopt = "0.11.2"
-PowerIO = "0.0.1"
+PowerIO = "0.0.1, 0.1"
 julia = "1.9"
 
 [extras]
