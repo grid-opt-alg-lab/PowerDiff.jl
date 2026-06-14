@@ -6,7 +6,6 @@ on:
   pull_request:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  JULIA_PKG_USE_CLI_GIT: true
 jobs:
   build:
     permissions:
@@ -14,36 +13,14 @@ jobs:
       contents: write
       statuses: write
     runs-on: ubuntu-latest
-    env:
-      POWERIO_JL_TOKEN: ${{ secrets.POWERIO_JL_REPO_TOKEN }}
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1'
-      - name: Probe PowerIO.jl access
-        id: powerio-jl
-        env:
-          GIT_TERMINAL_PROMPT: 0
-        run: |
-          if [ -n "${POWERIO_JL_TOKEN}" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          elif git ls-remote https://github.com/eigenergy/PowerIO.jl.git >/dev/null 2>&1; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Skip notice (PowerIO.jl unavailable)
-        if: steps.powerio-jl.outputs.available != 'true'
-        run: echo "PowerIO.jl is not publicly readable and POWERIO_JL_REPO_TOKEN is not set; skipping docs until PowerIO.jl is public or the token is configured."
-      - name: Configure PowerIO.jl access
-        if: env.POWERIO_JL_TOKEN != ''
-        run: git config --global url."https://x-access-token:${POWERIO_JL_TOKEN}@github.com/eigenergy/".insteadOf "https://github.com/eigenergy/"
       - name: Install dependencies
-        if: steps.powerio-jl.outputs.available == 'true'
         run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
       - name: Build and deploy
-        if: steps.powerio-jl.outputs.available == 'true'
         run: julia --project=docs/ docs/make.jl
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
