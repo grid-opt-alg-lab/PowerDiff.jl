@@ -1,4 +1,3 @@
-using LazyArtifacts
 import PowerIO
 
 # PowerIO is the parser and data layer. It parses MATPOWER/PSSE/etc. and
@@ -7,16 +6,6 @@ import PowerIO
 # PowerDiff consumes that directly. The only logic kept here is OPF-solver modeling:
 # polynomial cost interpretation, finite flow limits, default angle-difference
 # bounds, and rejection of records PowerDiff does not model (storage, HVDC).
-
-"""
-    get_path(library::Symbol)
-
-Resolve an artifact-backed library path owned by PowerDiff.
-"""
-function get_path(library::Symbol)
-    library == :pglib && return joinpath(artifact"PGLib_opf", "pglib-opf-23.07")
-    throw(ArgumentError("unsupported library $library"))
-end
 
 """
     parse_file(io::Union{IO,String}; library=nothing, filetype="m") -> PowerIO.Network
