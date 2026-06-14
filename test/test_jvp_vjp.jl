@@ -22,7 +22,7 @@
 # round-trip dict_to_vec/vec_to_dict, and error handling for invalid IDs.
 
 @testset "JVP / VJP" begin
-    raw = PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
+    raw = PowerDiff._network_data(PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m")))
     basic = _make_basic_case(raw)
 
     # =================================================================

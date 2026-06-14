@@ -21,38 +21,17 @@
 # arbitrary element IDs. Uses case5.m with bus IDs [1,2,3,4,10] — bus 10
 # maps to sequential index 5 via IDMapping.
 
-function _make_basic_case(data::ParsedCase)
-    bus_map = Dict(id => i for (i, id) in enumerate(sort([bus.bus_i for bus in data.bus])))
-    buses = [
-        ParsedBus(bus_map[bus.bus_i], bus.bus_type, bus.pd, bus.qd, bus.gs, bus.bs,
-            bus.area, bus.vm, bus.va, bus.base_kv, bus.zone, bus.vmax, bus.vmin)
-        for bus in data.bus
-    ]
-    gens = [
-        ParsedGen(gen.index, bus_map[gen.gen_bus], gen.pg, gen.qg, gen.qmax, gen.qmin,
-            gen.vg, gen.mbase, gen.gen_status, gen.pmax, gen.pmin, gen.cost)
-        for gen in data.gen
-    ]
-    branches = [
-        ParsedBranch(branch.index, bus_map[branch.f_bus], bus_map[branch.t_bus],
-            branch.br_r, branch.br_x, branch.br_b, branch.rate_a, branch.rate_b,
-            branch.rate_c, branch.tap, branch.shift, branch.br_status,
-            branch.angmin, branch.angmax)
-        for branch in data.branch
-    ]
-    loads = [
-        ParsedLoad(load.index, bus_map[load.load_bus], load.pd, load.qd, load.status)
-        for load in data.load
-    ]
-    shunts = [
-        ParsedShunt(shunt.index, bus_map[shunt.shunt_bus], shunt.gs, shunt.bs, shunt.status)
-        for shunt in data.shunt
-    ]
-    return ParsedCase(data.name, data.source_version, data.baseMVA, buses, gens, branches, loads, shunts)
+# Renumber bus ids to a dense 1..n space, operating on PowerDiff network tables.
+function _make_basic_case(data)
+    bus_map = Dict(id => i for (i, id) in enumerate(sort([b.bus_i for b in data.bus])))
+    buses = [(; b..., bus_i=bus_map[b.bus_i]) for b in data.bus]
+    gens = [(; g..., gen_bus=bus_map[g.gen_bus]) for g in data.gen]
+    branches = [(; br..., f_bus=bus_map[br.f_bus], t_bus=bus_map[br.t_bus]) for br in data.branch]
+    return (; data.name, data.baseMVA, bus=buses, gen=gens, branch=branches)
 end
 
 @testset "Non-Basic Network Support" begin
-    raw = PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
+    raw = PowerDiff._network_data(PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m")))
     basic = _make_basic_case(raw)
 
     # =================================================================
@@ -399,19 +378,6 @@ end
     end
 
     # =================================================================
-    # IDMapping shunt support
-    # =================================================================
-    @testset "IDMapping shunt fields" begin
-        dc_nb = DCNetwork(raw)
-        id_map = dc_nb.id_map
-
-        @test isa(id_map.shunt_ids, Vector{Int})
-        @test isa(id_map.shunt_to_idx, Dict{Int,Int})
-        # shunt_ids should be sorted
-        @test issorted(id_map.shunt_ids)
-    end
-
-    # =================================================================
     # calc_demand_vector from DCNetwork
     # =================================================================
     @testset "calc_demand_vector from DCNetwork" begin
@@ -472,43 +438,33 @@ end
     @testset "IDMapping constructor validation" begin
         # Unsorted bus_ids should throw
         @test_throws ArgumentError IDMapping(
-            [3, 1, 2], [1, 2], [1], [1], Int[],
-            Dict(3=>1, 1=>2, 2=>3), Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict{Int,Int}())
+            [3, 1, 2], [1, 2], [1],
+            Dict(3=>1, 1=>2, 2=>3), Dict(1=>1, 2=>2), Dict(1=>1))
 
         # Unsorted branch_ids should throw
         @test_throws ArgumentError IDMapping(
-            [1, 2, 3], [2, 1], [1], [1], Int[],
-            Dict(1=>1, 2=>2, 3=>3), Dict(2=>1, 1=>2), Dict(1=>1), Dict(1=>1), Dict{Int,Int}())
+            [1, 2, 3], [2, 1], [1],
+            Dict(1=>1, 2=>2, 3=>3), Dict(2=>1, 1=>2), Dict(1=>1))
 
         # Unsorted gen_ids should throw
         @test_throws ArgumentError IDMapping(
-            [1, 2], [1], [3, 1], [1], Int[],
-            Dict(1=>1, 2=>2), Dict(1=>1), Dict(3=>1, 1=>2), Dict(1=>1), Dict{Int,Int}())
-
-        # Unsorted load_ids should throw
-        @test_throws ArgumentError IDMapping(
-            [1, 2], [1], [1], [5, 2], Int[],
-            Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict(5=>1, 2=>2), Dict{Int,Int}())
-
-        # Unsorted shunt_ids should throw
-        @test_throws ArgumentError IDMapping(
-            [1, 2], [1], [1], [1], [3, 1],
-            Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict(1=>1), Dict(3=>1, 1=>2))
+            [1, 2], [1], [3, 1],
+            Dict(1=>1, 2=>2), Dict(1=>1), Dict(3=>1, 1=>2))
 
         # Length mismatch: bus_ids vs bus_to_idx
         @test_throws ArgumentError IDMapping(
-            [1, 2, 3], [1], [1], [1], Int[],
-            Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict(1=>1), Dict{Int,Int}())
+            [1, 2, 3], [1], [1],
+            Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1))
 
         # Length mismatch: branch_ids vs branch_to_idx
         @test_throws ArgumentError IDMapping(
-            [1, 2], [1, 2], [1], [1], Int[],
-            Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict(1=>1), Dict{Int,Int}())
+            [1, 2], [1, 2], [1],
+            Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1))
 
         # Valid construction should work
         id_map = IDMapping(
-            [1, 5, 10], [1, 2], [1], [1], Int[],
-            Dict(1=>1, 5=>2, 10=>3), Dict(1=>1, 2=>2), Dict(1=>1), Dict(1=>1), Dict{Int,Int}())
+            [1, 5, 10], [1, 2], [1],
+            Dict(1=>1, 5=>2, 10=>3), Dict(1=>1, 2=>2), Dict(1=>1))
         @test id_map.bus_ids == [1, 5, 10]
         @test id_map.bus_to_idx[10] == 3
     end

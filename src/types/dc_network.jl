@@ -157,17 +157,23 @@ const DEFAULT_SHED_COST_MULTIPLIER = 10
 # =============================================================================
 
 """
-    DCNetwork(data::ParsedCase; tau=DEFAULT_TAU, ref_bus=nothing)
+    DCNetwork(net::PowerIO.Network; tau=DEFAULT_TAU, ref_bus=nothing)
 
-Construct a DCNetwork from normalized typed MATPOWER data.
+Construct a DCNetwork from a parsed PowerIO network.
 
 # Example
 ```julia
-data = parse_file("case14.m")
-dc_net = DCNetwork(data)
+net = parse_file("case14.m")
+dc_net = DCNetwork(net)
 ```
 """
-function DCNetwork(data::ParsedCase; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
+DCNetwork(net::PowerIO.Network; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing) =
+    DCNetwork(_network_data(net); tau=tau, ref_bus=ref_bus)
+
+# Build from PowerDiff network tables (see `_network_data`). The `PowerIO.Network`
+# method runs PowerDiff's modeling deltas; this assumes the tables are already
+# normalized, so programmatic callers can supply ready values directly.
+function DCNetwork(data::NamedTuple; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
     id_map = IDMapping(data)
 
     n = length(id_map.bus_ids)
@@ -290,7 +296,7 @@ function DCNetwork(
         Float64.(c_shed),
         Float64.(demand), Float64.(pg_init),
         ref_bus, tau,
-        IDMapping(n, m, k, 0)
+        IDMapping(n, m, k)
     )
 end
 
@@ -307,15 +313,15 @@ function calc_demand_vector(network::DCNetwork)
     return copy(network.demand)
 end
 
-calc_demand_vector(data::ParsedCase) = calc_demand_vector(data, IDMapping(data))
+calc_demand_vector(net::PowerIO.Network) = calc_demand_vector(_network_data(net))
+calc_demand_vector(data::NamedTuple) = calc_demand_vector(data, IDMapping(data))
 
-function calc_demand_vector(data::ParsedCase, id_map::IDMapping)
-    # Index by the sorted IDMapping, matching every other DCNetwork(::ParsedCase) path.
-    # Keying off enumerate(data.bus) (file order) misaligns loads when bus IDs are unsorted.
+function calc_demand_vector(data::NamedTuple, id_map::IDMapping)
+    # to_powerdata already aggregates loads into per-bus demand (per-unit). Index by
+    # the sorted IDMapping so demand aligns even when original bus IDs are unsorted.
     d = zeros(length(id_map.bus_ids))
-    for load in data.load
-        load.status != 0 || continue
-        d[id_map.bus_to_idx[load.load_bus]] += load.pd
+    for bus in data.bus
+        d[id_map.bus_to_idx[bus.bus_i]] += bus.pd
     end
     return d
 end
@@ -364,13 +370,11 @@ end
 """
 Aggregate generation to bus-level vector.
 """
-function _calc_generation_vector(data::ParsedCase, id_map::IDMapping)
+function _calc_generation_vector(data::NamedTuple, id_map::IDMapping)
     n = length(id_map.bus_ids)
     g = zeros(n)
     for gen in data.gen
-        gen.gen_status != 0 || continue
-        bus_idx = id_map.bus_to_idx[gen.gen_bus]
-        g[bus_idx] += gen.pg
+        g[id_map.bus_to_idx[gen.gen_bus]] += gen.pg
     end
     return g
 end
@@ -456,14 +460,14 @@ function DCPowerFlowState(net::DCNetwork, d::AbstractVector{<:Real})
 end
 
 """
-    DCPowerFlowState(data::ParsedCase; g=nothing, d=nothing)
+    DCPowerFlowState(net::PowerIO.Network; g=nothing, d=nothing)
 
-Construct DCPowerFlowState from typed MATPOWER data.
+Construct DCPowerFlowState from a parsed PowerIO network.
 If `d` is not provided, extracts demand from the network.
 If `g` is not provided, aggregates generation from gen data to buses.
 """
-function DCPowerFlowState(data::ParsedCase; g::Union{Nothing,AbstractVector}=nothing, d::Union{Nothing,AbstractVector}=nothing)
-    net = DCNetwork(data)
+function DCPowerFlowState(net::PowerIO.Network; g::Union{Nothing,AbstractVector}=nothing, d::Union{Nothing,AbstractVector}=nothing)
+    net = DCNetwork(net)
 
     if isnothing(d)
         d = net.demand

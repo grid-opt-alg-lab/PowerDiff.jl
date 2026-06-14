@@ -204,10 +204,16 @@ end
 Reject the removed dictionary API with a migration hint.
 """
 function ACNetwork(net::Dict{String,<:Any}; idx_slack::Union{Nothing,Int}=nothing)
-    throw(ArgumentError("dictionary constructors were removed; parse a MATPOWER file with PowerDiff.parse_file or construct ParsedCase"))
+    throw(ArgumentError("dictionary constructors were removed; parse a MATPOWER file with PowerDiff.parse_file"))
 end
 
-function ACNetwork(data::ParsedCase; idx_slack::Union{Nothing,Int}=nothing)
+ACNetwork(net::PowerIO.Network; idx_slack::Union{Nothing,Int}=nothing) =
+    ACNetwork(_network_data(net); idx_slack=idx_slack)
+
+# Build from PowerDiff network tables (see `_network_data`). The `PowerIO.Network`
+# method runs PowerDiff's modeling deltas; this assumes the tables are already
+# normalized, so programmatic callers can supply ready values directly.
+function ACNetwork(data::NamedTuple; idx_slack::Union{Nothing,Int}=nothing)
     id_map = IDMapping(data)
     n_bus = length(id_map.bus_ids)
     n_branch = length(id_map.branch_ids)
@@ -272,17 +278,15 @@ function ACNetwork(data::ParsedCase; idx_slack::Union{Nothing,Int}=nothing)
     qd = zeros(n_bus)
     gs = zeros(n_bus)
     bs = zeros(n_bus)
-    for load in data.load
-        i = id_map.bus_to_idx[load.load_bus]
-        pd[i] += load.pd
-        qd[i] += load.qd
-    end
-    for shunt in data.shunt
-        i = id_map.bus_to_idx[shunt.shunt_bus]
-        gs[i] += shunt.gs
-        bs[i] += shunt.bs
-        g_shunt[i] += shunt.gs
-        b_shunt[i] += shunt.bs
+    # to_powerdata aggregates loads/shunts into per-bus values (per-unit).
+    for bus in data.bus
+        i = id_map.bus_to_idx[bus.bus_i]
+        pd[i] += bus.pd
+        qd[i] += bus.qd
+        gs[i] += bus.gs
+        bs[i] += bus.bs
+        g_shunt[i] += bus.gs
+        b_shunt[i] += bus.bs
     end
 
     pg = zeros(n_bus)
@@ -381,7 +385,7 @@ function ACNetwork(Y::AbstractMatrix{<:Complex}; idx_slack::Int=1)
         sw, is_switchable,
         idx_slack,
         vm_min, vm_max,
-        IDMapping(n, m, 0, 0),
+        IDMapping(n, m, 0),
         [edge[1] for edge in edges], [edge[2] for edge in edges],
         zeros(m), zeros(m), zeros(m), zeros(m), zeros(m), zeros(m), zeros(m),
         ones(m), zeros(m), ones(m), fill(-π, m), fill(π, m), fill(Inf, m),

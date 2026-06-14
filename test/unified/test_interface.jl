@@ -141,9 +141,10 @@ using Test
 
     @testset "ACNetwork" begin
         ac_net = ACNetwork(net_data)
+        nd = PowerDiff._network_data(net_data)
         @test ac_net isa AbstractPowerNetwork
-        @test ac_net.n == length(net_data.bus)
-        @test ac_net.m == length(net_data.branch)
+        @test ac_net.n == length(nd.bus)
+        @test ac_net.m == length(nd.branch)
 
         # Admittance matrix reconstruction
         Y = admittance_matrix(ac_net)

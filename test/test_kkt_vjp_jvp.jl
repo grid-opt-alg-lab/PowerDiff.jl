@@ -20,7 +20,7 @@
 # match the materialized Sensitivity matrix path.
 
 @testset "KKT VJP/JVP" begin
-    raw = PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m"))
+    raw = PowerDiff._network_data(PowerDiff.parse_file(joinpath(PM_DATA_DIR, "case5.m")))
     basic = _make_basic_case(raw)
 
     # =================================================================

@@ -13,12 +13,6 @@ NLPModelsIpopt = "f4238b75-b362-5c4c-b852-0801c9a21d71"
 PowerIO = "05ed8b54-f668-4096-9d0d-e8c3dd9dc169"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
-# PowerIO is not yet in the General registry, so it is pinned to the PowerIO.jl repo
-# here. Once PowerIO registers, drop this [sources] block and add a [compat] entry.
-# The PowerIO branch named in `rev` must be pushed before this branch's CI runs.
-[sources]
-PowerIO = {url = "https://github.com/eigenergy/PowerIO.jl.git", rev = "main"}
-
 [weakdeps]
 AcceleratedDCPowerFlows = "c32744f1-403b-4af7-9195-1da907387c09"
 
@@ -32,7 +26,7 @@ Ipopt = "1"
 JuMP = "1"
 LazyArtifacts = "1"
 NLPModelsIpopt = "0.11.2"
-PowerIO = "0.0.1, 0.1"
+PowerIO = "0.1"
 julia = "1.9"
 
 [extras]

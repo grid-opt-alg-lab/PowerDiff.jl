@@ -120,19 +120,19 @@ end
 
     @testset "Transformer, phase shift, and parallel-line finite differences" begin
         buses = [
-            ParsedBus(1, 3, 0.0, 0.0, 0.0, 0.0, 1, 1.0, 0.0, 230.0, 1, 1.1, 0.9),
-            ParsedBus(2, 1, 0.0, 0.0, 0.0, 0.0, 1, 1.0, 0.0, 230.0, 1, 1.1, 0.9),
-            ParsedBus(3, 1, 0.0, 0.0, 0.0, 0.0, 1, 1.0, 0.0, 230.0, 1, 1.1, 0.9),
+            pd_bus(1, 3; vmax=1.1, vmin=0.9),
+            pd_bus(2, 1; vmax=1.1, vmin=0.9),
+            pd_bus(3, 1; vmax=1.1, vmin=0.9),
         ]
         gens = [
-            ParsedGen(1, 1, 0.5, 0.0, 1.0, -1.0, 1.0, 100.0, 1, 2.0, 0.0, (1.0, 1.0, 0.0)),
+            pd_gen(1, 1; pg=0.5, qmax=1.0, qmin=-1.0, vg=1.0, pmax=2.0, pmin=0.0, cost=(1.0, 1.0, 0.0)),
         ]
         branches = [
-            ParsedBranch(1, 1, 2, 0.01, 0.10, 0.02, 2.0, 2.0, 2.0, 1.05, 0.12, 1, -π / 3, π / 3),
-            ParsedBranch(2, 1, 2, 0.02, 0.20, 0.01, 2.0, 2.0, 2.0, 1.00, 0.00, 1, -π / 3, π / 3),
-            ParsedBranch(3, 2, 3, 0.01, 0.15, 0.03, 2.0, 2.0, 2.0, 0.97, -0.08, 1, -π / 3, π / 3),
+            pd_branch(1, 1, 2; br_r=0.01, br_x=0.10, br_b=0.02, rate_a=2.0, rate_b=2.0, rate_c=2.0, tap=1.05, shift=0.12, angmin=-π / 3, angmax=π / 3),
+            pd_branch(2, 1, 2; br_r=0.02, br_x=0.20, br_b=0.01, rate_a=2.0, rate_b=2.0, rate_c=2.0, tap=1.00, shift=0.00, angmin=-π / 3, angmax=π / 3),
+            pd_branch(3, 2, 3; br_r=0.01, br_x=0.15, br_b=0.03, rate_a=2.0, rate_b=2.0, rate_c=2.0, tap=0.97, shift=-0.08, angmin=-π / 3, angmax=π / 3),
         ]
-        net = ACNetwork(ParsedCase("topology_fd", "2", 100.0, buses, gens, branches, ParsedLoad[], ParsedShunt[]))
+        net = ACNetwork(pd_case(buses, gens, branches; name="topology_fd"))
         state = ACPowerFlowState(net, [1.01 + 0.02im, 0.98 - 0.04im, 1.02 + 0.01im])
         non_slack = [i for i in 1:state.n if i != state.idx_slack]
         injections = state.v .* conj.(state.Y * state.v)
