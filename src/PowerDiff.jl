@@ -30,7 +30,6 @@ const MOI = JuMP.MOI
 const _SILENCE_WARNINGS = Ref(false)
 
 include("artifacts.jl")
-include("network_data.jl")
 
 """
     silence()
