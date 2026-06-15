@@ -294,7 +294,9 @@ function DCOPFProblem(network::DCNetwork; d::Union{Nothing,AbstractVector}=nothi
     return DCOPFProblem(network, d; kwargs...)
 end
 
-function DCOPFProblem(data::ParsedCase; d::Union{Nothing,AbstractVector}=nothing, tau::Float64=DEFAULT_TAU, kwargs...)
+DCOPFProblem(net::PowerIO.Network; kwargs...) = DCOPFProblem(_network_data(net); kwargs...)
+
+function DCOPFProblem(data::NamedTuple; d::Union{Nothing,AbstractVector}=nothing, tau::Float64=DEFAULT_TAU, kwargs...)
     network = DCNetwork(data; tau=tau)
     if isnothing(d)
         d = calc_demand_vector(network)

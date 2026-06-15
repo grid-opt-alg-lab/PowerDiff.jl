@@ -20,6 +20,7 @@ using JuMP
 using Ipopt
 using ExaModels
 using NLPModelsIpopt
+using PowerIO
 
 const MOI = JuMP.MOI
 
@@ -28,7 +29,7 @@ const MOI = JuMP.MOI
 # =============================================================================
 const _SILENCE_WARNINGS = Ref(false)
 
-include("parser.jl")
+include("artifacts.jl")
 
 """
     silence()
@@ -102,7 +103,6 @@ export Sensitivity, silence
 export operand_symbols, parameter_symbols
 export jvp, vjp, jvp!, vjp!, dict_to_vec, vec_to_dict, kkt_dims
 export parse_file, parse_matpower, parse_matpower_struct, get_path
-export ParsedCase, ParsedBus, ParsedGen, ParsedBranch, ParsedLoad, ParsedShunt
 
 # DC Power Flow Types
 export DCNetwork, DCPowerFlowState

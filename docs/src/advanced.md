@@ -41,7 +41,7 @@ Stores the DC network topology and parameters.
 | `tau` | `Float64` | Regularization parameter |
 | `id_map` | `IDMapping` | Bidirectional element ID mapping (original ↔ sequential) |
 
-Construct from typed MATPOWER data with `DCNetwork(parse_file("case14.m"))`, or
+Construct from a parsed MATPOWER network with `DCNetwork(parse_file("case14.m"))`, or
 with explicit parameters: `DCNetwork(n, m, k, A, G_inc, b; ...)`.
 
 ### ACNetwork

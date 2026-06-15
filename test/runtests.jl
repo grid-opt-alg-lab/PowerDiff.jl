@@ -43,10 +43,11 @@ include("common.jl")
         @test_skip false
     else
         dc_net = DCNetwork(net)
+        nd = PowerDiff._network_data(net)
 
-        @test dc_net.n == length(net.bus)
-        @test dc_net.m == length(net.branch)
-        @test dc_net.k == length(net.gen)
+        @test dc_net.n == length(nd.bus)
+        @test dc_net.m == length(nd.branch)
+        @test dc_net.k == length(nd.gen)
         @test size(dc_net.A) == (dc_net.m, dc_net.n)
         @test size(dc_net.G_inc) == (dc_net.n, dc_net.k)
         @test length(dc_net.b) == dc_net.m
@@ -56,16 +57,12 @@ include("common.jl")
     end
 end
 
-# Regression: calc_demand_vector(::ParsedCase) must index by the sorted IDMapping,
-# not by file order, so loads land on the right bus when bus IDs are unsorted.
+# Regression: calc_demand_vector(::NamedTuple) must index by the sorted IDMapping,
+# not by file order, so demand lands on the right bus when bus IDs are unsorted.
 @testset "calc_demand_vector aligns with sorted IDMapping" begin
-    # Only bus_i varies; the other fields are identical across the three buses.
-    buses = [PowerDiff.ParsedBus(id, 1, 0.0, 0.0, 0.0, 0.0, 1, 1.0, 0.0, 100.0, 1, 1.1, 0.9)
-             for id in (10, 2, 5)]
-    loads = [PowerDiff.ParsedLoad(1, 10, 1.0, 0.0, 1),
-             PowerDiff.ParsedLoad(2, 5,  3.0, 0.0, 1)]
-    data = PowerDiff.ParsedCase("unsorted", "2", 100.0, buses,
-        PowerDiff.ParsedGen[], PowerDiff.ParsedBranch[], loads, PowerDiff.ParsedShunt[])
+    # Per-bus demand (loads already aggregated into bus pd); only bus_i and pd vary.
+    buses = [pd_bus(10, 1; pd=1.0), pd_bus(2, 1; pd=0.0), pd_bus(5, 1; pd=3.0)]
+    data = pd_case(buses, NamedTuple[], NamedTuple[]; name="unsorted")
 
     d = calc_demand_vector(data)
     id_map = PowerDiff.IDMapping(data)

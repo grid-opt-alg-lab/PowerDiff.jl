@@ -4,24 +4,24 @@ PowerIO is PowerDiff's parser and data layer. PowerDiff does not expose a parser
 backend switch.
 
 `PowerDiff.parse_file(path)` resolves the path, requires a MATPOWER `.m` file, and
-calls `PowerIO.parse_file(path)`. `PowerDiff.parse_file(io; filetype="m")` reads
-the stream and calls `PowerIO.parse_str(text, "matpower")`.
+returns a `PowerIO.Network` via `PowerIO.parse_file`. `PowerDiff.parse_file(io)`
+reads the stream and calls `PowerIO.parse_str(text, "matpower")`. Pass the result to
+[`DCNetwork`](@ref) or [`ACNetwork`](@ref).
 
-PowerIO returns a raw, lossless `Network`: MW/MVAr, degrees, original bus ids, raw
-bus types, loads and shunts as first class records, and out of service elements
-retained. PowerDiff then maps that `Network` into its own `ParsedCase` and keeps
-the normalization it already owns:
+The network constructors build directly from `PowerIO.to_powerdata(net)`, which
+already returns normalized data: per-unit scaling by `base_mva`, degree-to-radian
+conversion, out-of-service and isolated-element filtering, bus-type inference,
+per-bus load/shunt aggregation, and polynomial cost rescaling. PowerDiff layers on
+only the OPF modeling it owns:
 
-- per unit scaling by `base_mva`
-- degree to radian conversion
-- bus type inference and slack selection
-- out of service and isolated element filtering
-- tap `0` to `1`
-- angle bound normalization
-- generator cost rescaling and padding
-- `rate_a` fallback
+- polynomial cost interpretation: it reads the constant, linear, and quadratic
+  coefficients straight from `to_powerdata`'s generator rows (already per-unit and
+  right-aligned). PWL costs are rejected; higher-order polynomials are rejected by
+  `to_powerdata` itself. A generator with no cost record is treated as cost-free.
+- a finite `rate_a` fallback when the source leaves the thermal limit at `0`
+- default angle-difference bounds
 
-PowerDiff rejects PowerIO networks carrying storage or HVDC/dcline records because
-the current `ParsedCase` model has no fields for them.
+PowerDiff rejects networks carrying storage or HVDC/dcline records, which it does
+not model.
 
 The parser tests assert path and IO parity through this single PowerIO path.

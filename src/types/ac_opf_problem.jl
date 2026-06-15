@@ -729,7 +729,5 @@ function ACOPFProblem(pm_data::Dict; kwargs...)
     throw(ArgumentError("dictionary constructors were removed; parse a MATPOWER file with PowerDiff.parse_file"))
 end
 
-function ACOPFProblem(data::ParsedCase; kwargs...)
-    network = ACNetwork(data)
-    return ACOPFProblem(network; kwargs...)
-end
+ACOPFProblem(net::PowerIO.Network; kwargs...) = ACOPFProblem(ACNetwork(net); kwargs...)
+ACOPFProblem(data::NamedTuple; kwargs...) = ACOPFProblem(ACNetwork(data); kwargs...)

@@ -571,16 +571,12 @@ function run_tier2(; outdir::String=@__DIR__,
     println("="^65)
 
     case_path = joinpath(dirname(pathof(PM)), "..", "test", "data", "matpower", "case14.m")
-    raw = PM.parse_file(case_path)
-    PM.make_basic_network!(raw)        # populates rate_a defaults
+    net = DCNetwork(parse_file(case_path))
     # case14 ships with very loose flow limits (max loading ~15% on the binding
-    # line at default rate_a). Scale by 0.10 to bring 2 lines to the bound and
+    # line at default rate_a). Scale fmax by 0.10 to bring 2 lines to the bound and
     # produce meaningful LMP variation. This is the "stressed" scenario IPPs
     # actually care about — peak loading, outages, etc.
-    for (_, br) in raw["branch"]
-        br["rate_a"] *= fmax_scale
-    end
-    net = DCNetwork(raw)
+    net.fmax .*= fmax_scale
     # Break generator degeneracy. Without this the KKT system is singular at
     # the optimum (multiple gens at upper bound), Tikhonov regularization kicks
     # in, and the matrix free VJP returns essentially zero gradient.
@@ -728,9 +724,8 @@ const RTS_LOAD_CSV = expanduser("~/Datasets/RTS-GMLC/RTS_Data/timeseries_data_fi
 function load_rts_gmlc()
     isfile(RTS_PATH) || error("RTS_GMLC.m not at $RTS_PATH")
     raw = PM.parse_file(RTS_PATH)
-    if !isempty(raw["dcline"])
-        empty!(raw["dcline"])           # PowerModels DC line workaround
-    end
+    # PowerDiff does not model HVDC/dclines; drop them (RTS-GMLC ships DC lines).
+    isempty(raw["dcline"]) || empty!(raw["dcline"])
     PM.make_basic_network!(raw)         # populates rate_a defaults & sequential IDs
     return raw
 end
@@ -765,11 +760,10 @@ function run_tier4(; outdir::String=@__DIR__,
     println("="^65)
 
     raw = load_rts_gmlc()
+    # Bridge the (dcline-free) PowerModels dict into PowerDiff via PowerIO.
+    net = DCNetwork(PowerDiff.PowerIO.from_powermodels(raw))
     # Tighten flow limits so congestion is meaningful (RTS-GMLC ships generous limits)
-    for (_, br) in raw["branch"]
-        br["rate_a"] *= 0.5
-    end
-    net = DCNetwork(raw)
+    net.fmax .*= 0.5
     # Break gen degeneracy so the KKT system is non singular at the optimum.
     for i in eachindex(net.gmax)
         if net.gmax[i] > 0.01
