@@ -29,11 +29,16 @@ The cache is prewarmed by constructors and refreshed by topology readers when
 mutations and the first topology read after each mutation.
 """
 mutable struct _DCTopologyCache
+    # Branch endpoints as sequential bus indices, cached from the incidence matrix:
+    # from_bus[e]/to_bus[e] are the columns of the +1/-1 entries in row `e` of `A`.
+    # This is the same information `A` already encodes; it is materialized as dense
+    # Int vectors (once, since `A`'s structure is fixed) so the connectivity refresh
+    # can read each branch's endpoints in O(1) instead of rescanning sparse rows.
     from_bus::Vector{Int}
     to_bus::Vector{Int}
-    energized::BitVector
-    refs::Vector{Int}
-    non_ref::Vector{Int}
+    energized::BitVector    # energized[e] == (b[e] * sw[e] != 0)
+    refs::Vector{Int}       # one reference bus per energized island (sorted)
+    non_ref::Vector{Int}    # all buses except `refs`
     initialized::Bool
 end
 
@@ -669,8 +674,19 @@ function _topology_cache_valid(net::DCNetwork)
     return true
 end
 
+# Recompute the energized-island partition and its reference buses.
+#
+# Energized branches (b[e]*sw[e] != 0) define the connectivity graph; buses joined
+# by them form one island. We run union-find over those branches, then pick one
+# reference bus per island: the lowest bus index in each, except the configured
+# `ref_bus`, which is forced to be the reference for its own island. Buses with no
+# energized branch are singleton islands that reference themselves.
 function _refresh_topology_cache!(net::DCNetwork)
     cache = net.topology_cache
+
+    # Union-find over buses. `parent[i]` points toward i's component root; a bus is
+    # its own parent until merged. find_root uses path halving, union_roots! keeps
+    # the lower index as root so the partition (and thus refs) is deterministic.
     parent = collect(1:net.n)
 
     function find_root(i::Int)
@@ -693,19 +709,23 @@ function _refresh_topology_cache!(net::DCNetwork)
         return nothing
     end
 
+    # Cache the branch endpoints from `A` once. `A`'s structure is fixed after
+    # construction, so this only runs the first time (or if `m` somehow changed).
     if length(cache.from_bus) != net.m
         cache.from_bus = zeros(Int, net.m)
         cache.to_bus = zeros(Int, net.m)
         rows, cols, nz_values = findnz(net.A)
         @inbounds for p in eachindex(rows)
             if nz_values[p] > 0
-                cache.from_bus[rows[p]] = cols[p]
+                cache.from_bus[rows[p]] = cols[p]   # +1 entry -> from bus
             else
-                cache.to_bus[rows[p]] = cols[p]
+                cache.to_bus[rows[p]] = cols[p]     # -1 entry -> to bus
             end
         end
     end
 
+    # Recompute the energized flags (these track `b`/`sw`) and union the endpoints
+    # of every energized branch so each island collapses to a single root.
     resize!(cache.energized, net.m)
     @inbounds for e in 1:net.m
         cache.energized[e] = _is_energized(net, e)
@@ -715,11 +735,13 @@ function _refresh_topology_cache!(net::DCNetwork)
         union_roots!(cache.from_bus[e], cache.to_bus[e])
     end
 
+    # One reference per island: start with the lowest bus index in each component...
     refs_by_root = Dict{Int,Int}()
     @inbounds for bus in 1:net.n
         root = find_root(bus)
         refs_by_root[root] = min(get(refs_by_root, root, bus), bus)
     end
+    # ...then force the configured ref_bus to be the reference for its island.
     refs_by_root[find_root(net.ref_bus)] = net.ref_bus
     cache.refs = sort!(collect(values(refs_by_root)))
     cache.non_ref = setdiff(1:net.n, cache.refs)
