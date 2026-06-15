@@ -239,6 +239,12 @@ The returned `bus`/`gen`/`branch` rows mirror the field names the network
 constructors expect, with loads/shunts already folded into per-bus `pd/qd/gs/bs`.
 `shunt` re-exposes those bus shunts as a table (one `(; index, shunt_bus, gs, bs)`
 record per bus with a nonzero shunt admittance) for callers that want shunt records.
+
+Bus rows carry the source MATPOWER bus id on `bus_i`, so [`IDMapping`](@ref)`.bus_ids`
+(and any bus-indexed sensitivity `row_to_id`) map back to the original file. Generator
+and branch `index` are dense file-order positions in `to_powerdata`'s status-filtered
+output, not original `mpc.gen`/`mpc.branch` row numbers: when out-of-service rows are
+dropped the dense index no longer equals the source row.
 """
 function _network_data(net)
     # Reject records PowerDiff does not model. Both guards read the raw network so
@@ -305,7 +311,14 @@ function _poly_cost(g)
         Int(g.n) == 0 && return (0.0, 0.0, 0.0)
         throw(ArgumentError("only polynomial mpc.gencost (model 2) is supported"))
     end
-    return (Float64(g.c[1]), Float64(g.c[2]), Float64(g.c[3]))
+    # to_powerdata right-aligns the (quadratic, linear, constant) triple, but guard the
+    # indexing so a model-2 cost shorter than 3 terms (purely linear/constant) zero-pads
+    # the missing leading coefficients instead of throwing a BoundsError.
+    c = g.c
+    cq = length(c) >= 3 ? Float64(c[end-2]) : 0.0
+    cl = length(c) >= 2 ? Float64(c[end-1]) : 0.0
+    cc = length(c) >= 1 ? Float64(c[end]) : 0.0
+    return (cq, cl, cc)
 end
 
 # PowerDiff's OPF needs a finite thermal limit on every branch. When MATPOWER leaves
@@ -334,6 +347,15 @@ end
 # =============================================================================
 # DCNetwork Constructors
 # =============================================================================
+
+"""
+    DCNetwork(net::Dict; kwargs...)
+
+Reject the removed dictionary API with a migration hint.
+"""
+function DCNetwork(net::Dict{String,<:Any}; kwargs...)
+    throw(ArgumentError("dictionary constructors were removed; parse a MATPOWER file with PowerDiff.parse_file"))
+end
 
 """
     DCNetwork(net::PowerIO.Network; tau=DEFAULT_TAU, ref_bus=nothing)
@@ -415,14 +437,22 @@ function DCNetwork(data::NamedTuple; tau::Float64=DEFAULT_TAU, ref_bus::Union{No
     demand = calc_demand_vector(data, id_map)
     pg_init = _calc_generation_vector(data, id_map)
 
-    # Load-shedding cost: high penalty to discourage shedding when feasible
-    marginal_cost_ub = max(maximum(2cq .* gmax .+ cl), 1.0)
+    # Load-shedding cost: high penalty to discourage shedding when feasible.
+    # Guard the reduction so a generator-free network (valid for pure DC power flow
+    # built via the NamedTuple constructor) falls back to a unit marginal cost
+    # instead of `maximum` throwing on an empty collection.
+    marginal_cost_ub = k == 0 ? 1.0 : max(maximum(2cq .* gmax .+ cl), 1.0)
     c_shed = fill(DEFAULT_SHED_COST_MULTIPLIER * marginal_cost_ub, n)
 
     # Reference bus (translate original ID to sequential index)
     if isnothing(ref_bus)
         ref_candidates = [id for id in id_map.bus_ids if bus_tbl[id].bus_type == 3]
-        orig_ref = isempty(ref_candidates) ? id_map.bus_ids[1] : ref_candidates[1]
+        if isempty(ref_candidates)
+            _SILENCE_WARNINGS[] || @warn "No reference bus (type 3) in the network; defaulting to bus $(id_map.bus_ids[1]) as slack. Pass `ref_bus` to choose explicitly."
+            orig_ref = id_map.bus_ids[1]
+        else
+            orig_ref = ref_candidates[1]
+        end
         ref_bus = id_map.bus_to_idx[orig_ref]
     else
         # If user provided an original bus ID, translate it; validate the result
@@ -636,6 +666,15 @@ DCPowerFlowState with generation set to zeros.
 function DCPowerFlowState(net::DCNetwork, d::AbstractVector{<:Real})
     g = zeros(net.n)
     return DCPowerFlowState(net, g, d)
+end
+
+"""
+    DCPowerFlowState(net::Dict; kwargs...)
+
+Reject the removed dictionary API with a migration hint.
+"""
+function DCPowerFlowState(net::Dict{String,<:Any}; kwargs...)
+    throw(ArgumentError("dictionary constructors were removed; construct DCPowerFlowState(DCNetwork(data), g, d)"))
 end
 
 """

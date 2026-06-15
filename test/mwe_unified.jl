@@ -22,10 +22,9 @@
 using PowerDiff
 using PowerModels
 
-# Load a test network
+# Load a test network through PowerDiff's PowerIO parser (returns a PowerIO.Network)
 case_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower", "case14.m")
-data = PowerModels.parse_file(case_path)
-net_data = PowerModels.make_basic_network(data)
+net_data = PowerDiff.parse_file(case_path)
 
 # =============================================================================
 # DC Power Flow Example (non-OPF)
@@ -122,12 +121,15 @@ println("\n" * "=" ^ 60)
 println("=== AC Power Flow: Symbol-Based Sensitivities ===")
 println("=" ^ 60)
 
-# Solve AC power flow
-PowerModels.compute_ac_pf!(net_data)
+# Solve AC power flow with PowerModels as an external oracle for the voltage vector,
+# then wrap it in PowerDiff's typed AC state (the supported API since the dict path was removed)
+pm_basic = PowerModels.make_basic_network(PowerModels.parse_file(case_path))
+PowerModels.compute_ac_pf!(pm_basic)
+v = PowerModels.calc_basic_bus_voltage(pm_basic)
 
 # Create ACNetwork and ACPowerFlowState
 ac_net = ACNetwork(net_data)
-state = ACPowerFlowState(net_data)
+state = ACPowerFlowState(ac_net, v)
 
 println("AC Network: n=$(ac_net.n) buses, m=$(ac_net.m) branches")
 println("Voltage magnitudes: |v| = ", round.(abs.(state.v), digits=4))

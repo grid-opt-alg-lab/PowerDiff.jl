@@ -294,6 +294,15 @@ function DCOPFProblem(network::DCNetwork; d::Union{Nothing,AbstractVector}=nothi
     return DCOPFProblem(network, d; kwargs...)
 end
 
+"""
+    DCOPFProblem(pm_data::Dict; kwargs...)
+
+Reject the removed dictionary API with a migration hint.
+"""
+function DCOPFProblem(pm_data::Dict{String,<:Any}; kwargs...)
+    throw(ArgumentError("dictionary constructors were removed; parse a MATPOWER file with PowerDiff.parse_file"))
+end
+
 DCOPFProblem(net::PowerIO.Network; kwargs...) = DCOPFProblem(_network_data(net); kwargs...)
 
 function DCOPFProblem(data::NamedTuple; d::Union{Nothing,AbstractVector}=nothing, tau::Float64=DEFAULT_TAU, kwargs...)

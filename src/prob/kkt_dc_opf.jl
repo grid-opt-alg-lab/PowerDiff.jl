@@ -351,7 +351,8 @@ Flatten solution primal and dual variables into a single vector for KKT evaluati
 # Variable ordering
 [va; pg; f; psh; lam_lb; lam_ub; gamma_lb; gamma_ub; rho_lb; rho_ub; mu_lb; mu_ub; nu_bal; nu_flow; eta]
 
-where eta is the dual for the reference bus constraint (set to 0).
+where eta is the dual for the reference bus constraint `va[ref_bus] == 0`, packed
+from the recovered `sol.eta_ref` (the KKT operator includes this entry).
 """
 function flatten_variables(sol::DCOPFSolution, prob::DCOPFProblem)
     return vcat(

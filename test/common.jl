@@ -20,7 +20,7 @@
 # which defines its own load_test_case inline).
 #
 # Data loaders:
-#   load_test_case  — parse MATPOWER case into PowerDiff's typed representation
+#   load_test_case  — parse a MATPOWER case into a PowerIO.Network (via PowerDiff.parse_file)
 #   load_pm_case    — parse a PowerModels dictionary for oracle comparisons only
 #
 # Programmatic networks:
@@ -66,7 +66,7 @@ pd_case(bus, gen, branch; name="case", baseMVA=100.0) = (; name, baseMVA, bus, g
 """
     load_test_case(case_name::String)
 
-Load a PowerModels test fixture through PowerDiff's typed parser.
+Load a PowerModels test fixture through `PowerDiff.parse_file`, returning a `PowerIO.Network`.
 """
 function load_test_case(case_name::String)
     case_path = joinpath(PM_DATA_DIR, case_name)

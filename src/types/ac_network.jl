@@ -255,6 +255,12 @@ function ACNetwork(data::NamedTuple; idx_slack::Union{Nothing,Int}=nothing)
         br_r[l] = branch.br_r
         br_x[l] = branch.br_x
         br_b[l] = branch.br_b
+        # MATPOWER models line charging as a single symmetric susceptance with no
+        # charging conductance, and `_network_data` already folded the two PowerIO
+        # sides into `br_b`. Split it evenly and leave g_fr/g_to at zero (initialized
+        # above). Asymmetric b_fr != b_to or nonzero g_fr/g_to from a non-MATPOWER
+        # source would be averaged/dropped here; thread the per-side values through
+        # if that fidelity is ever needed.
         b_fr[l] = branch.br_b / 2
         b_to[l] = branch.br_b / 2
         tap[l] = iszero(branch.tap) ? 1.0 : branch.tap
@@ -314,7 +320,10 @@ function ACNetwork(data::NamedTuple; idx_slack::Union{Nothing,Int}=nothing)
     end
 
     ref_bus_keys = [id_map.bus_to_idx[id] for id in id_map.bus_ids if bus_tbl[id].bus_type == 3]
-    isempty(ref_bus_keys) && push!(ref_bus_keys, 1)
+    if isempty(ref_bus_keys)
+        _SILENCE_WARNINGS[] || @warn "No reference bus (type 3) in the network; defaulting to the first bus as slack. Pass `idx_slack` to choose explicitly."
+        push!(ref_bus_keys, 1)
+    end
     isnothing(idx_slack) && (idx_slack = first(ref_bus_keys))
     vm_min = [bus_tbl[id].vmin for id in id_map.bus_ids]
     vm_max = [bus_tbl[id].vmax for id in id_map.bus_ids]
