@@ -95,7 +95,7 @@ Demand enters the power balance and the load shedding upper bound through
 ```
 
 For strictly positive demand, ``\partial d_+ / \partial d = 1``. For negative
-demand, it is ``0``. At zero demand, the positive part function is non-smooth;
+demand, it is ``0``. At zero demand, the positive part function is nonsmooth;
 the implementation uses the fixed zero shedding convention already required by
 the collapsed bound ``0 \leq \text{psh} \leq 0``.
 
@@ -109,9 +109,9 @@ Switching affects the Laplacian ``B``, weight matrix ``W``, and flow definition 
 ```
 
 This propagates into the stationarity, power balance, and flow definition blocks of the KKT system.
-Sensitivities are defined while the energized-island partition is fixed. Opening
+Sensitivities are defined while the energized island partition is fixed. Opening
 or closing a bridge splits or merges islands and changes the reference set, so
-the derivative is non-smooth at that topology boundary.
+the derivative is nonsmooth at that topology boundary.
 
 ### Cost Coefficients (``c_q``, ``c_l``)
 
@@ -142,7 +142,7 @@ Susceptances affect the same blocks as switching (through ``B`` and ``W``), but 
 Locational marginal prices are the power balance duals ``\nu_{\text{bal}}``, decomposed as:
 
 ```math
-\text{LMP} = \underbrace{\text{energy}}_{\text{per-island uniform component}} + \underbrace{\text{congestion}}_{\text{flow-limit component}}
+\text{LMP} = \underbrace{\text{energy}}_{\text{per island uniform component}} + \underbrace{\text{congestion}}_{\text{flow limit component}}
 ```
 
 The congestion component is extracted by solving:

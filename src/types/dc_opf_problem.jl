@@ -50,7 +50,7 @@ precomputed at construction time).
 - `dz_dsw`: Full KKT derivative w.r.t. switching (or nothing)
 - `dz_dfmax`: Full KKT derivative w.r.t. flow limits (or nothing)
 - `dz_db`: Full KKT derivative w.r.t. susceptances (or nothing)
-- `b_r_factor`: Cached reduced susceptance factorization (topology-dependent, survives demand changes)
+- `b_r_factor`: Cached reduced susceptance factorization (topology dependent, survives demand changes)
 - `work`: Scratch workspace for VJP/JVP KKT solves (lazily allocated on first call)
 """
 mutable struct DCSensitivityCache
@@ -97,7 +97,7 @@ end
 """
     invalidate_topology!(cache::DCSensitivityCache)
 
-Clear all cached data including topology-dependent `b_r_factor` and `work`.
+Clear all cached data including topology dependent `b_r_factor` and `work`.
 Called when network topology changes (switching, susceptances).
 """
 function invalidate_topology!(cache::DCSensitivityCache)
@@ -123,7 +123,7 @@ B-θ formulation of DC OPF wrapped around a JuMP model.
 - `d`: Demand parameter (can be updated for sensitivity analysis)
 - `cons`: Named tuple of constraint references
 - `cache`: Mutable sensitivity cache for avoiding redundant KKT solves
-- `_n_ref`: Number of energized-island reference constraints in the currently
+- `_n_ref`: Number of energized island reference constraints in the currently
   built JuMP model (internal). Invariant after `_rebuild_jump_model!`:
   `_n_ref == length(cons.ref)`.
 - `_optimizer`: Optimizer factory for model rebuilds (internal)
@@ -200,9 +200,9 @@ Called by the constructor and by `update_switching!` after mutating `network.sw`
 
 This function owns the `_n_ref == length(prob.cons.ref)` invariant. Directly
 mutating `prob.network.sw` or moving `prob.network.b` across zero changes the
-energized-island topology without rebuilding the JuMP model, so callers must use
+energized island topology without rebuilding the JuMP model, so callers must use
 `update_switching!` for switch changes and rebuild the problem after
-topology-changing susceptance edits.
+topology changing susceptance edits.
 """
 function _rebuild_jump_model!(prob::DCOPFProblem)
     network = prob.network

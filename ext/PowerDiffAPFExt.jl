@@ -57,7 +57,7 @@ end
 
 Convert a `DCNetwork` to an `APF.Network`.
 
-APF networks lack generators, costs, and limits, so this is one-way.
+APF networks lack generators, costs, and limits, so this is one way.
 APF exposes one slack bus, so disconnected `DCNetwork`s are rejected.
 Bus demand is set to zero (PD separates demand from network topology).
 Branch `status` is derived from switching state: `sw[e] > 0.5`.

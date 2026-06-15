@@ -25,7 +25,7 @@ fixed after construction, while `b` and `sw` may change in place.
 
 The cache is prewarmed by constructors and refreshed by topology readers when
 `b` or `sw` changes. It is not a synchronization primitive: callers sharing a
-`DCNetwork` across threads must treat topology fields as read-only, or serialize
+`DCNetwork` across threads must treat topology fields as read only, or serialize
 mutations and the first topology read after each mutation.
 """
 mutable struct _DCTopologyCache
@@ -55,7 +55,7 @@ topology sensitivity analysis.
 - `fmax`, `gmax`, `gmin`: Flow and generation limits
 - `angmax`, `angmin`: Phase angle difference limits
 - `cq`, `cl`: Quadratic and linear generation cost coefficients
-- `c_shed`: Load-shedding cost per bus (penalty for involuntary load curtailment)
+- `c_shed`: Load shedding cost per bus (penalty for involuntary load curtailment)
 - `ref_bus`: Preferred reference bus index (phase angle = 0)
 - `tau`: Regularization parameter for strong convexity
 - `id_map`: Bidirectional mapping between original and sequential element IDs
@@ -188,7 +188,7 @@ const DEFAULT_SHED_COST_MULTIPLIER = 10
 # the network tables the DCNetwork and ACNetwork constructors consume. The only
 # logic beyond re-keying to source bus ids is the OPF solver modeling PowerIO leaves
 # to the consumer: polynomial cost interpretation, finite flow limits, default
-# angle-difference bounds, and rejection of records PowerDiff does not model.
+# angle difference bounds, and rejection of records PowerDiff does not model.
 
 """
     parse_file(path::String; library=nothing, from=nothing, filetype=nothing) -> PowerIO.Network
@@ -298,7 +298,7 @@ load/shunt aggregation, reference-bus inference (`type == 3`), source bus ids on
 This adapter keys bus references back to source bus ids (so [`IDMapping`](@ref)'s
 sorted ordering is preserved) and applies the OPF modeling PowerIO leaves to the
 consumer: polynomial cost interpretation (rejecting PWL and higher-than-quadratic),
-a finite flow-limit fallback when `rate_a == 0`, default angle-difference bounds,
+a finite flow limit fallback when `rate_a == 0`, default angle difference bounds,
 and rejection of storage / HVDC records that PowerDiff does not model.
 
 The returned `bus`/`gen`/`branch` rows mirror the field names the network
@@ -428,7 +428,7 @@ function _fallback_rate_a(r::Float64, x::Float64, angmin::Float64, angmax::Float
     return ymag * max(fr_vmax, to_vmax) * cmax
 end
 
-# Default angle-difference bounds (radians in, radians out). MATPOWER angmin == angmax
+# Default angle difference bounds (radians in, radians out). MATPOWER angmin == angmax
 # == 0 means unbounded; treat ±90° or wider and the zero case as a ±60° window, the
 # MATPOWER/PowerModels convention. PowerIO's `to_powerdata` already converts to radians.
 function _normalize_angle_bounds(angmin::Float64, angmax::Float64)
@@ -532,7 +532,7 @@ function DCNetwork(data::NamedTuple; tau::Float64=DEFAULT_TAU, ref_bus::Union{No
     demand = calc_demand_vector(data, id_map)
     pg_init = _calc_generation_vector(data, id_map)
 
-    # Load-shedding cost: high penalty to discourage shedding when feasible.
+    # Load shedding cost: high penalty to discourage shedding when feasible.
     # Guard the reduction so a generator-free network (valid for pure DC power flow
     # built via the NamedTuple constructor) falls back to a unit marginal cost
     # instead of `maximum` throwing on an empty collection.
@@ -729,9 +729,9 @@ end
 
 function _topology_cache(net::DCNetwork)
     # Refresh mutates `net.topology_cache`. Constructors prewarm this cache, so
-    # normal read-only sharing across threads does not first-touch it. If callers
+    # normal read only sharing across threads does not first touch it. If callers
     # mutate `b` or `sw` directly, they must serialize that mutation and the next
-    # topology read; the exposed vectors themselves are not thread-safe.
+    # topology read; the exposed vectors themselves are not thread safe.
     _topology_cache_valid(net) || _refresh_topology_cache!(net)
     return getfield(net, :topology_cache)
 end

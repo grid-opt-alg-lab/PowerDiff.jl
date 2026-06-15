@@ -83,7 +83,7 @@ The congestion RHS includes both flow limit duals and angle difference duals:
     congestion[non_ref] = B_r \\ (A' W (λ_ub - λ_lb) + A'(γ_ub - γ_lb))[non_ref]
 
 The congestion component captures price differentiation due to binding flow and angle
-constraints, with each energized-island reference bus congestion component equal
+constraints, with each energized island reference bus congestion component equal
 to zero.
 
 # Returns
@@ -177,4 +177,3 @@ function calc_qlmp(prob::ACOPFProblem)
     sol = _ensure_ac_solved!(prob)
     return calc_qlmp(sol, prob)
 end
-

@@ -952,7 +952,7 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
         Ae_dot_ν = dot(A_e_vec, ν_bal)
         J_s[idx.va, e] = -b[e] * A_e_vec * (Ae_dot_ν + ν_flow[e])
 
-        # ∂K_θ/∂s_e from gated angle-difference bounds
+        # ∂K_θ/∂s_e from gated angle difference bounds
         J_s[idx.va, e] += A_e_vec * (sol.gamma_ub[e] - sol.gamma_lb[e])
 
         # ∂K_γ/∂s_e from gated complementary slackness
@@ -1000,11 +1000,11 @@ function calc_kkt_jacobian_switching_column(prob::DCOPFProblem, sol::DCOPFSoluti
     coeff = -b[e] * (sol.nu_bal[f_bus] - sol.nu_bal[t_bus] + sol.nu_flow[e])
     col[idx.va[f_bus]] += coeff
     col[idx.va[t_bus]] -= coeff
-    # gated angle-difference stationarity contribution
+    # gated angle difference stationarity contribution
     coeff_ang = sol.gamma_ub[e] - sol.gamma_lb[e]
     col[idx.va[f_bus]] += coeff_ang
     col[idx.va[t_bus]] -= coeff_ang
-    # gated angle-difference complementary slackness
+    # gated angle difference complementary slackness
     col[idx.gamma_lb[e]] = sol.gamma_lb[e] * (Aθ_e - net.angmin[e])
     col[idx.gamma_ub[e]] = sol.gamma_ub[e] * (net.angmax[e] - Aθ_e)
     return col
@@ -1025,7 +1025,7 @@ function update_switching!(prob::DCOPFProblem, s::AbstractVector)
     length(s) == m || throw(DimensionMismatch("Switching vector length $(length(s)) must match number of branches $m"))
     all(0 .<= s .<= 1) || throw(ArgumentError("Switching values must be in [0,1]"))
 
-    # Invalidate all cached data including topology-dependent b_r_factor
+    # Invalidate all cached data including topology dependent b_r_factor
     invalidate_topology!(prob.cache)
 
     # Update network switching state

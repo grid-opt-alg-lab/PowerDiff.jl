@@ -24,8 +24,8 @@ B = A^\top \operatorname{diag}(-b \circ \mathrm{sw}) \, A
 
 where ``A`` is the ``m \times n`` incidence matrix and ``b`` stores the imaginary part of the inverse impedance (``b_e = \operatorname{Im}(1/z_e) < 0`` for inductive branches, so ``-b > 0``).
 
-`DCNetwork` caches the energized-island partition used to choose reference
-buses. Constructors initialize this cache, and topology-dependent readers
+`DCNetwork` caches the energized island partition used to choose reference
+buses. Constructors initialize this cache, and topology dependent readers
 refresh it if direct `b` or `sw` edits change which branches are energized. The
 cache assumes serialized topology mutation: a shared `DCNetwork` may be read
 from multiple threads only while its topology fields are not being mutated.
@@ -45,9 +45,9 @@ where the perturbation is a rank-1 update from the incidence column of branch ``
 \frac{\partial B_r}{\partial \mathrm{sw}_e} = -b_e \, a_{e,r} \, a_{e,r}^\top
 ```
 
-These derivatives apply while the energized-island partition is fixed. A
+These derivatives apply while the energized island partition is fixed. A
 bridge opening or closing changes the reference set, so sensitivities are
-non-smooth at the split or merge boundary.
+nonsmooth at the split or merge boundary.
 
 ### Flow Sensitivity to Switching
 

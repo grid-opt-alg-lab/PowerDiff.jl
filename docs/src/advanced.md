@@ -36,7 +36,7 @@ Stores the DC network topology and parameters.
 | `gmax`, `gmin` | `Vector{Float64}` | Generator limits |
 | `angmax`, `angmin` | `Vector{Float64}` | Phase angle difference limits |
 | `cq`, `cl` | `Vector{Float64}` | Cost coefficients (quadratic, linear) |
-| `c_shed` | `Vector{Float64}` | Load-shedding cost per bus |
+| `c_shed` | `Vector{Float64}` | Load shedding cost per bus |
 | `ref_bus` | `Int` | Preferred reference bus index (sequential) |
 | `tau` | `Float64` | Regularization parameter |
 | `id_map` | `IDMapping` | Bidirectional element ID mapping (original ↔ sequential) |
@@ -48,13 +48,13 @@ Use `reference_buses(net)` to obtain the effective reference set. It preserves
 `ref_bus` for its energized island and deterministically adds one reference for
 each additional island, including isolated buses.
 
-`DCNetwork` precomputes an internal energized-topology cache and refreshes it
+`DCNetwork` precomputes an internal energized topology cache and refreshes it
 when topology readers observe a direct `b` or `sw` change. This cache is not a
-thread-safety mechanism. Sharing a `DCNetwork` across threads is supported only
-when topology fields are treated as read-only; callers that mutate `b` or `sw`
-directly must serialize the mutation and the next topology-dependent read. For
+thread safety mechanism. Sharing a `DCNetwork` across threads is supported only
+when topology fields are treated as read only; callers that mutate `b` or `sw`
+directly must serialize the mutation and the next topology dependent read. For
 `DCOPFProblem`, switch changes should go through [`update_switching!`](@ref), and
-topology-changing susceptance edits require rebuilding the problem so the JuMP
+topology changing susceptance edits require rebuilding the problem so the JuMP
 model and KKT layout keep the same reference constraints.
 
 ### ACNetwork

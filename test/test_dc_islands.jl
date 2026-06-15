@@ -64,18 +64,21 @@ end
         net = _make_fully_isolated_network()
         d = [0.2, 0.3]
         @test reference_buses(net) == [1, 2]
+        @test !isempty(sprint(show, MIME"text/plain"(), net))
 
         state = DCPowerFlowState(net, d, d)
         @test isempty(state.non_ref)
         @test isempty(state.f)
         @test state.va == zeros(2)
         @test Matrix(calc_sensitivity(state, :va, :d)) == zeros(2, 2)
+        @test !isempty(sprint(show, MIME"text/plain"(), state))
 
         prob = DCOPFProblem(net, d)
         sol = solve!(prob)
         @test sol.pg ≈ d atol=1e-5
         @test sol.va == zeros(2)
         @test norm(kkt(flatten_variables(sol, prob), prob, d), Inf) < 1e-4
+        @test !isempty(sprint(show, MIME"text/plain"(), sol))
     end
 
     @testset "bridge opening resizes DC topology workspaces" begin
