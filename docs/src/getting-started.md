@@ -7,7 +7,7 @@ This guide walks through the main workflows: DC power flow, DC OPF with LMP anal
 ```julia
 using PowerDiff
 
-# Load a MATPOWER v2 case into PowerDiff's typed representation
+# Parse a MATPOWER v2 case into a PowerIO.Network
 net = parse_file("case14.m")
 ```
 

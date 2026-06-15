@@ -14,13 +14,12 @@ conversion, out-of-service and isolated-element filtering, bus-type inference,
 per-bus load/shunt aggregation, and polynomial cost rescaling. PowerDiff layers on
 only the OPF modeling it owns:
 
-- polynomial cost interpretation: constant, linear, and quadratic costs; PWL and
-  higher-order polynomials are rejected. Costs are read from PowerIO's raw generator
-  records because `to_powerdata` does not preserve coefficients declared with
-  `ncost > 3`.
+- polynomial cost interpretation: it reads the constant, linear, and quadratic
+  coefficients straight from `to_powerdata`'s generator rows (already per-unit and
+  right-aligned). PWL costs are rejected; higher-order polynomials are rejected by
+  `to_powerdata` itself. A generator with no cost record is treated as cost-free.
 - a finite `rate_a` fallback when the source leaves the thermal limit at `0`
 - default angle-difference bounds
-- a reference bus chosen as the largest generator's bus when the source marks none
 
 PowerDiff rejects networks carrying storage or HVDC/dcline records, which it does
 not model.

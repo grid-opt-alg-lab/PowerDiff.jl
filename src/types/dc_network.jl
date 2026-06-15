@@ -212,11 +212,11 @@ function parse_matpower(file::String; library=nothing)
 end
 
 """
-    parse_matpower_struct(file::String; kwargs...)
+    parse_matpower_struct(file::String; library=nothing)
 
 Compatibility alias for [`parse_matpower`](@ref).
 """
-parse_matpower_struct(file::String; kwargs...) = parse_matpower(file; kwargs...)
+parse_matpower_struct(file::String; library=nothing) = parse_matpower(file; library=library)
 
 _resolve_case_path(path::AbstractString, ::Nothing) = String(path)
 _resolve_case_path(path::AbstractString, library) = joinpath(get_path(library), path)
@@ -239,43 +239,33 @@ The returned `bus`/`gen`/`branch` rows mirror the field names the network
 constructors expect, with loads/shunts already folded into per-bus `pd/qd/gs/bs`.
 """
 function _network_data(net)
+    # Reject records PowerDiff does not model. Both guards read the raw network so
+    # they stay consistent: to_powerdata's filtered output drops out-of-service
+    # records, which would silently accept a file that declares them.
     isempty(PowerIO.hvdc(net)) || throw(ArgumentError(
         "PowerDiff does not support HVDC/dcline records; remove or convert dcline before parsing"))
-    pd = PowerIO.to_powerdata(net)
-    isempty(pd.storage) || throw(ArgumentError(
+    isempty(PowerIO.storage(net)) || throw(ArgumentError(
         "PowerDiff does not support storage records; remove or convert storage before parsing"))
+    pd = PowerIO.to_powerdata(net)
     isempty(pd.bus) && throw(ArgumentError("MATPOWER file is missing mpc.bus"))
     isempty(pd.gen) && throw(ArgumentError("MATPOWER file has no active generators"))
     isempty(pd.branch) && throw(ArgumentError("MATPOWER file has no active branches"))
 
-    orig = [Int(b.bus_i) for b in pd.bus]      # dense file-order index -> source bus id
-    vmax = [Float64(b.vmax) for b in pd.bus]   # dense index -> bus vmax
+    orig = [Int(b.bus_i) for b in pd.bus]   # dense file-order index -> source bus id
 
     buses = [(; bus_i=orig[i], bus_type=Int(b.type),
               pd=Float64(b.pd), qd=Float64(b.qd), gs=Float64(b.gs), bs=Float64(b.bs),
               vm=Float64(b.vm), va=Float64(b.va), vmin=Float64(b.vmin), vmax=Float64(b.vmax))
              for (i, b) in enumerate(pd.bus)]
 
-    # Costs come straight from to_powerdata's gen rows: `c` is already per-unit
-    # scaled with leading zeros collapsed (ncost > 3 is no longer mangled), so a
-    # quadratic padded to ncost=5 keeps its linear term. Map dense `gen.bus` to the
-    # source bus id via `orig`.
+    # Costs come straight from to_powerdata's gen rows (already per-unit and
+    # right-aligned). Map dense `gen.bus` to the source bus id via `orig`.
     gens = [(; index=j, gen_bus=orig[g.bus],
              pg=Float64(g.pg), qg=Float64(g.qg), qmin=Float64(g.qmin), qmax=Float64(g.qmax),
              vg=Float64(g.vg), pmin=Float64(g.pmin), pmax=Float64(g.pmax), cost=_poly_cost(g))
             for (j, g) in enumerate(pd.gen)]
 
-    branches = NamedTuple[]
-    for (l, br) in enumerate(pd.branch)
-        angmin, angmax = _normalize_angle_bounds(Float64(br.angmin), Float64(br.angmax))
-        rate_a = br.rate_a > 0 ? Float64(br.rate_a) :
-                 _fallback_rate_a(Float64(br.br_r), Float64(br.br_x), angmin, angmax,
-                                  vmax[br.f_bus], vmax[br.t_bus])
-        push!(branches, (; index=l, f_bus=orig[br.f_bus], t_bus=orig[br.t_bus],
-              br_r=Float64(br.br_r), br_x=Float64(br.br_x), br_b=Float64(br.b_fr + br.b_to),
-              rate_a=rate_a, rate_b=Float64(br.rate_b), rate_c=Float64(br.rate_c),
-              tap=Float64(br.tap), shift=Float64(br.shift), angmin=angmin, angmax=angmax))
-    end
+    branches = [_branch_row(l, br, orig, buses) for (l, br) in enumerate(pd.branch)]
     all(br.rate_a > 0 for br in branches) || throw(ArgumentError(
         "branches must have positive thermal limits after normalization"))
 
@@ -283,23 +273,31 @@ function _network_data(net)
             bus=buses, gen=gens, branch=branches)
 end
 
-# Interpret a PowerIO gen row's polynomial cost as PowerDiff's
-# (quadratic, linear, constant) tuple. `g.c` is already per-unit scaled and
-# leading-zero collapsed by to_powerdata; reject PWL (model_poly == false) and
-# higher-than-quadratic costs.
+# Build one PowerDiff branch row from a to_powerdata branch: map dense f_bus/t_bus to
+# source ids, default the angle window, and synthesize a finite rate_a when MATPOWER
+# leaves it at 0 (unlimited), using the endpoint buses' vmax limits.
+function _branch_row(l, br, orig, buses)
+    angmin, angmax = _normalize_angle_bounds(Float64(br.angmin), Float64(br.angmax))
+    rate_a = br.rate_a > 0 ? Float64(br.rate_a) :
+             _fallback_rate_a(Float64(br.br_r), Float64(br.br_x), angmin, angmax,
+                              buses[br.f_bus].vmax, buses[br.t_bus].vmax)
+    return (; index=l, f_bus=orig[br.f_bus], t_bus=orig[br.t_bus],
+            br_r=Float64(br.br_r), br_x=Float64(br.br_x), br_b=Float64(br.b_fr + br.b_to),
+            rate_a=rate_a, rate_b=Float64(br.rate_b), rate_c=Float64(br.rate_c),
+            tap=Float64(br.tap), shift=Float64(br.shift), angmin=angmin, angmax=angmax)
+end
+
+# Interpret a PowerIO gen row's polynomial cost as PowerDiff's (quadratic, linear,
+# constant) tuple. to_powerdata returns polynomial (model 2) costs as a right-aligned,
+# per-unit (cq, cl, cc) triple and rejects higher-than-quadratic itself. A generator
+# with no gencost row comes back as `model_poly == false` with `n == 0` (cost-free);
+# piecewise-linear (model 1) is `model_poly == false` with `n > 0` and is unsupported.
 function _poly_cost(g)
-    g.model_poly || throw(ArgumentError("only polynomial mpc.gencost (model 2) is supported"))
-    n = Int(g.n)
-    coeffs = collect(Float64, g.c)
-    1 <= n <= length(coeffs) || throw(ArgumentError("mpc.gencost must declare at least one coefficient"))
-    coeffs = coeffs[1:n]
-    while length(coeffs) > 1 && iszero(first(coeffs))
-        popfirst!(coeffs)
+    if !g.model_poly
+        Int(g.n) == 0 && return (0.0, 0.0, 0.0)
+        throw(ArgumentError("only polynomial mpc.gencost (model 2) is supported"))
     end
-    length(coeffs) <= 3 || throw(ArgumentError("only constant, linear, and quadratic generator costs are supported"))
-    return length(coeffs) == 3 ? (coeffs[1], coeffs[2], coeffs[3]) :
-           length(coeffs) == 2 ? (0.0, coeffs[1], coeffs[2]) :
-                                 (0.0, 0.0, coeffs[1])
+    return (Float64(g.c[1]), Float64(g.c[2]), Float64(g.c[3]))
 end
 
 # PowerDiff's OPF needs a finite thermal limit on every branch. When MATPOWER leaves
