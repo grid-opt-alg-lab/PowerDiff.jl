@@ -26,7 +26,8 @@
 #   - RTS_GMLC.m lives in PowerSystems/PowerSystemCaseBuilder, not PowerModels
 #   - File path depends on installed package version
 #   - AC OPF + ForwardDiff KKT Jacobian is slow (~30s+)
-#   - RTS_GMLC carries dcline records, which PowerDiff rejects explicitly
+#   - RTS_GMLC carries dcline records and piecewise linear generator costs,
+#     which are converted in the PowerDiff smoke path
 
 using Test
 using LinearAlgebra
@@ -50,6 +51,13 @@ function _candidate_rts_paths()
             isdir(d) && push!(paths, joinpath(d, "data", "matpower", "RTS_GMLC.m"))
         end
     end
+    for depot in DEPOT_PATH
+        artifacts = joinpath(depot, "artifacts")
+        isdir(artifacts) || continue
+        for (root, _, files) in walkdir(artifacts)
+            "RTS_GMLC.m" in files && push!(paths, joinpath(root, "RTS_GMLC.m"))
+        end
+    end
     return paths
 end
 
@@ -64,11 +72,42 @@ const RTS_PATH = let found = filter(isfile, _candidate_rts_paths())
     first(found)
 end
 
-function _without_dcline(data)
+function _linearize_piecewise_cost!(gen)
+    get(gen, "model", 2) == 1 || return false
+
+    points = Float64.(get(gen, "cost", Float64[]))
+    ncost = Int(get(gen, "ncost", length(points) ÷ 2))
+    ncost >= 1 && length(points) >= 2 * ncost || throw(ArgumentError(
+        "piecewise linear generator cost has inconsistent point data"))
+
+    xs = points[1:2:(2 * ncost)]
+    ys = points[2:2:(2 * ncost)]
+    if ncost == 1
+        slope = 0.0
+        intercept = ys[1]
+    else
+        dx = xs[end] - xs[1]
+        !iszero(dx) || throw(ArgumentError(
+            "piecewise linear generator cost has duplicate endpoint output"))
+        slope = (ys[end] - ys[1]) / dx
+        intercept = ys[1] - slope * xs[1]
+    end
+
+    gen["model"] = 2
+    gen["ncost"] = 3
+    gen["cost"] = [0.0, slope, intercept]
+    return true
+end
+
+function _for_powerdiff_smoke(data)
     clean = deepcopy(data)
     if haskey(clean, "dcline") && !isempty(clean["dcline"])
         println("  Emptying $(length(clean["dcline"])) DC line(s) before PowerIO conversion")
         empty!(clean["dcline"])
+    end
+    if haskey(clean, "gen")
+        n_pwl = count(_linearize_piecewise_cost!, values(clean["gen"]))
+        n_pwl > 0 && println("  Linearizing $n_pwl piecewise linear generator cost curve(s) for PowerDiff smoke path")
     end
     return clean
 end
@@ -87,7 +126,7 @@ println("Using RTS_GMLC.m from: $RTS_PATH")
 # Load network
 # ─────────────────────────────────────────────────────────────────────────────
 raw = PowerModels.parse_file(RTS_PATH)
-raw_for_powerdiff = _without_dcline(raw)
+raw_for_powerdiff = _for_powerdiff_smoke(raw)
 powerio_net = PowerIO.from_powermodels(raw_for_powerdiff)
 
 # Verify this is truly non-basic (bus IDs are not 1:n)

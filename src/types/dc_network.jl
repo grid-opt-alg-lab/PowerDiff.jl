@@ -379,7 +379,8 @@ end
 function _poly_cost(g)
     if !g.model_poly
         Int(g.n) == 0 && return (0.0, 0.0, 0.0)
-        throw(ArgumentError("only polynomial mpc.gencost (model 2) is supported"))
+        throw(ArgumentError(
+            "piecewise linear generator costs are not supported; convert model 1 costs to polynomial model 2 before parsing"))
     end
     # to_powerdata right-aligns the (quadratic, linear, constant) triple, but guard the
     # indexing so a model-2 cost shorter than 3 terms (purely linear/constant) zero-pads
