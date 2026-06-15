@@ -144,10 +144,11 @@ end
     end
 
     @testset "bundled PowerModels disconnected cases" begin
-        for case_name in ["case5_db.m", "case6.m"]
+        for case_name in ["case6.m"]
             @testset "$case_name" begin
                 raw = load_raw_case(case_name)
-                if isnothing(raw)
+                parsed = load_test_case(case_name)
+                if isnothing(raw) || isnothing(parsed)
                     @test_skip false
                     continue
                 end
@@ -156,8 +157,8 @@ end
                     optimizer_with_attributes(Ipopt.Optimizer, "print_level" => 0))
                 @test pm_result["termination_status"] in (MOI.OPTIMAL, MOI.LOCALLY_SOLVED)
 
-                net = DCNetwork(raw)
-                d = calc_demand_vector(raw)
+                net = DCNetwork(parsed)
+                d = calc_demand_vector(parsed)
                 @test getfield(net, :topology_cache).initialized
                 @test length(reference_buses(net)) > 1
                 sol = solve!(DCOPFProblem(net, d))
@@ -168,14 +169,20 @@ end
         end
     end
 
-    @testset "case7_tplgy specialized-component classification" begin
-        raw = load_raw_case("case7_tplgy.m")
-        if isnothing(raw)
-            @test_skip false
-        else
-            specialized = sum(length(get(raw, key, Dict())) for key in ("dcline", "storage", "switch"))
-            @test specialized > 0
-            @test length(reference_buses(DCNetwork(raw))) > 1
+    @testset "specialized PowerModels components stay unsupported" begin
+        for case_name in ["case5_db.m", "case7_tplgy.m"]
+            @testset "$case_name" begin
+                raw = load_raw_case(case_name)
+                parsed = load_test_case(case_name)
+                if isnothing(raw) || isnothing(parsed)
+                    @test_skip false
+                    continue
+                end
+
+                specialized = sum(length(get(raw, key, Dict())) for key in ("dcline", "storage", "switch"))
+                @test specialized > 0
+                @test_throws ArgumentError DCNetwork(parsed)
+            end
         end
     end
 end
