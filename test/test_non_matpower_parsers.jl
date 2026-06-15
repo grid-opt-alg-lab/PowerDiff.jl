@@ -102,6 +102,19 @@ end
     prob = ACOPFProblem(net; silent=true)
     @test prob.data.ref_bus_keys == [2]
 
+    typed_ref_data = pd_case(
+        [pd_bus(10, 3), pd_bus(20, 1)],
+        gens,
+        branches;
+        name="typed_ref_bus",
+    )
+    override_net = ACNetwork(typed_ref_data; idx_slack=2)
+    @test override_net.idx_slack == 2
+    @test override_net.ref_bus_keys == [2]
+    @test ACOPFProblem(override_net; silent=true).data.ref_bus_keys == [2]
+    @test_throws ArgumentError ACNetwork(typed_ref_data; idx_slack=0)
+    @test_throws ArgumentError ACNetwork(typed_ref_data; idx_slack=3)
+
     y = ComplexF64[1 -1; -1 1]
     raw_net = ACNetwork(y)
     @test_throws ArgumentError ACOPFProblem(raw_net; silent=true)

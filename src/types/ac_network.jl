@@ -319,15 +319,18 @@ function ACNetwork(data::NamedTuple; idx_slack::Union{Nothing,Int}=nothing)
         cq[j], cl[j], cc[j] = gen.cost
     end
 
-    ref_bus_keys = [id_map.bus_to_idx[id] for id in id_map.bus_ids if bus_tbl[id].bus_type == 3]
-    if isempty(ref_bus_keys)
-        fallback_slack = isnothing(idx_slack) ? 1 : idx_slack
-        1 <= fallback_slack <= n_bus || throw(ArgumentError(
-            "idx_slack=$fallback_slack is not a valid bus index (1:$n_bus)"))
-        _SILENCE_WARNINGS[] || @warn "No reference bus (type 3) in the network; defaulting to bus $fallback_slack as slack. Pass `idx_slack` to choose explicitly."
-        push!(ref_bus_keys, fallback_slack)
+    if !isnothing(idx_slack)
+        1 <= idx_slack <= n_bus || throw(ArgumentError(
+            "idx_slack=$idx_slack is not a valid bus index (1:$n_bus)"))
+        ref_bus_keys = [idx_slack]
+    else
+        ref_bus_keys = [id_map.bus_to_idx[id] for id in id_map.bus_ids if bus_tbl[id].bus_type == 3]
+        if isempty(ref_bus_keys)
+            _SILENCE_WARNINGS[] || @warn "No reference bus (type 3) in the network; defaulting to bus 1 as slack. Pass `idx_slack` to choose explicitly."
+            push!(ref_bus_keys, 1)
+        end
+        idx_slack = first(ref_bus_keys)
     end
-    isnothing(idx_slack) && (idx_slack = first(ref_bus_keys))
     vm_min = [bus_tbl[id].vmin for id in id_map.bus_ids]
     vm_max = [bus_tbl[id].vmax for id in id_map.bus_ids]
 
