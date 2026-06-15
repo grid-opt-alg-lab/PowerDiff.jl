@@ -42,7 +42,7 @@ Stores the DC network topology and parameters.
 | `ref_bus` | `Int` | Preferred reference bus index (sequential) |
 | `tau` | `Float64` | Regularization parameter |
 | `id_map` | `IDMapping` | Bidirectional element ID mapping (original ↔ sequential) |
-| `topology_cache` | `_DCTopologyCache` | Internal energized-island cache (not part of the public API) |
+| `topology_cache` | `_DCTopologyCache` | Internal energized island cache (not part of the public API) |
 
 Construct from a parsed MATPOWER network with `DCNetwork(parse_file("case14.m"))`, or
 with explicit parameters: `DCNetwork(n, m, k, A, G_inc, b; ...)`.
