@@ -32,7 +32,7 @@ where:
 - ``c_{\text{shed}}`` is the load shedding cost vector
 - ``d_+ = \max(d, 0)`` is the curtailable portion of signed net demand; negative net demand remains in power balance as an injection
 - ``\tau`` is a small regularization parameter for numerical conditioning
-- ``\text{refs}`` contains one deterministic reference bus per energized island, including isolated buses; the configured ``\text{ref_bus}`` remains the reference for its island
+- ``\text{refs}`` contains one reference bus per energized island, including isolated buses. The choice is deterministic: the configured ``\text{ref_bus}`` is the reference for its island, and every other island uses its lowest sequential bus index
 
 The built OPF model stores one reference constraint for each entry of
 ``\text{refs}``. Consequently, topology changes that can alter the energized
@@ -64,7 +64,7 @@ with total dimension ``5n + 6m + 3k + n_{\text{ref}}``.
 
 The KKT residual ``K(z, p)`` consists of:
 
-1. **Stationarity w.r.t. ``\theta``**: ``B^\top \nu_{\text{bal}} + (WA)^\top \nu_{\text{flow}} + E_{\text{ref}} \eta_{\text{ref}} + A^\top (\gamma_{\text{ub}} - \gamma_{\text{lb}}) = 0``
+1. **Stationarity w.r.t. ``\theta``**: ``B^\top \nu_{\text{bal}} + (WA)^\top \nu_{\text{flow}} + E_{\text{ref}} \eta_{\text{ref}} + A^\top \operatorname{diag}(\mathrm{sw}) (\gamma_{\text{ub}} - \gamma_{\text{lb}}) = 0``, where ``E_{\text{ref}} \in \mathbb{R}^{n \times n_{\text{ref}}}`` selects the per-island reference buses
 2. **Stationarity w.r.t. ``g``**: ``2 C_q g + c_l - G_{\text{inc}}^\top \nu_{\text{bal}} - \rho_{\text{lb}} + \rho_{\text{ub}} = 0``
 3. **Stationarity w.r.t. ``f``**: ``\tau^2 f - \nu_{\text{flow}} - \lambda_{\text{lb}} + \lambda_{\text{ub}} = 0``
 4. **Stationarity w.r.t. psh**: ``c_{\text{shed}} - \nu_{\text{bal}} - \mu_{\text{lb}} + \mu_{\text{ub}} = 0``

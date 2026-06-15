@@ -37,16 +37,20 @@ Stores the DC network topology and parameters.
 | `angmax`, `angmin` | `Vector{Float64}` | Phase angle difference limits |
 | `cq`, `cl` | `Vector{Float64}` | Cost coefficients (quadratic, linear) |
 | `c_shed` | `Vector{Float64}` | Load shedding cost per bus |
+| `demand` | `Vector{Float64}` | Real power demand aggregated per bus |
+| `pg_init` | `Vector{Float64}` | Initial real generation aggregated per bus |
 | `ref_bus` | `Int` | Preferred reference bus index (sequential) |
 | `tau` | `Float64` | Regularization parameter |
 | `id_map` | `IDMapping` | Bidirectional element ID mapping (original ↔ sequential) |
+| `topology_cache` | `_DCTopologyCache` | Internal energized-island cache (not part of the public API) |
 
 Construct from a parsed MATPOWER network with `DCNetwork(parse_file("case14.m"))`, or
 with explicit parameters: `DCNetwork(n, m, k, A, G_inc, b; ...)`.
 
-Use `reference_buses(net)` to obtain the effective reference set. It preserves
-`ref_bus` for its energized island and deterministically adds one reference for
-each additional island, including isolated buses.
+Use `reference_buses(net)` to obtain the effective reference set. The choice is
+deterministic: `ref_bus` is kept as the reference for its energized island, and
+every other island (including an isolated bus) uses its lowest sequential bus
+index.
 
 `DCNetwork` precomputes an internal energized topology cache and refreshes it
 when topology readers observe a direct `b` or `sw` change. This cache is not a

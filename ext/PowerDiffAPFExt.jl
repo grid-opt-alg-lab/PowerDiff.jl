@@ -60,7 +60,10 @@ Convert a `DCNetwork` to an `APF.Network`.
 APF networks lack generators, costs, and limits, so this is one way.
 APF exposes one slack bus, so disconnected `DCNetwork`s are rejected.
 Bus demand is set to zero (PD separates demand from network topology).
-Branch `status` is derived from switching state: `sw[e] > 0.5`.
+Branch `status` is derived from switching state: `sw[e] > 0.5`. Because APF
+models branches as strictly on/off, switching states must be binary (`sw[e] ∈
+{0, 1}`); fractional values are rejected so that PD's energized-island count
+(`b[e] * sw[e] != 0`) cannot disagree with the converted APF topology.
 
 Note: `to_apf_network` sets bus demand to zero because PD separates demand
 from topology. For APF workflows that need demand data (e.g., `compute_flow!`),
@@ -68,6 +71,17 @@ use `APF.from_power_models(pm_data)` directly instead.
 """
 function PowerDiff.to_apf_network(net::PowerDiff.DCNetwork)
     n, m = net.n, net.m
+
+    # APF binarizes branch status via sw[e] > 0.5, but PD treats a branch as
+    # energized whenever b[e] * sw[e] != 0. These two views only agree when every
+    # switching state is binary, so reject fractional sw to keep the island count
+    # used for the slack-bus check consistent with the topology APF actually builds.
+    all(s -> s == 0 || s == 1, net.sw) || throw(ArgumentError(
+        "AcceleratedDCPowerFlows conversion requires binary switching states (sw[e] ∈ {0, 1}); " *
+        "APF models branches as on/off via sw[e] > 0.5, so fractional switching would make the " *
+        "energized-island count disagree with the converted APF topology"
+    ))
+
     refs = PowerDiff.reference_buses(net)
     length(refs) == 1 || throw(ArgumentError(
         "AcceleratedDCPowerFlows conversion requires one energized island; found $(length(refs))"

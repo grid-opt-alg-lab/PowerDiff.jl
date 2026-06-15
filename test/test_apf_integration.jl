@@ -176,6 +176,21 @@ end
     @test_throws ArgumentError to_apf_network(net)
 end
 
+@testset "to_apf_network rejects fractional switching" begin
+    net = load_test_case("case14.m")
+    if isnothing(net)
+        @test_skip false
+    else
+        dc_net = DCNetwork(net)
+        # Fractional sw cannot be represented by APF's on/off branch status and
+        # would make PD's energized-island count disagree with the APF topology.
+        dc_net.sw[1] = 0.3
+        @test_throws ArgumentError to_apf_network(dc_net)
+        dc_net.sw[1] = 1.0  # restore; binary states convert fine
+        @test to_apf_network(dc_net) isa APF.Network
+    end
+end
+
 # =========================================================================
 # Index alignment
 # =========================================================================

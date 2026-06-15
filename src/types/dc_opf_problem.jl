@@ -180,9 +180,19 @@ function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Ipopt.Opt
 
     _debug_negative_demand(d)
 
+    # The model/variable/constraint fields start empty; `_rebuild_jump_model!`
+    # below builds the JuMP model and fills va/pg/f/psh, cons, and _n_ref.
+    # Arguments are positional to match the DCOPFProblem field order.
     prob = DCOPFProblem(
-        JuMP.Model(), network, VariableRef[], VariableRef[], VariableRef[], VariableRef[],
-        Float64.(d), (;), DCSensitivityCache(), 0, optimizer, silent
+        JuMP.Model(),                                                # model: replaced on rebuild
+        network,
+        VariableRef[], VariableRef[], VariableRef[], VariableRef[],  # va, pg, f, psh: filled on rebuild
+        Float64.(d),                                                 # d: demand parameter, normalized to Float64
+        (;),                                                         # cons: filled on rebuild
+        DCSensitivityCache(),                                        # cache: empty sensitivity cache
+        0,                                                           # _n_ref: set to length(refs) on rebuild
+        optimizer,                                                   # _optimizer: factory for model (re)builds
+        silent,                                                      # _silent: suppress solver output
     )
     _rebuild_jump_model!(prob)
     return prob

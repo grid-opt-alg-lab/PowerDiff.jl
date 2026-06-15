@@ -456,7 +456,8 @@ s.t. G_inc * g + psh - d = B * θ   (ν_bal)
 
 # Returns
 Vector of KKT residuals (should be zero at optimum):
-1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + E_ref * η_ref + A'*(γ_ub - γ_lb) = 0
+1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + E_ref * η_ref + A' * Diag(sw) * (γ_ub - γ_lb) = 0
+   (E_ref is the n × n_ref selection matrix for the per-island reference buses)
 2. Stationarity w.r.t. g: 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub = 0
 3. Stationarity w.r.t. f: τ² * f - ν_flow - λ_lb + λ_ub = 0
 4. Stationarity w.r.t. psh: c_shed - ν_bal - μ_lb + μ_ub = 0

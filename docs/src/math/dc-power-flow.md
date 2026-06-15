@@ -45,9 +45,10 @@ where the perturbation is a rank-1 update from the incidence column of branch ``
 \frac{\partial B_r}{\partial \mathrm{sw}_e} = -b_e \, a_{e,r} \, a_{e,r}^\top
 ```
 
-These derivatives apply while the energized island partition is fixed. A
-bridge opening or closing changes the reference set, so sensitivities are
-nonsmooth at the split or merge boundary.
+These derivatives apply while the energized island partition is fixed. Toggling
+a bridge (a branch whose energization changes the island partition) adds or
+removes a reference bus and changes the dimension of the reduced system ``B_r``,
+so sensitivities are nonsmooth at that split or merge boundary.
 
 ### Flow Sensitivity to Switching
 

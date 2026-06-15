@@ -76,15 +76,18 @@ end
 
 Extract the congestion component of LMPs for analysis.
 
-From the θ-stationarity KKT condition:
-    B' * ν_bal + (WA)' * ν_flow + E_ref * η_ref + A'*(γ_ub - γ_lb) = 0
+From the θ-stationarity KKT condition, where `E_ref` is the `n × n_ref` matrix
+that selects the one reference bus per energized island (so `E_ref * η_ref` is a
+length-`n` vector aligned with the bus stationarity rows):
+    B' * ν_bal + (WA)' * ν_flow + E_ref * η_ref + A' Diag(sw) (γ_ub - γ_lb) = 0
 
-The congestion RHS includes both flow limit duals and angle difference duals:
-    congestion[non_ref] = B_r \\ (A' W (λ_ub - λ_lb) + A'(γ_ub - γ_lb))[non_ref]
+Neglecting the O(τ²) flow regularization (so ν_flow ≈ λ_ub - λ_lb), the congestion
+RHS gathers the flow limit and angle difference dual contributions:
+    congestion[non_ref] = B_r \\ (A' W (λ_ub - λ_lb) + A' Diag(sw) (γ_ub - γ_lb))[non_ref]
 
 The congestion component captures price differentiation due to binding flow and angle
-constraints, with each energized island reference bus congestion component equal
-to zero.
+constraints. Only the non-reference rows are populated, so every energized island
+reference bus has a congestion component of exactly zero.
 
 # Returns
 Vector (length n) of congestion contributions to each bus's LMP.
@@ -95,7 +98,12 @@ function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork;
     non_ref = _non_reference_buses(net)
 
     At = net.A'
-    rhs_full = At * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb) + At * (sol.gamma_ub - sol.gamma_lb)
+    # Angle difference constraints are gated by `sw` in the model, so their
+    # stationarity contribution carries the same `Diag(sw)` factor. For energized
+    # branches `sw == 1` (a no-op); on de-energized branches the gate matches the
+    # zero angle dual the solver returns there.
+    rhs_full = At * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb) +
+               At * Diagonal(net.sw) * (sol.gamma_ub - sol.gamma_lb)
 
     result = zeros(net.n)
     result[non_ref] = B_r_factor \ rhs_full[non_ref]
@@ -108,7 +116,8 @@ end
 Extract the energy (non-congestion) component of LMPs for analysis.
 
 This is the uniform price component: energy = ν_bal - congestion.
-It is approximately constant within each energized island.
+It is exactly uniform within each energized island in the unregularized limit;
+the O(τ²) flow regularization perturbs that uniformity slightly.
 
 # Returns
 Vector (length n) of energy contributions to each bus's LMP.
