@@ -31,6 +31,10 @@ _inline_data() = PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(_INLI
         # Loads and shunts are aggregated into per-bus values.
         @test data.bus[1].pd == 0.5
         @test data.bus[1].gs == 0.01
+        # Shunts are also re-exposed as a per-bus table (bus 1: Gs=1, Bs=-2 -> 0.01, -0.02 pu).
+        @test length(data.shunt) == 1
+        @test data.shunt[1].shunt_bus == 1
+        @test data.shunt[1].gs ≈ 0.01 && data.shunt[1].bs ≈ -0.02
         @test data.branch[1].tap == 1.0
         @test data.branch[1].rate_a > 0
         @test data.branch[1].angmin ≈ -π / 3

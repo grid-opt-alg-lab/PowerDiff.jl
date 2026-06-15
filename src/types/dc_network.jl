@@ -237,6 +237,8 @@ and rejection of storage / HVDC records that PowerDiff does not model.
 
 The returned `bus`/`gen`/`branch` rows mirror the field names the network
 constructors expect, with loads/shunts already folded into per-bus `pd/qd/gs/bs`.
+`shunt` re-exposes those bus shunts as a table (one `(; index, shunt_bus, gs, bs)`
+record per bus with a nonzero shunt admittance) for callers that want shunt records.
 """
 function _network_data(net)
     # Reject records PowerDiff does not model. Both guards read the raw network so
@@ -269,8 +271,14 @@ function _network_data(net)
     all(br.rate_a > 0 for br in branches) || throw(ArgumentError(
         "branches must have positive thermal limits after normalization"))
 
+    # to_powerdata folds shunts into per-bus gs/bs (which the constructors consume).
+    # Re-expose them as a table, one record per bus with a nonzero shunt admittance,
+    # for callers that want shunt records back.
+    shunt_buses = [b for b in buses if b.gs != 0.0 || b.bs != 0.0]
+    shunts = [(; index=i, shunt_bus=b.bus_i, gs=b.gs, bs=b.bs) for (i, b) in enumerate(shunt_buses)]
+
     return (; name=PowerIO.network_name(net), baseMVA=Float64(pd.baseMVA),
-            bus=buses, gen=gens, branch=branches)
+            bus=buses, gen=gens, branch=branches, shunt=shunts)
 end
 
 # Build one PowerDiff branch row from a to_powerdata branch: map dense f_bus/t_bus to
