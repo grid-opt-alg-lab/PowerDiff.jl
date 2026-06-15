@@ -176,19 +176,35 @@ end
     @test_throws ArgumentError to_apf_network(net)
 end
 
-@testset "to_apf_network rejects fractional switching" begin
+@testset "to_apf_network fractional switching handling" begin
     net = load_test_case("case14.m")
     if isnothing(net)
         @test_skip false
     else
         dc_net = DCNetwork(net)
-        # Fractional sw cannot be represented by APF's on/off branch status and
-        # would make PD's energized-island count disagree with the APF topology.
+        # Default: fractional sw is rejected (APF cannot represent partial switching).
         dc_net.sw[1] = 0.3
         @test_throws ArgumentError to_apf_network(dc_net)
-        dc_net.sw[1] = 1.0  # restore; binary states convert fine
+        # Opt-in: allow_fractional converts under APF's sw > 0.5 binarization.
+        # case14 stays connected with branch 1 binarized open, so it is one island.
+        apf_frac = to_apf_network(dc_net; allow_fractional=true)
+        @test apf_frac isa APF.Network
+        @test !apf_frac.branches[1].status  # sw = 0.3 binarizes to open
+        dc_net.sw[1] = 1.0  # restore; binary states convert under the default path
         @test to_apf_network(dc_net) isa APF.Network
     end
+end
+
+@testset "to_apf_network rejects disconnected binarized topology" begin
+    # Single branch between two buses. allow_fractional still checks connectivity
+    # under sw > 0.5: at sw = 0.3 the branch binarizes open, leaving two islands.
+    A = sparse([1.0 -1.0])
+    G = sparse(reshape([1.0, 0.0], 2, 1))
+    net_open = DCNetwork(2, 1, 1, A, G, [-10.0]; sw=[0.3], ref_bus=1)
+    @test_throws ArgumentError to_apf_network(net_open; allow_fractional=true)
+    # At sw = 0.7 the branch binarizes closed, so the two buses form one island.
+    net_closed = DCNetwork(2, 1, 1, A, G, [-10.0]; sw=[0.7], ref_bus=1)
+    @test to_apf_network(net_closed; allow_fractional=true) isa APF.Network
 end
 
 # =========================================================================
