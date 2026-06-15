@@ -148,7 +148,7 @@ Locational marginal prices are the power balance duals ``\nu_{\text{bal}}``, dec
 The congestion component is extracted by solving:
 
 ```math
-\text{congestion}[\text{non-ref}] = B_r^{-1} \left(A_r^\top W (\lambda_{\text{ub}}^{\text{std}} - \lambda_{\text{lb}}^{\text{std}}) + A_r^\top (\gamma_{\text{ub}}^{\text{std}} - \gamma_{\text{lb}}^{\text{std}})\right)
+\text{congestion}[\text{non-ref}] = B_r^{-1} \left(A_r^\top W (\lambda_{\text{ub}}^{\text{std}} - \lambda_{\text{lb}}^{\text{std}}) + A_r^\top \operatorname{diag}(\mathrm{sw}) (\gamma_{\text{ub}}^{\text{std}} - \gamma_{\text{lb}}^{\text{std}})\right)
 ```
 
 where ``\lambda^{\text{std}}``, ``\gamma^{\text{std}}`` use the standard sign convention (non-negative for binding constraints). The ``\gamma`` terms capture congestion from binding phase angle difference limits. The energy component is uniform within each energized island and reflects that island's marginal cost of generation.

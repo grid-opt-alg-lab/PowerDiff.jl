@@ -25,7 +25,7 @@
 # LMP Decomposition (for analysis):
 #     LMP = ν_bal = energy_component + congestion_component
 # where:
-#     congestion_component = B_r⁻¹ [A_r' Diag(-b .* sw) (λ_ub - λ_lb) + A_r'(γ_ub - γ_lb)]  (non-ref block)
+#     congestion_component = B_r⁻¹ [A_r' Diag(-b .* sw) (λ_ub - λ_lb) + A_r' Diag(sw) (γ_ub - γ_lb)]  (non-ref block)
 #     energy_component = ν_bal - congestion_component  (uniform within each island)
 #
 # Sign conventions (DC OPF):
@@ -99,9 +99,10 @@ function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork;
 
     At = net.A'
     # Angle difference constraints are gated by `sw` in the model, so their
-    # stationarity contribution carries the same `Diag(sw)` factor. For energized
-    # branches `sw == 1` (a no-op); on de-energized branches the gate matches the
-    # zero angle dual the solver returns there.
+    # stationarity contribution carries the same `Diag(sw)` factor: the gate is the
+    # identity on fully closed branches (sw == 1), scales the contribution on
+    # fractional branches (0 < sw < 1), and zeroes the term on open branches
+    # (sw == 0), matching the gated angle dual the solver returns.
     rhs_full = At * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb) +
                At * Diagonal(net.sw) * (sol.gamma_ub - sol.gamma_lb)
 
