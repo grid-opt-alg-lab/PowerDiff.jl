@@ -1,11 +1,14 @@
-import PowerIO
-
-# PowerIO is the parser and data layer. It parses MATPOWER/PSSE/etc. and
-# `PowerIO.to_powerdata` returns normalized, per-unit, filtered data with the slack
-# bus inferred, loads/shunts aggregated per bus, and polynomial costs rescaled.
-# PowerDiff consumes that directly. The only logic kept here is OPF-solver modeling:
-# polynomial cost interpretation, finite flow limits, default angle-difference
-# bounds, and rejection of records PowerDiff does not model (storage, HVDC).
+# PowerIO is the parser and data layer. `PowerIO.parse_*` reads MATPOWER/PSSE/etc.
+# and `PowerIO.to_powerdata` returns normalized, per-unit, status/isolated-filtered
+# data with the reference bus inferred (`type == 3`), source bus ids on `bus_i`,
+# loads/shunts aggregated per bus, and polynomial costs collapsed and rescaled.
+#
+# This file is the construction front door: thin MATPOWER-only parse wrappers that
+# return a `PowerIO.Network`, and `_network_data`, the adapter that turns one into
+# the network tables `DCNetwork`/`ACNetwork` consume. The only logic here beyond
+# re-keying to source bus ids is the OPF-solver modeling PowerIO leaves to the
+# consumer: polynomial cost interpretation, finite flow limits, default
+# angle-difference bounds, and rejection of records PowerDiff does not model.
 
 """
     parse_file(io::Union{IO,String}; library=nothing, filetype="m") -> PowerIO.Network
@@ -64,15 +67,16 @@ _resolve_case_path(path::AbstractString, library) = joinpath(get_path(library), 
 """
     _network_data(net::PowerIO.Network) -> NamedTuple
 
-Normalized PowerDiff network tables built from `PowerIO.to_powerdata(net)`.
+Build PowerDiff network tables from `PowerIO.to_powerdata(net)`.
 
-`to_powerdata` already does per-unit scaling, status/isolated filtering, slack
-inference, per-bus load/shunt aggregation, and `base^(n-i)` cost rescaling, and it
-returns dense file-order indices. This re-keys the bus references back to original
-bus ids (so [`IDMapping`](@ref)'s sorted ordering is preserved) and applies
-PowerDiff's OPF modeling: polynomial cost (rejecting PWL/quartic), a finite flow
-limit fallback when `rate_a == 0`, default angle-difference bounds, and rejection of
-storage / HVDC records that PowerDiff does not model.
+`to_powerdata` does per-unit scaling, status/isolated filtering, per-bus
+load/shunt aggregation, reference-bus inference (`type == 3`), source bus ids on
+`bus_i`, and polynomial cost collapse/rescaling, returning dense file-order rows.
+This adapter keys bus references back to source bus ids (so [`IDMapping`](@ref)'s
+sorted ordering is preserved) and applies the OPF modeling PowerIO leaves to the
+consumer: polynomial cost interpretation (rejecting PWL and higher-than-quadratic),
+a finite flow-limit fallback when `rate_a == 0`, default angle-difference bounds,
+and rejection of storage / HVDC records that PowerDiff does not model.
 
 The returned `bus`/`gen`/`branch` rows mirror the field names the network
 constructors expect, with loads/shunts already folded into per-bus `pd/qd/gs/bs`.
@@ -80,60 +84,29 @@ constructors expect, with loads/shunts already folded into per-bus `pd/qd/gs/bs`
 function _network_data(net)
     isempty(PowerIO.hvdc(net)) || throw(ArgumentError(
         "PowerDiff does not support HVDC/dcline records; remove or convert dcline before parsing"))
-    # Surface malformed input (e.g. non-finite fields PowerIO leaves as `nothing`) as an
-    # ArgumentError rather than a downstream MethodError.
-    pd = try
-        PowerIO.to_powerdata(net)
-    catch e
-        e isa ArgumentError && rethrow()
-        throw(ArgumentError("PowerDiff: could not normalize the network: " * sprint(showerror, e)))
-    end
+    pd = PowerIO.to_powerdata(net)
     isempty(pd.storage) || throw(ArgumentError(
         "PowerDiff does not support storage records; remove or convert storage before parsing"))
     isempty(pd.bus) && throw(ArgumentError("MATPOWER file is missing mpc.bus"))
     isempty(pd.gen) && throw(ArgumentError("MATPOWER file has no active generators"))
     isempty(pd.branch) && throw(ArgumentError("MATPOWER file has no active branches"))
 
-    orig = [Int(b.bus_i) for b in pd.bus]      # file-order index -> original bus id
-    vmax = [Float64(b.vmax) for b in pd.bus]   # file-order index -> bus vmax
+    orig = [Int(b.bus_i) for b in pd.bus]      # dense file-order index -> source bus id
+    vmax = [Float64(b.vmax) for b in pd.bus]   # dense index -> bus vmax
 
     buses = [(; bus_i=orig[i], bus_type=Int(b.type),
               pd=Float64(b.pd), qd=Float64(b.qd), gs=Float64(b.gs), bs=Float64(b.bs),
               vm=Float64(b.vm), va=Float64(b.va), vmin=Float64(b.vmin), vmax=Float64(b.vmax))
              for (i, b) in enumerate(pd.bus)]
 
-    # to_powerdata's gen `c`/`n` mangles costs declared with ncost > 3 (it keeps the
-    # 3 highest-degree coefficients with the wrong exponents and drops the rest), so a
-    # quadratic padded to ncost=5 — e.g. MATPOWER case14 — loses its linear term. Read
-    # the raw cost coefficients from PowerIO instead, aligned to to_powerdata's kept
-    # gens by the same keep filter (in service, bus not isolated). Track as a PowerIO
-    # enhancement: have to_powerdata expose costs losslessly.
-    kept_bus = Set(Int(b.id) for b in PowerIO.buses(net) if String(b.kind) != "ISOLATED")
-    raw_costs = [_cost_tuple(g.cost, Float64(pd.baseMVA))
-                 for g in PowerIO.generators(net) if g.in_service && Int(g.bus) in kept_bus]
-    length(raw_costs) == length(pd.gen) ||
-        throw(ArgumentError("generator cost alignment mismatch ($(length(raw_costs)) vs $(length(pd.gen)))"))
-
+    # Costs come straight from to_powerdata's gen rows: `c` is already per-unit
+    # scaled with leading zeros collapsed (ncost > 3 is no longer mangled), so a
+    # quadratic padded to ncost=5 keeps its linear term. Map dense `gen.bus` to the
+    # source bus id via `orig`.
     gens = [(; index=j, gen_bus=orig[g.bus],
              pg=Float64(g.pg), qg=Float64(g.qg), qmin=Float64(g.qmin), qmax=Float64(g.qmax),
-             vg=Float64(g.vg), pmin=Float64(g.pmin), pmax=Float64(g.pmax), cost=raw_costs[j])
+             vg=Float64(g.vg), pmin=Float64(g.pmin), pmax=Float64(g.pmax), cost=_poly_cost(g))
             for (j, g) in enumerate(pd.gen)]
-
-    # PowerDiff's OPF needs a reference bus. to_powerdata only reassigns the slack when
-    # an explicit REF was demoted; if the source marks none at all, promote the bus with
-    # the largest generator (matching the previous parser). PowerIO issue: infer a
-    # reference when the file marks none.
-    if !any(b -> b.bus_type == 3, buses)
-        slack_bus, best_pmax = 0, -Inf
-        for g in gens
-            if g.pmax > best_pmax
-                best_pmax = g.pmax
-                slack_bus = g.gen_bus
-            end
-        end
-        slack_bus == 0 ||
-            (buses = [b.bus_i == slack_bus ? (; b..., bus_type=3) : b for b in buses])
-    end
 
     branches = NamedTuple[]
     for (l, br) in enumerate(pd.branch)
@@ -153,17 +126,16 @@ function _network_data(net)
             bus=buses, gen=gens, branch=branches)
 end
 
-# Convert a PowerIO raw generator cost (model, ncost, coeffs) to PowerDiff's
-# (quadratic, linear, constant) tuple, in per-unit. Rescale each coefficient by
-# base^(n-i), drop leading zeros (so a quadratic padded to ncost=5 collapses to a
-# real quadratic), and reject piecewise-linear and higher-than-quadratic costs.
-function _cost_tuple(cost, base::Float64)
-    cost === nothing && return (0.0, 0.0, 0.0)
-    Int(cost.model) == 2 || throw(ArgumentError("only polynomial mpc.gencost model 2 is supported"))
-    n = Int(cost.ncost)
-    n >= 1 || throw(ArgumentError("mpc.gencost must declare at least one coefficient"))
-    cf = collect(cost.coeffs)
-    coeffs = [base^(n - i) * Float64(cf[i]) for i in 1:n]
+# Interpret a PowerIO gen row's polynomial cost as PowerDiff's
+# (quadratic, linear, constant) tuple. `g.c` is already per-unit scaled and
+# leading-zero collapsed by to_powerdata; reject PWL (model_poly == false) and
+# higher-than-quadratic costs.
+function _poly_cost(g)
+    g.model_poly || throw(ArgumentError("only polynomial mpc.gencost (model 2) is supported"))
+    n = Int(g.n)
+    coeffs = collect(Float64, g.c)
+    1 <= n <= length(coeffs) || throw(ArgumentError("mpc.gencost must declare at least one coefficient"))
+    coeffs = coeffs[1:n]
     while length(coeffs) > 1 && iszero(first(coeffs))
         popfirst!(coeffs)
     end

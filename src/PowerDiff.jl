@@ -20,6 +20,7 @@ using JuMP
 using Ipopt
 using ExaModels
 using NLPModelsIpopt
+using PowerIO
 
 const MOI = JuMP.MOI
 
@@ -29,7 +30,7 @@ const MOI = JuMP.MOI
 const _SILENCE_WARNINGS = Ref(false)
 
 include("artifacts.jl")
-include("parser.jl")
+include("network_data.jl")
 
 """
     silence()
