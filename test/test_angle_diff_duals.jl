@@ -384,4 +384,41 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
             @test rel_err < 0.05
         end
     end
+
+    @testset "Congestion component gates angle duals by sw" begin
+        # Regression (PR #55): calc_congestion_component must gate the angle
+        # difference dual term by sw, matching the KKT theta-stationarity term
+        # A' * Diag(sw) * (gamma_ub - gamma_lb). That term used to be ungated,
+        # which gave a wrong energy/congestion split on any branch with sw != 1
+        # and a nonzero angle dual. With sw == 1 everywhere the two forms are
+        # identical, so this only shows up on partially switched branches.
+        net = DCNetwork(n, m, k, A, G_inc, b; sw=[1.0, 0.5, 1.0],
+            fmax=fill(100.0, m), gmax=[5.0, 5.0], gmin=[0.0, 0.0],
+            angmax=[Float64(pi), 0.025, Float64(pi)], angmin=fill(-Float64(pi), m),
+            cl=[10.0, 50.0], cq=[1.0, 1.0], ref_bus=1, tau=0.01)
+        prob = DCOPFProblem(net, d)
+        sol = solve!(prob)
+
+        # The fractionally switched branch (2) carries an active angle dual.
+        @test abs(sol.gamma_ub[2] - sol.gamma_lb[2]) > 1e-3
+
+        cong = calc_congestion_component(sol, net)
+        w = -net.b
+        non_ref = PowerDiff._non_reference_buses(net)
+        At = net.A'
+
+        # Gated RHS: matches the implementation and the documented stationarity.
+        rhs_gated = At * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb) +
+                    At * Diagonal(net.sw) * (sol.gamma_ub - sol.gamma_lb)
+        expected = zeros(net.n)
+        expected[non_ref] = sol.B_r_factor \ rhs_gated[non_ref]
+        @test isapprox(cong, expected; atol=1e-8)
+
+        # Ungated RHS (the pre-fix behavior) disagrees, so the gate is load bearing.
+        rhs_ungated = At * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb) +
+                      At * (sol.gamma_ub - sol.gamma_lb)
+        ungated = zeros(net.n)
+        ungated[non_ref] = sol.B_r_factor \ rhs_ungated[non_ref]
+        @test !isapprox(cong, ungated; atol=1e-3)
+    end
 end
