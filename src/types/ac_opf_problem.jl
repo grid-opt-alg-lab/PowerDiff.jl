@@ -340,6 +340,7 @@ function ACOPFProblem(
     backend_tag = _ac_backend_tag(backend)
     backend_tag isa ExaBackend && optimizer !== Ipopt.Optimizer && throw(ArgumentError(
         "backend=:exa uses NLPModelsIpopt directly and does not accept a custom optimizer"))
+    _validate_acopf_network(network)
     data = _build_acopf_data(network)
     return _acopf_problem(network, data, backend_tag; optimizer=optimizer, silent=silent)
 end
@@ -348,6 +349,17 @@ function _ac_backend_tag(backend::Symbol)
     backend == :jump && return JuMPBackend()
     backend == :exa && return ExaBackend()
     throw(ArgumentError("unsupported ACOPF backend :$backend (expected :jump or :exa)"))
+end
+
+function _validate_acopf_network(network::ACNetwork)
+    isempty(network.gen_bus) && throw(ArgumentError(
+        "ACOPFProblem requires generator, cost, demand, voltage limit, and finite branch limit data; " *
+        "ACNetwork values built from a raw admittance matrix are power flow networks only"))
+    all(isfinite, network.rate_a) || throw(ArgumentError(
+        "ACOPFProblem requires finite branch rate_a limits"))
+    all(>(0), network.rate_a) || throw(ArgumentError(
+        "ACOPFProblem requires positive branch rate_a limits"))
+    return nothing
 end
 
 function _build_acopf_data(network::ACNetwork)
@@ -726,7 +738,7 @@ Reject the removed dictionary API with a migration hint.
 Accepts both basic and non-basic networks.
 """
 function ACOPFProblem(pm_data::Dict; kwargs...)
-    throw(ArgumentError("dictionary constructors were removed; parse a MATPOWER file with PowerDiff.parse_file"))
+    throw(ArgumentError("dictionary constructors were removed; parse a network file with PowerDiff.parse_file"))
 end
 
 ACOPFProblem(net::PowerIO.Network; kwargs...) = ACOPFProblem(ACNetwork(net); kwargs...)

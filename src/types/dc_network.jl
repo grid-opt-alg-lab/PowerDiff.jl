@@ -153,36 +153,54 @@ const DEFAULT_TAU = 1e-2
 const DEFAULT_SHED_COST_MULTIPLIER = 10
 
 # =============================================================================
-# MATPOWER input and PowerIO -> network-table construction
+# PowerIO input and network-table construction
 # =============================================================================
 #
 # PowerIO is the parser and data layer. `PowerIO.parse_*` reads MATPOWER/PSSE/etc.
 # and `PowerIO.to_powerdata` returns normalized, per-unit, status/isolated-filtered
 # data with the reference bus inferred (`type == 3`), source bus ids on `bus_i`,
 # loads/shunts aggregated per bus, and polynomial costs collapsed and rescaled.
-# These thin MATPOWER-only wrappers return a `PowerIO.Network`, and `_network_data`
-# turns one into the network tables the DCNetwork and ACNetwork constructors
-# consume. The only logic beyond re-keying to source bus ids is the OPF-solver
-# modeling PowerIO leaves to the consumer: polynomial cost interpretation, finite
-# flow limits, default angle-difference bounds, and rejection of records PowerDiff
-# does not model.
+# These thin wrappers return a `PowerIO.Network`, and `_network_data` turns one into
+# the network tables the DCNetwork and ACNetwork constructors consume. The only
+# logic beyond re-keying to source bus ids is the OPF solver modeling PowerIO leaves
+# to the consumer: polynomial cost interpretation, finite flow limits, default
+# angle-difference bounds, and rejection of records PowerDiff does not model.
 
 """
-    parse_file(io::Union{IO,String}; library=nothing, filetype="m") -> PowerIO.Network
+    parse_file(path::String; library=nothing, from=nothing, filetype=nothing) -> PowerIO.Network
+    parse_file(io::IO; from="matpower", filetype=nothing) -> PowerIO.Network
 
-Parse a MATPOWER v2 `.m` file into a `PowerIO.Network`.
+Parse a supported PowerIO network file into a `PowerIO.Network`.
 
-PowerDiff intentionally supports MATPOWER files only. Convert other formats before
-constructing PowerDiff types. Pass the result to [`DCNetwork`](@ref) / [`ACNetwork`](@ref).
+For paths, PowerIO infers the format from the extension unless `from` is given.
+For streams, pass `from` (or `filetype`) because there is no extension. JSON formats
+are ambiguous; use `from=:egret` or `from=:powermodels`.
+
+Supported format tokens are PowerIO's tokens: `:matpower` / `:m`, `:psse` / `:raw`,
+`:powerworld` / `:aux`, `:powermodels`, and `:egret`.
+Pass the result to [`DCNetwork`](@ref) / [`ACNetwork`](@ref).
 """
-function parse_file(io::Union{IO,String}; library=nothing, filetype="m", kwargs...)
+function parse_file(io::Union{IO,String}; library=nothing, filetype=nothing, from=nothing, kwargs...)
     isempty(kwargs) || throw(ArgumentError(
         "unsupported parse_file keyword(s): $(join(string.(keys(kwargs)), ", "))"))
-    resolved = io isa String ? _resolve_case_path(io, library) : io
-    resolved_type = resolved isa String ? lowercase(splitext(resolved)[2]) : ".$(lowercase(filetype))"
-    resolved_type == ".m" || throw(ArgumentError(
-        "unsupported network file type $resolved_type; PowerDiff supports MATPOWER v2 .m files only"))
-    return parse_matpower(resolved)
+    fmt = _powerio_format_hint(from, filetype)
+    if io isa String
+        resolved = _resolve_case_path(io, library)
+        try
+            return isnothing(fmt) ? PowerIO.parse_file(resolved) : PowerIO.parse_file(resolved; from=fmt)
+        catch e
+            e isa ArgumentError && rethrow()
+            throw(ArgumentError("PowerDiff.parse_file: " * sprint(showerror, e)))
+        end
+    else
+        fmt = isnothing(fmt) ? "matpower" : fmt
+        try
+            return PowerIO.parse_file(io, fmt)
+        catch e
+            e isa ArgumentError && rethrow()
+            throw(ArgumentError("PowerDiff.parse_file: " * sprint(showerror, e)))
+        end
+    end
 end
 
 """
@@ -193,7 +211,7 @@ Parse MATPOWER v2 data into a `PowerIO.Network`.
 """
 function parse_matpower(io::IO)
     try
-        return PowerIO.parse_str(read(io, String), "matpower")
+        return PowerIO.parse_file(io, "matpower")
     catch e
         e isa ArgumentError && rethrow()
         throw(ArgumentError("PowerDiff.parse_matpower: " * sprint(showerror, e)))
@@ -204,7 +222,7 @@ function parse_matpower(file::String; library=nothing)
     resolved = _resolve_case_path(file, library)
     isfile(resolved) || throw(ArgumentError("invalid MATPOWER file $resolved"))
     try
-        return PowerIO.parse_file(String(resolved))
+        return PowerIO.parse_file(String(resolved); from="matpower")
     catch e
         e isa ArgumentError && rethrow()
         throw(ArgumentError("PowerDiff.parse_matpower: " * sprint(showerror, e)))
@@ -220,6 +238,30 @@ parse_matpower_struct(file::String; library=nothing) = parse_matpower(file; libr
 
 _resolve_case_path(path::AbstractString, ::Nothing) = String(path)
 _resolve_case_path(path::AbstractString, library) = joinpath(get_path(library), path)
+
+_powerio_format_hint(::Nothing, ::Nothing) = nothing
+_powerio_format_hint(from, ::Nothing) = _format_token(from)
+_powerio_format_hint(::Nothing, filetype) = _format_token(filetype)
+function _powerio_format_hint(from, filetype)
+    f1 = _format_token(from)
+    f2 = _format_token(filetype)
+    f1 == f2 || throw(ArgumentError("conflicting parse format hints: from=$from and filetype=$filetype"))
+    return f1
+end
+
+function _format_token(x)
+    s = lowercase(String(x))
+    startswith(s, ".") && (s = s[2:end])
+    s == "json" && throw(ArgumentError(
+        "JSON input is ambiguous; pass from=:egret or from=:powermodels"))
+    s in ("m", "matpower") && return "matpower"
+    s in ("raw", "psse") && return "psse"
+    s in ("aux", "powerworld") && return "powerworld"
+    s in ("pm", "powermodels", "powermodels-json") && return "powermodels-json"
+    s in ("egret", "egret-json") && return "egret-json"
+    throw(ArgumentError(
+        "unsupported network format $x (expected matpower, psse/raw, powerworld/aux, powermodels-json, or egret-json)"))
+end
 
 """
     _network_data(net::PowerIO.Network) -> NamedTuple
@@ -240,11 +282,10 @@ constructors expect, with loads/shunts already folded into per-bus `pd/qd/gs/bs`
 `shunt` re-exposes those bus shunts as a table (one `(; index, shunt_bus, gs, bs)`
 record per bus with a nonzero shunt admittance) for callers that want shunt records.
 
-Bus rows carry the source MATPOWER bus id on `bus_i`, so [`IDMapping`](@ref)`.bus_ids`
-(and any bus-indexed sensitivity `row_to_id`) map back to the original file. Generator
-and branch `index` are dense file-order positions in `to_powerdata`'s status-filtered
-output, not original `mpc.gen`/`mpc.branch` row numbers: when out-of-service rows are
-dropped the dense index no longer equals the source row.
+Bus rows carry the source bus id on `bus_i`, so [`IDMapping`](@ref)`.bus_ids`
+(and any bus-indexed sensitivity `row_to_id`) map back to the input network.
+Generator and branch `index` values are source row numbers among the unfiltered
+PowerIO rows, so out-of-service rows leave gaps instead of renumbering active rows.
 """
 function _network_data(net)
     # Reject records PowerDiff does not model. Both guards read the raw network so
@@ -255,11 +296,12 @@ function _network_data(net)
     isempty(PowerIO.storage(net)) || throw(ArgumentError(
         "PowerDiff does not support storage records; remove or convert storage before parsing"))
     pd = PowerIO.to_powerdata(net)
-    isempty(pd.bus) && throw(ArgumentError("MATPOWER file is missing mpc.bus"))
-    isempty(pd.gen) && throw(ArgumentError("MATPOWER file has no active generators"))
-    isempty(pd.branch) && throw(ArgumentError("MATPOWER file has no active branches"))
+    isempty(pd.bus) && throw(ArgumentError("network has no active buses"))
+    isempty(pd.gen) && throw(ArgumentError("network has no active generators"))
+    isempty(pd.branch) && throw(ArgumentError("network has no active branches"))
 
     orig = [Int(b.bus_i) for b in pd.bus]   # dense file-order index -> source bus id
+    gen_source_rows, branch_source_rows = _active_source_rows(net, pd)
 
     buses = [(; bus_i=orig[i], bus_type=Int(b.type),
               pd=Float64(b.pd), qd=Float64(b.qd), gs=Float64(b.gs), bs=Float64(b.bs),
@@ -268,12 +310,12 @@ function _network_data(net)
 
     # Costs come straight from to_powerdata's gen rows (already per-unit and
     # right-aligned). Map dense `gen.bus` to the source bus id via `orig`.
-    gens = [(; index=j, gen_bus=orig[g.bus],
+    gens = [(; index=gen_source_rows[j], gen_bus=orig[g.bus],
              pg=Float64(g.pg), qg=Float64(g.qg), qmin=Float64(g.qmin), qmax=Float64(g.qmax),
              vg=Float64(g.vg), pmin=Float64(g.pmin), pmax=Float64(g.pmax), cost=_poly_cost(g))
             for (j, g) in enumerate(pd.gen)]
 
-    branches = [_branch_row(l, br, orig, buses) for (l, br) in enumerate(pd.branch)]
+    branches = [_branch_row(branch_source_rows[l], br, orig, buses) for (l, br) in enumerate(pd.branch)]
     all(br.rate_a > 0 for br in branches) || throw(ArgumentError(
         "branches must have positive thermal limits after normalization"))
 
@@ -287,9 +329,37 @@ function _network_data(net)
             bus=buses, gen=gens, branch=branches, shunt=shunts)
 end
 
+function _active_source_rows(net, pd)
+    raw = PowerIO.to_powerdata(net; filtered=false)
+    kept_bus_ids = Set(Int(b.bus_i) for b in pd.bus)
+    raw_bus_id = Dict(Int(b.i) => Int(b.bus_i) for b in raw.bus)
+
+    gen_rows = Int[]
+    for (row, gen) in enumerate(raw.gen)
+        status = hasproperty(gen, :status) ? Int(gen.status) != 0 : true
+        bus_id = get(raw_bus_id, Int(gen.bus), nothing)
+        status && bus_id in kept_bus_ids && push!(gen_rows, row)
+    end
+
+    branch_rows = Int[]
+    for (row, br) in enumerate(raw.branch)
+        status = hasproperty(br, :status) ? Int(br.status) != 0 : true
+        f_id = get(raw_bus_id, Int(br.f_bus), nothing)
+        t_id = get(raw_bus_id, Int(br.t_bus), nothing)
+        status && f_id in kept_bus_ids && t_id in kept_bus_ids && push!(branch_rows, row)
+    end
+
+    length(gen_rows) == length(pd.gen) || throw(ArgumentError(
+        "PowerDiff could not map active generators back to source rows"))
+    length(branch_rows) == length(pd.branch) || throw(ArgumentError(
+        "PowerDiff could not map active branches back to source rows"))
+
+    return gen_rows, branch_rows
+end
+
 # Build one PowerDiff branch row from a to_powerdata branch: map dense f_bus/t_bus to
-# source ids, default the angle window, and synthesize a finite rate_a when MATPOWER
-# leaves it at 0 (unlimited), using the endpoint buses' vmax limits.
+# source ids, default the angle window, and synthesize a finite rate_a when the
+# source leaves it at 0 (unlimited), using the endpoint buses' vmax limits.
 function _branch_row(l, br, orig, buses)
     angmin, angmax = _normalize_angle_bounds(Float64(br.angmin), Float64(br.angmax))
     rate_a = br.rate_a > 0 ? Float64(br.rate_a) :
@@ -321,9 +391,9 @@ function _poly_cost(g)
     return (cq, cl, cc)
 end
 
-# PowerDiff's OPF needs a finite thermal limit on every branch. When MATPOWER leaves
-# rate_a == 0 (unlimited), synthesize one from the bus voltage limits and the branch
-# impedance / angle window, matching the previous native parser.
+# PowerDiff's OPF needs a finite thermal limit on every branch. When the source
+# leaves rate_a == 0 (unlimited), synthesize one from the bus voltage limits and
+# the branch impedance / angle window, matching the previous native parser.
 function _fallback_rate_a(r::Float64, x::Float64, angmin::Float64, angmax::Float64,
                           fr_vmax::Float64, to_vmax::Float64)
     theta_max = max(abs(angmin), abs(angmax))
@@ -334,7 +404,7 @@ function _fallback_rate_a(r::Float64, x::Float64, angmin::Float64, angmax::Float
 end
 
 # Default angle-difference bounds (radians in, radians out). MATPOWER angmin == angmax
-# == 0 means unbounded; treat ±90°-or-wider and the zero case as a ±60° window, the
+# == 0 means unbounded; treat ±90° or wider and the zero case as a ±60° window, the
 # MATPOWER/PowerModels convention. PowerIO's `to_powerdata` already converts to radians.
 function _normalize_angle_bounds(angmin::Float64, angmax::Float64)
     pad = deg2rad(60.0)
@@ -354,7 +424,7 @@ end
 Reject the removed dictionary API with a migration hint.
 """
 function DCNetwork(net::Dict{String,<:Any}; kwargs...)
-    throw(ArgumentError("dictionary constructors were removed; parse a MATPOWER file with PowerDiff.parse_file"))
+    throw(ArgumentError("dictionary constructors were removed; parse a network file with PowerDiff.parse_file"))
 end
 
 """

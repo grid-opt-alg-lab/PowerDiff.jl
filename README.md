@@ -33,7 +33,7 @@ Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerDiff.jl.git")
 ```julia
 using PowerDiff
 
-# Parse a MATPOWER v2 case into a PowerIO.Network
+# Parse a supported PowerIO case into a PowerIO.Network
 net = parse_file("case14.m")
 dc_net = DCNetwork(net)
 d = calc_demand_vector(net)
@@ -61,8 +61,9 @@ See the [Getting Started guide](https://samueltalkington.com/research/powerdiff/
 
 ## Input Format
 
-PowerDiff reads MATPOWER v2 `.m` files directly through `parse_file`. Convert other
-formats to MATPOWER before constructing PowerDiff networks.
+PowerDiff reads files through PowerIO. `parse_file` supports MATPOWER `.m`,
+PSS/E `.raw`, PowerWorld `.aux`, PowerModels JSON, and Egret JSON. For streams,
+pass `from`; JSON streams need `from=:egret` or `from=:powermodels`.
 
 ## Dependencies
 

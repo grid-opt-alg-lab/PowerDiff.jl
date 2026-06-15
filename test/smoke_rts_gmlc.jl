@@ -26,11 +26,12 @@
 #   - RTS_GMLC.m lives in PowerSystems/PowerSystemCaseBuilder, not PowerModels
 #   - File path depends on installed package version
 #   - AC OPF + ForwardDiff KKT Jacobian is slow (~30s+)
-#   - DC line workaround required (PowerModels limitation)
+#   - RTS_GMLC carries dcline records, which PowerDiff rejects explicitly
 
 using Test
 using LinearAlgebra
 using PowerDiff
+using PowerIO
 using PowerModels
 
 PowerModels.silence()
@@ -38,22 +39,21 @@ PowerModels.silence()
 # ─────────────────────────────────────────────────────────────────────────────
 # Locate RTS_GMLC.m
 # ─────────────────────────────────────────────────────────────────────────────
-const RTS_PATHS = [
-    joinpath(dirname(dirname(pathof(PowerModels))), "test", "data", "matpower", "RTS_GMLC.m"),
-    # PowerSystems / PowerSystemCaseBuilder fallbacks
-    filter(isfile, [
-        joinpath(d, "data", "matpower", "RTS_GMLC.m")
-        for d in readdir(joinpath(homedir(), ".julia", "packages", "PowerSystemCaseBuilder"); join=true)
-        if isdir(d)
-    ])...,
-    filter(isfile, [
-        joinpath(d, "data", "matpower", "RTS_GMLC.m")
-        for d in readdir(joinpath(homedir(), ".julia", "packages", "PowerSystems"); join=true)
-        if isdir(d)
-    ])...,
-]
+function _candidate_rts_paths()
+    paths = String[
+        joinpath(dirname(dirname(pathof(PowerModels))), "test", "data", "matpower", "RTS_GMLC.m"),
+    ]
+    for pkg in ("PowerSystemCaseBuilder", "PowerSystems")
+        root = joinpath(homedir(), ".julia", "packages", pkg)
+        isdir(root) || continue
+        for d in readdir(root; join=true)
+            isdir(d) && push!(paths, joinpath(d, "data", "matpower", "RTS_GMLC.m"))
+        end
+    end
+    return paths
+end
 
-const RTS_PATH = let found = filter(isfile, RTS_PATHS)
+const RTS_PATH = let found = filter(isfile, _candidate_rts_paths())
     if isempty(found)
         error("""
         RTS_GMLC.m not found. Install one of:
@@ -64,18 +64,38 @@ const RTS_PATH = let found = filter(isfile, RTS_PATHS)
     first(found)
 end
 
+function _without_dcline(data)
+    clean = deepcopy(data)
+    if haskey(clean, "dcline") && !isempty(clean["dcline"])
+        println("  Emptying $(length(clean["dcline"])) DC line(s) before PowerIO conversion")
+        empty!(clean["dcline"])
+    end
+    return clean
+end
+
+function _voltage_vector(pm_data, bus_ids)
+    bus_by_id = Dict(Int(bus["bus_i"]) => bus for bus in values(pm_data["bus"]))
+    return ComplexF64[
+        bus_by_id[id]["vm"] * cis(deg2rad(bus_by_id[id]["va"]))
+        for id in bus_ids
+    ]
+end
+
 println("Using RTS_GMLC.m from: $RTS_PATH")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Load network
 # ─────────────────────────────────────────────────────────────────────────────
 raw = PowerModels.parse_file(RTS_PATH)
+raw_for_powerdiff = _without_dcline(raw)
+powerio_net = PowerIO.from_powermodels(raw_for_powerdiff)
 
 # Verify this is truly non-basic (bus IDs are not 1:n)
 bus_ids = sort([raw["bus"][k]["bus_i"] for k in keys(raw["bus"])])
 @assert bus_ids != collect(1:length(bus_ids)) "RTS_GMLC should have non-sequential bus IDs"
 println("Bus IDs: $(bus_ids[1])..$(bus_ids[end]) ($(length(bus_ids)) buses)")
 println("Branches: $(length(raw["branch"])), Generators: $(length(raw["gen"])), Loads: $(length(raw["load"]))")
+!isempty(get(raw, "dcline", Dict())) && println("DCLines excluded from PowerDiff smoke path: $(length(raw["dcline"]))")
 
 @testset "RTS_GMLC Smoke Tests" begin
 
@@ -83,9 +103,9 @@ println("Branches: $(length(raw["branch"])), Generators: $(length(raw["gen"])), 
     # DCNetwork
     # =================================================================
     @testset "DCNetwork construction" begin
-        dc_net = DCNetwork(raw)
+        dc_net = DCNetwork(powerio_net)
         @test dc_net.n == length(bus_ids)
-        @test dc_net.m == length(raw["branch"])
+        @test dc_net.m == length(raw_for_powerdiff["branch"])
         # build_ref() filters inactive generators (158 total, 96 active)
         @test dc_net.k == length(dc_net.id_map.gen_ids)
         @test dc_net.k > 0
@@ -102,8 +122,8 @@ println("Branches: $(length(raw["branch"])), Generators: $(length(raw["gen"])), 
     # DC Power Flow
     # =================================================================
     @testset "DC power flow" begin
-        dc_net = DCNetwork(raw)
-        d = calc_demand_vector(raw)
+        dc_net = DCNetwork(powerio_net)
+        d = calc_demand_vector(powerio_net)
         @test length(d) == dc_net.n
         @test sum(d) > 0  # nonzero demand
 
@@ -127,7 +147,7 @@ println("Branches: $(length(raw["branch"])), Generators: $(length(raw["gen"])), 
     # =================================================================
     local dc_prob  # share across DC testsets
     @testset "DC OPF solve" begin
-        dc_prob = DCOPFProblem(raw)
+        dc_prob = DCOPFProblem(powerio_net)
         sol = solve!(dc_prob)
         @test sol.objective > 0
         @test all(isfinite, sol.pg)
@@ -165,18 +185,12 @@ println("Branches: $(length(raw["branch"])), Generators: $(length(raw["gen"])), 
     end
 
     # =================================================================
-    # ACNetwork (requires emptying dcline — PowerModels limitation)
+    # ACNetwork
     # =================================================================
-    raw_ac = deepcopy(raw)
-    if !isempty(raw_ac["dcline"])
-        println("  Emptying $(length(raw_ac["dcline"])) DC line(s) for AC compatibility")
-        empty!(raw_ac["dcline"])
-    end
-
     @testset "ACNetwork construction" begin
-        ac_net = ACNetwork(raw_ac)
+        ac_net = ACNetwork(powerio_net)
         @test ac_net.n == length(bus_ids)
-        @test ac_net.m == length(raw_ac["branch"])
+        @test ac_net.m == length(raw_for_powerdiff["branch"])
         @test ac_net.id_map.bus_ids == bus_ids
     end
 
@@ -184,9 +198,10 @@ println("Branches: $(length(raw["branch"])), Generators: $(length(raw["gen"])), 
     # AC Power Flow
     # =================================================================
     @testset "AC power flow" begin
-        pf_data = deepcopy(raw_ac)
+        pf_data = deepcopy(raw_for_powerdiff)
         PowerModels.compute_ac_pf!(pf_data)
-        state = ACPowerFlowState(pf_data)
+        ac_net = ACNetwork(powerio_net)
+        state = ACPowerFlowState(ac_net, _voltage_vector(pf_data, ac_net.id_map.bus_ids))
 
         @test all(isfinite, abs.(state.v))
         @test all(v -> 0.8 < abs(v) < 1.2, state.v)  # reasonable voltage magnitudes
@@ -207,7 +222,7 @@ println("Branches: $(length(raw["branch"])), Generators: $(length(raw["gen"])), 
     # AC OPF
     # =================================================================
     @testset "AC OPF" begin
-        ac_prob = ACOPFProblem(raw_ac)
+        ac_prob = ACOPFProblem(powerio_net)
         sol = solve!(ac_prob)
         @test sol.objective > 0
         @test all(isfinite, sol.vm)
@@ -234,9 +249,9 @@ println("Branches: $(length(raw["branch"])), Generators: $(length(raw["gen"])), 
     # Cross-validate: DC basic vs non-basic (SVD comparison)
     # =================================================================
     @testset "DC basic vs non-basic SVD match" begin
-        basic = PowerModels.make_basic_network(deepcopy(raw))
-        prob_nb = DCOPFProblem(raw)
-        prob_b = DCOPFProblem(basic)
+        basic = PowerModels.make_basic_network(deepcopy(raw_for_powerdiff))
+        prob_nb = DCOPFProblem(powerio_net)
+        prob_b = DCOPFProblem(PowerIO.from_powermodels(basic))
         sol_nb = solve!(prob_nb)
         sol_b = solve!(prob_b)
 

@@ -300,7 +300,7 @@ end
 Reject the removed dictionary API with a migration hint.
 """
 function DCOPFProblem(pm_data::Dict{String,<:Any}; kwargs...)
-    throw(ArgumentError("dictionary constructors were removed; parse a MATPOWER file with PowerDiff.parse_file"))
+    throw(ArgumentError("dictionary constructors were removed; parse a network file with PowerDiff.parse_file"))
 end
 
 DCOPFProblem(net::PowerIO.Network; kwargs...) = DCOPFProblem(_network_data(net); kwargs...)

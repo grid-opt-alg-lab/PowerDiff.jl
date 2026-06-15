@@ -3,10 +3,12 @@
 PowerIO is PowerDiff's parser and data layer. PowerDiff does not expose a parser
 backend switch.
 
-`PowerDiff.parse_file(path)` resolves the path, requires a MATPOWER `.m` file, and
-returns a `PowerIO.Network` via `PowerIO.parse_file`. `PowerDiff.parse_file(io)`
-reads the stream and calls `PowerIO.parse_str(text, "matpower")`. Pass the result to
-[`DCNetwork`](@ref) or [`ACNetwork`](@ref).
+`PowerDiff.parse_file(path)` resolves the path and returns a `PowerIO.Network` via
+`PowerIO.parse_file`. PowerIO infers path formats from extensions unless `from` is
+given. `PowerDiff.parse_file(io)` uses MATPOWER by default because streams have no
+extension; pass `from` for PSS/E RAW, PowerWorld AUX, PowerModels JSON, or Egret
+JSON. JSON streams are ambiguous, so use `from=:egret` or `from=:powermodels`.
+Pass the result to [`DCNetwork`](@ref) or [`ACNetwork`](@ref).
 
 The network constructors build directly from `PowerIO.to_powerdata(net)`, which
 already returns normalized data: per-unit scaling by `base_mva`, degree-to-radian

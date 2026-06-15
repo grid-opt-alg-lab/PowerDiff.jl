@@ -1,6 +1,6 @@
 # API Reference
 
-## MATPOWER Parser
+## Parser
 
 ```@docs
 parse_file

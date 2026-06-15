@@ -8,12 +8,19 @@ const SUITE = BenchmarkGroup()
 PM.silence()
 PowerDiff.silence()
 
+function _parse_benchmark_case(case_path)
+    if isdefined(PowerDiff, :parse_file)
+        return PowerDiff.parse_file(case_path)
+    end
+    return PM.make_basic_network(PM.parse_file(case_path))
+end
+
 function _load_benchmark_case()
     pm_dir = joinpath(dirname(pathof(PM)), "..", "test", "data", "matpower")
     for case_name in ("case30.m", "case24.m", "case14.m", "case9.m", "case5.m")
         case_path = joinpath(pm_dir, case_name)
         isfile(case_path) || continue
-        net_data = PowerDiff.parse_file(case_path)
+        net_data = _parse_benchmark_case(case_path)
         return case_name, case_path, net_data
     end
     error("No bundled PowerModels MATPOWER benchmark case found")
@@ -26,7 +33,7 @@ ac_prob = ACOPFProblem(deepcopy(net_data); silent=true)
 ac_sol = solve!(ac_prob)
 
 SUITE["parser"] = BenchmarkGroup()
-SUITE["parser"][case_name] = @benchmarkable PowerDiff.parse_file($case_path)
+SUITE["parser"][case_name] = @benchmarkable _parse_benchmark_case($case_path)
 
 SUITE["dc_opf"] = BenchmarkGroup()
 SUITE["dc_opf"]["kkt_jacobian"] = BenchmarkGroup()

@@ -6,7 +6,7 @@ mpc.version = '2';
 mpc.baseMVA = 100;
 mpc.bus = [1 2 50 10 1 -2 1 1.0 0 230 1 1.1 0.9; 2 1 0 0 0 0 1 1.0 0 230 1 1.1 0.9];
 mpc.gen = [1 80 0 100 -100 1 100 1 150 0; 2 20 0 50 -50 1 100 0 50 0];
-mpc.branch = [1 2 0.01 0.1 0.02 0 0 0 0 0 1 -360 360; 1 2 0.02 0.2 0.01 100 100 100 1 0 0 -30 30];
+mpc.branch = [1 2 0.01 0.1 0.02 0 0 0 0 0 0 -360 360; 1 2 0.02 0.2 0.01 100 100 100 1 0 1 -60 60];
 mpc.gencost = [2 0 0 3 0.01 2 3; 2 0 0 3 0.02 3 4];
 mpc.areas = [1 1];
 mpc.bus_name = ['one'; 'two'];
@@ -27,6 +27,8 @@ _inline_data() = PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(_INLI
         @test length(data.bus) == 2
         @test length(data.gen) == 1
         @test length(data.branch) == 1
+        @test data.gen[1].index == 1
+        @test data.branch[1].index == 2
         @test data.bus[1].bus_type == 3
         # Loads and shunts are aggregated into per-bus values.
         @test data.bus[1].pd == 0.5
@@ -52,7 +54,6 @@ _inline_data() = PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(_INLI
     end
 
     @testset "Rejected inputs" begin
-        @test_throws ArgumentError PowerDiff.parse_file("case.raw")
         @test_throws ArgumentError PowerDiff.parse_file("case.json")
         @test_throws ArgumentError PowerDiff.parse_file(IOBuffer(_INLINE_CASE); filetype="json")
         @test_throws ArgumentError PowerDiff.parse_file(IOBuffer(_INLINE_CASE); unsupported=true)

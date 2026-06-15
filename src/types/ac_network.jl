@@ -204,7 +204,7 @@ end
 Reject the removed dictionary API with a migration hint.
 """
 function ACNetwork(net::Dict{String,<:Any}; idx_slack::Union{Nothing,Int}=nothing)
-    throw(ArgumentError("dictionary constructors were removed; parse a MATPOWER file with PowerDiff.parse_file"))
+    throw(ArgumentError("dictionary constructors were removed; parse a network file with PowerDiff.parse_file"))
 end
 
 ACNetwork(net::PowerIO.Network; idx_slack::Union{Nothing,Int}=nothing) =
@@ -258,7 +258,7 @@ function ACNetwork(data::NamedTuple; idx_slack::Union{Nothing,Int}=nothing)
         # MATPOWER models line charging as a single symmetric susceptance with no
         # charging conductance, and `_network_data` already folded the two PowerIO
         # sides into `br_b`. Split it evenly and leave g_fr/g_to at zero (initialized
-        # above). Asymmetric b_fr != b_to or nonzero g_fr/g_to from a non-MATPOWER
+        # above). Asymmetric b_fr != b_to or nonzero g_fr/g_to from a non MATPOWER
         # source would be averaged/dropped here; thread the per-side values through
         # if that fidelity is ever needed.
         b_fr[l] = branch.br_b / 2
@@ -321,8 +321,11 @@ function ACNetwork(data::NamedTuple; idx_slack::Union{Nothing,Int}=nothing)
 
     ref_bus_keys = [id_map.bus_to_idx[id] for id in id_map.bus_ids if bus_tbl[id].bus_type == 3]
     if isempty(ref_bus_keys)
-        _SILENCE_WARNINGS[] || @warn "No reference bus (type 3) in the network; defaulting to the first bus as slack. Pass `idx_slack` to choose explicitly."
-        push!(ref_bus_keys, 1)
+        fallback_slack = isnothing(idx_slack) ? 1 : idx_slack
+        1 <= fallback_slack <= n_bus || throw(ArgumentError(
+            "idx_slack=$fallback_slack is not a valid bus index (1:$n_bus)"))
+        _SILENCE_WARNINGS[] || @warn "No reference bus (type 3) in the network; defaulting to bus $fallback_slack as slack. Pass `idx_slack` to choose explicitly."
+        push!(ref_bus_keys, fallback_slack)
     end
     isnothing(idx_slack) && (idx_slack = first(ref_bus_keys))
     vm_min = [bus_tbl[id].vmin for id in id_map.bus_ids]

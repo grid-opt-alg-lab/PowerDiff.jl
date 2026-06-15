@@ -7,13 +7,14 @@ This guide walks through the main workflows: DC power flow, DC OPF with LMP anal
 ```julia
 using PowerDiff
 
-# Parse a MATPOWER v2 case into a PowerIO.Network
+# Parse a supported PowerIO case into a PowerIO.Network
 net = parse_file("case14.m")
 ```
 
-PowerDiff intentionally accepts MATPOWER v2 `.m` input only. The former
-PowerModels dictionary constructors were removed; convert other formats to
-MATPOWER before constructing PowerDiff networks.
+PowerDiff reads files through PowerIO. `parse_file` supports MATPOWER `.m`,
+PSS/E `.raw`, PowerWorld `.aux`, PowerModels JSON, and Egret JSON. For streams,
+pass `from`; JSON streams need `from=:egret` or `from=:powermodels`. The former
+PowerModels dictionary constructors were removed.
 
 ## Interactive Exploration
 
