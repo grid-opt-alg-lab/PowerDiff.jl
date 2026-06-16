@@ -21,7 +21,7 @@ A Julia package for differentiable power system analysis. Compute sensitivities 
 
 ## Installation
 
-> Requires Julia 1.9 or later.
+> Requires Julia 1.10 or later.
 
 ```julia
 using Pkg
