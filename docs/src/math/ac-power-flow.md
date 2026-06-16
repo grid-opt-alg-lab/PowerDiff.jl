@@ -139,7 +139,15 @@ The conductance and susceptance columns share the same ``M`` and differ only in 
 \frac{\partial \theta_i}{\partial \beta} = \operatorname{Im}\!\left(\frac{\partial V_i}{\partial \beta} \cdot \frac{\bar V_i}{|V_i|^2}\right),
 ```
 
-gives the admittance sensitivities `calc_sensitivity(state, :vm, :g)`, `calc_sensitivity(state, :va, :b)`, and so on. Branch current and flow sensitivities to ``g`` and ``b`` follow by the same chain rule used in the Current Sensitivity and Branch Flow Sensitivity sections above, with ``\partial V / \partial \beta`` substituted for ``\partial V / \partial p_k``.
+gives the admittance sensitivities `calc_sensitivity(state, :vm, :g)`, `calc_sensitivity(state, :va, :b)`, and so on. Branch current and flow sensitivities to ``g`` and ``b`` carry a **direct** term in addition to this voltage chain rule, because the perturbed branch's own admittance enters its flow. For a shuntless branch ``I_\ell = (g_\ell + j b_\ell)(V_f - V_t)``,
+
+```math
+\frac{\partial I_\ell}{\partial \beta}
+  = \underbrace{\frac{\partial (g_\ell + j b_\ell)}{\partial \beta}\,(V_f - V_t)}_{\text{direct (branch } \ell)}
+  + \underbrace{(g_\ell + j b_\ell)\left(\frac{\partial V_f}{\partial \beta} - \frac{\partial V_t}{\partial \beta}\right)}_{\text{indirect (through the voltage change)}},
+```
+
+which mirrors the direct and indirect split of the DC switching sensitivity. The direct term is nonzero only when ``\beta`` is branch ``\ell``'s own ``g`` or ``b`` (then ``\partial (g_\ell + j b_\ell)/\partial g_\ell = 1`` or ``\partial (g_\ell + j b_\ell)/\partial b_\ell = j``); for every other branch only the voltage term remains. Power flow sensitivities follow from ``S_\ell = V_f \bar I_\ell`` by the product rule, and the implementation adds this direct contribution for `:im` and `:f` queries.
 
 In AC OPF the analogous topology parameter is the switching state ``\mathrm{sw}``, which scales the whole branch admittance primitive (``\partial Y / \partial \mathrm{sw}_e = (g_e + jb_e)\, a_e a_e^\top`` at unit tap). Its sensitivities come from implicitly differentiating the KKT system (see [AC Optimal Power Flow](@ref)).
 
