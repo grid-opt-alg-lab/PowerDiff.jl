@@ -18,7 +18,7 @@ f &= W A \theta & (\nu_{\text{flow}}) \\
 g_{\min} \leq g &\leq g_{\max} & (\rho_{\text{lb}}, \rho_{\text{ub}}) \\
 0 \leq \text{psh} &\leq d_+ & (\mu_{\text{lb}}, \mu_{\text{ub}}) \\
 \mathrm{sw} \circ \alpha_{\min} \leq \mathrm{sw} \circ A\theta &\leq \mathrm{sw} \circ \alpha_{\max} & (\gamma_{\text{lb}}, \gamma_{\text{ub}}) \\
-\theta_{\text{ref}} &= 0 & (\eta_{\text{ref}})
+\theta_{\text{refs}} &= 0 & (\eta_{\text{ref}})
 \end{aligned}
 ```
 
@@ -33,6 +33,13 @@ where:
 - ``d_+ = \max(d, 0)`` is the curtailable portion of signed net demand; negative net demand remains in power balance as an injection
 - ``\tau`` is a small regularization parameter for numerical conditioning
 - the angle difference limits are gated by ``\mathrm{sw}`` so an open branch (``\mathrm{sw}_e = 0``) imposes no limit; the factor cancels for a branch in service (``\mathrm{sw}_e = 1``)
+- ``\text{refs}`` contains one reference bus per energized island, including isolated buses. The choice is deterministic: the configured ``\text{ref_bus}`` is the reference for its island, and every other island uses its lowest sequential bus index
+
+The built OPF model stores one reference constraint for each entry of
+``\text{refs}``. Consequently, topology changes that can alter the energized
+island partition must rebuild the model: use [`update_switching!`](@ref) for
+switch changes, and rebuild the `DCOPFProblem` after direct susceptance edits
+that move a branch across zero.
 
 ## KKT System for Implicit Differentiation
 
@@ -52,13 +59,13 @@ The KKT variable vector ``z`` is structured as:
 z = [\theta, g, f, \text{psh}, \lambda_{\text{lb}}, \lambda_{\text{ub}}, \gamma_{\text{lb}}, \gamma_{\text{ub}}, \rho_{\text{lb}}, \rho_{\text{ub}}, \mu_{\text{lb}}, \mu_{\text{ub}}, \nu_{\text{bal}}, \nu_{\text{flow}}, \eta_{\text{ref}}]
 ```
 
-with total dimension ``5n + 6m + 3k + 1``.
+with total dimension ``5n + 6m + 3k + n_{\text{ref}}``.
 
 ### KKT Conditions
 
 The KKT residual ``K(z, p)`` consists of:
 
-1. **Stationarity w.r.t. ``\theta``**: ``B^\top \nu_{\text{bal}} + (WA)^\top \nu_{\text{flow}} + e_{\text{ref}} \eta_{\text{ref}} + A^\top \operatorname{diag}(\mathrm{sw}) (\gamma_{\text{ub}} - \gamma_{\text{lb}}) = 0``
+1. **Stationarity w.r.t. ``\theta``**: ``B^\top \nu_{\text{bal}} + (WA)^\top \nu_{\text{flow}} + E_{\text{ref}} \eta_{\text{ref}} + A^\top \operatorname{diag}(\mathrm{sw}) (\gamma_{\text{ub}} - \gamma_{\text{lb}}) = 0``, where ``E_{\text{ref}} \in \mathbb{R}^{n \times n_{\text{ref}}}`` selects the per-island reference buses
 2. **Stationarity w.r.t. ``g``**: ``2 C_q g + c_l - G_{\text{inc}}^\top \nu_{\text{bal}} - \rho_{\text{lb}} + \rho_{\text{ub}} = 0``
 3. **Stationarity w.r.t. ``f``**: ``\tau^2 f - \nu_{\text{flow}} - \lambda_{\text{lb}} + \lambda_{\text{ub}} = 0``
 4. **Stationarity w.r.t. psh**: ``c_{\text{shed}} - \nu_{\text{bal}} - \mu_{\text{lb}} + \mu_{\text{ub}} = 0``
@@ -67,7 +74,7 @@ The KKT residual ``K(z, p)`` consists of:
 5c. **Complementary slackness (generation/shedding bounds)**: ``\rho \circ (\cdot) = 0``, ``\mu \circ (\cdot) = 0``
 6. **Primal feasibility**: ``G_{\text{inc}} g + \text{psh} - d - B\theta = 0``
 7. **Flow definition**: ``f - WA\theta = 0``
-8. **Reference bus**: ``\theta_{\text{ref}} = 0``
+8. **Reference buses**: ``\theta_{\text{refs}} = 0``
 
 ### Analytical Sparse KKT Jacobian
 
@@ -79,7 +86,7 @@ For each parameter type, we compute ``\partial K / \partial p`` and then the ful
 
 ### Demand (``d``)
 
-Demand enters the power balance and the load shed upper bound constraints through the clipped demand
+Demand enters the power balance and the load shedding upper bound through
 ``d_+ = \max(d, 0)``:
 
 ```math
@@ -89,7 +96,7 @@ Demand enters the power balance and the load shed upper bound constraints throug
 ```
 
 For strictly positive demand, ``\partial d_+ / \partial d = 1``. For negative
-demand, it is ``0``. At zero demand, the clipping function is non-smooth;
+demand, it is ``0``. At zero demand, the positive part function is nonsmooth;
 the implementation uses the fixed zero shedding convention already required by
 the collapsed bound ``0 \leq \text{psh} \leq 0``.
 
@@ -126,6 +133,10 @@ where ``a_e^\top`` is row ``e`` of ``A`` (so ``a_e^\top \theta = (A\theta)_e``) 
 
 Each block is rank-1 in the incidence row ``a_e`` or supported on branch ``e`` alone, so every column of ``\partial K / \partial \mathrm{sw}`` has only a handful of nonzeros. The stationarity block combines the Laplacian term (``\partial B / \partial \mathrm{sw}_e``), the flow coupling term (``\partial W / \partial \mathrm{sw}_e``), and the gated angle limit term (``\partial \operatorname{diag}(\mathrm{sw}) / \partial \mathrm{sw}_e = e_e e_e^\top``).
 
+Sensitivities are defined while the energized island partition is fixed. Opening
+or closing a bridge splits or merges islands and changes the reference set, so
+the derivative is nonsmooth at that topology boundary.
+
 ### Cost Coefficients (``c_q``, ``c_l``)
 
 Quadratic cost ``c_q`` enters stationarity w.r.t. ``g``:
@@ -155,13 +166,13 @@ Susceptances affect the same blocks as switching (through ``B`` and ``W``), but 
 Locational marginal prices are the power balance duals ``\nu_{\text{bal}}``, decomposed as:
 
 ```math
-\text{LMP} = \underbrace{\text{energy}}_{\text{uniform component}} + \underbrace{\text{congestion}}_{\text{flow-limit component}}
+\text{LMP} = \underbrace{\text{energy}}_{\text{per island uniform component}} + \underbrace{\text{congestion}}_{\text{flow limit component}}
 ```
 
 The congestion component is extracted by solving:
 
 ```math
-\text{congestion}[\text{non-ref}] = B_r^{-1} \left(A_r^\top W (\lambda_{\text{ub}}^{\text{std}} - \lambda_{\text{lb}}^{\text{std}}) + A_r^\top (\gamma_{\text{ub}}^{\text{std}} - \gamma_{\text{lb}}^{\text{std}})\right)
+\text{congestion}[\text{non-ref}] = B_r^{-1} \left(A_r^\top W (\lambda_{\text{ub}}^{\text{std}} - \lambda_{\text{lb}}^{\text{std}}) + A_r^\top \operatorname{diag}(\mathrm{sw}) (\gamma_{\text{ub}}^{\text{std}} - \gamma_{\text{lb}}^{\text{std}})\right)
 ```
 
-where ``\lambda^{\text{std}}``, ``\gamma^{\text{std}}`` use the standard sign convention (non-negative for binding constraints). The ``\gamma`` terms capture congestion from binding phase angle difference limits. The energy component is uniform across all buses in a connected network and reflects the marginal cost of generation.
+where ``\lambda^{\text{std}}``, ``\gamma^{\text{std}}`` use the standard sign convention (non-negative for binding constraints). The ``\gamma`` terms capture congestion from binding phase angle difference limits. The energy component is uniform within each energized island and reflects that island's marginal cost of generation.

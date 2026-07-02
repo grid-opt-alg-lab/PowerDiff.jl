@@ -12,14 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# =============================================================================
-# Joint APF + PD Workflow: N-1 Screening + Sensitivity Analysis
-# =============================================================================
-#
-# This example demonstrates using AcceleratedDCPowerFlows (APF) for fast
-# contingency screening and PowerDiff (PD) for gradient-based
-# economic sensitivity analysis. APF handles the speed-critical forward
-# computation; PD provides the differentiable optimization layer.
+# This experiment depends on the unregistered AcceleratedDCPowerFlows.jl.
+# Install it in a local environment before running:
+#   import Pkg; Pkg.add(url="https://github.com/mtanneau/AcceleratedDCPowerFlows.jl.git")
 
 using PowerModels
 using AcceleratedDCPowerFlows
@@ -30,38 +25,41 @@ const APF = AcceleratedDCPowerFlows
 
 PM.silence()
 
+function materialize_apf_ptdf(phi)
+    ptdf = zeros(phi.E, phi.N)
+    injection = zeros(phi.N)
+    for i in 1:phi.N
+        injection[i] = 1.0
+        APF.compute_flow!(@view(ptdf[:, i]), injection, phi)
+        injection[i] = 0.0
+    end
+    return ptdf
+end
+
 # --- Load network ---
 case_path = joinpath(dirname(pathof(PM)), "..", "test", "data", "matpower", "case14.m")
 pm_data = PM.parse_file(case_path)
 PM.make_basic_network!(pm_data)
 
-# Tighten flow limits to create congestion — case14's default limits are very
-# loose, so N-1 screening finds zero critical contingencies.  Scaling by 0.2
-# makes several post-contingency flows exceed 80% loading.
+# Tighten flow limits so N-1 screening finds congested contingencies on case14.
 for (_, br) in pm_data["branch"]
     br["rate_a"] *= 0.2
 end
 
-println("=== Joint APF + PD Workflow on case14 ===\n")
+println("=== Joint APF + PowerDiff Workflow on case14 ===\n")
 
-# --- Step 1: APF for fast N-1 contingency screening ---
-# Use APF.from_power_models (not PD's to_apf_network) because APF's converter
-# preserves load/gen data in bus.pd, which is needed for compute_flow!.
-# PD's to_apf_network zeros demand since PD separates demand from topology.
+# --- Step 1: APF for N-1 contingency screening ---
 apf_net = APF.from_power_models(pm_data)
 N = APF.num_buses(apf_net)
 E = APF.num_branches(apf_net)
 
-# Build LODF for O(1) per-contingency flow computation
 L = APF.full_lodf(apf_net)
 
-# Pre-contingency flows via PTDF
-Φ = APF.full_ptdf(apf_net)
-p = [bus.pd for bus in apf_net.buses]  # net injections (load - gen)
+phi = APF.full_ptdf(apf_net)
+p = [bus.pd for bus in apf_net.buses]
 pf0 = zeros(E)
-APF.compute_flow!(pf0, p, Φ)
+APF.compute_flow!(pf0, p, phi)
 
-# Screen all N-1 contingencies
 println("Step 1: N-1 contingency screening via APF LODF")
 pfc = zeros(E)
 critical = Int[]
@@ -76,11 +74,11 @@ for e in 1:E
 end
 println("  Found $(length(critical)) critical contingencies (>80% loading)")
 for e in critical
-    println("    Branch $e: $(apf_net.branches[e].bus_fr) → $(apf_net.branches[e].bus_to)")
+    println("    Branch $e: $(apf_net.branches[e].bus_fr) -> $(apf_net.branches[e].bus_to)")
 end
 
-# --- Step 2: PD for economic sensitivity ---
-println("\nStep 2: DC OPF + sensitivity analysis via PD")
+# --- Step 2: PowerDiff for economic sensitivity ---
+println("\nStep 2: DC OPF and sensitivity analysis via PowerDiff")
 typed_data = parse_file(case_path)
 dc_net = DCNetwork(typed_data)
 dc_net.fmax .*= 0.2
@@ -88,31 +86,31 @@ d = calc_demand_vector(typed_data)
 prob = DCOPFProblem(dc_net, d)
 PowerDiff.solve!(prob)
 
-# LMP sensitivity w.r.t. switching
 dlmp_dsw = calc_sensitivity(prob, :lmp, :sw)
 
 println("\n  LMP impact of critical contingencies:")
 for e in critical
     lmp_grad = dlmp_dsw[:, e]
     max_impact_bus = argmax(abs.(lmp_grad))
-    println("    Branch $e outage → max LMP impact = $(round(lmp_grad[max_impact_bus], sigdigits=3)) at bus $max_impact_bus")
+    println("    Branch $e outage -> max LMP impact = $(round(lmp_grad[max_impact_bus], sigdigits=3)) at bus $max_impact_bus")
 end
 
-# --- Step 3: Cross-validate PTDF ---
-println("\nStep 3: PTDF cross-validation")
+# --- Step 3: Cross-check PTDF matrices ---
+println("\nStep 3: PTDF cross-check")
 pf_state = DCPowerFlowState(dc_net, d)
-result = compare_ptdf(pf_state)
-println("  PD ↔ APF PTDF match: $(result.match) (max error: $(round(result.maxerr, sigdigits=3)))")
+pd_ptdf = ptdf_matrix(pf_state)
+apf_ptdf = materialize_apf_ptdf(phi)
+maxerr = maximum(abs, pd_ptdf - apf_ptdf)
+println("  PowerDiff <-> APF PTDF max error: $(round(maxerr, sigdigits=3))")
 
-# Note: LMP and generation sensitivities on case14 are small (~1e-5 to 1e-9)
-# because 4/5 generators sit at their upper bounds, creating KKT degeneracy.
-# A network with more interior generators would show larger, more meaningful values.
+# LMP and generation sensitivities on case14 are small because most generators
+# sit at their upper bounds, which creates KKT degeneracy.
 
 # --- Step 4: Generation sensitivity for topology optimization ---
 println("\nStep 4: Generation sensitivity for topology optimization")
 dpg_dsw = calc_sensitivity(prob, :pg, :sw)
-println("  ∂pg/∂sw matrix size: $(size(dpg_dsw))")
-println("  Most sensitive generator-branch pair:")
+println("  dpg/dsw matrix size: $(size(dpg_dsw))")
+println("  Most sensitive generator branch pair:")
 dpg_mat = Matrix(dpg_dsw)
 idx = argmax(abs.(dpg_mat))
 println("    Generator $(idx[1]), Branch $(idx[2]): $(round(dpg_mat[idx], sigdigits=3))")

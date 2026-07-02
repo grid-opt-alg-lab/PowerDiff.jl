@@ -4,16 +4,17 @@
 
 For non-OPF power flow with fixed generation, the DC approximation linearizes
 the power flow equations using the susceptance-weighted Laplacian. The voltage
-angles satisfy the reduced system obtained by eliminating the reference (slack) bus:
+angles satisfy the reduced system obtained by eliminating one reference bus per
+energized island:
 
 ```math
 \theta_r = B_r^{-1} \, p_r
 ```
 
 where:
-- ``B_r`` is the susceptance-weighted Laplacian with the reference bus row and column deleted (invertible for a connected network)
-- ``p_r = g_r - d_r`` is the net injection vector with the reference entry removed
-- ``\theta_{\text{ref}} = 0`` by convention
+- ``B_r`` is the susceptance-weighted Laplacian with one reference row and column deleted per energized island, including isolated buses
+- ``p_r = g_r - d_r`` is the net injection vector with the reference entries removed
+- ``\theta_{\text{refs}} = 0`` by convention
 
 The susceptance-weighted Laplacian is:
 
@@ -22,6 +23,12 @@ B = A^\top \operatorname{diag}(-b \circ \mathrm{sw}) \, A
 ```
 
 where ``A`` is the ``m \times n`` incidence matrix (row ``e``, written ``a_e^\top``, has ``+1`` at branch ``e``'s from-bus and ``-1`` at its to-bus, so ``a_e^\top \theta = (A\theta)_e`` is the angle difference across the branch), and ``b`` stores the imaginary part of the inverse impedance (``b_e = \operatorname{Im}(1/z_e) < 0`` for inductive branches, so ``-b > 0``).
+
+`DCNetwork` caches the energized island partition used to choose reference
+buses. Constructors initialize this cache, and topology dependent readers
+refresh it if direct `b` or `sw` edits change which branches are energized. The
+cache assumes serialized topology mutation: a shared `DCNetwork` may be read
+from multiple threads only while its topology fields are not being mutated.
 
 ## Switching Sensitivity
 
@@ -37,6 +44,11 @@ where the perturbation is a rank-1 update from row ``a_e^\top`` of branch ``e`` 
 ```math
 \frac{\partial B_r}{\partial \mathrm{sw}_e} = -b_e \, a_{e,r} \, a_{e,r}^\top
 ```
+
+These derivatives apply while the energized island partition is fixed. Toggling
+a bridge (a branch whose energization changes the island partition) adds or
+removes a reference bus and changes the dimension of the reduced system ``B_r``,
+so sensitivities are nonsmooth at that split or merge boundary.
 
 ### Flow Sensitivity to Switching
 
@@ -59,7 +71,7 @@ Substituting the angle sensitivity ``\partial \theta / \partial \mathrm{sw}_e`` 
   = b_e \,(a_{e,r}^\top \theta_r)\, B_r^{-1} a_{e,r}
 ```
 
-(embedded into the full bus vector with the reference entry held at zero) which makes the flow sensitivity fully explicit:
+(embedded into the full bus vector with the reference entries held at zero) which makes the flow sensitivity fully explicit:
 
 ```math
 \frac{\partial f}{\partial \mathrm{sw}_e}
@@ -69,7 +81,7 @@ Substituting the angle sensitivity ``\partial \theta / \partial \mathrm{sw}_e`` 
   \Big)
 ```
 
-where ``A_r`` is the incidence matrix with its reference bus column removed (so ``A \,\partial\theta/\partial \mathrm{sw}_e = A_r \,\partial\theta_r/\partial \mathrm{sw}_e``), and we used ``a_{e,r}^\top \theta_r = a_e^\top \theta`` since ``\theta_{\text{ref}} = 0``. The shared scalar ``b_e \,(a_e^\top \theta) = b_e \,(A\theta)_e`` is exactly the negative of branch ``e``'s flow when it is in service (``f_e = -b_e (A\theta)_e`` at ``\mathrm{sw}_e = 1``), so the whole flow sensitivity scales with how heavily branch ``e`` is loaded.
+where ``A_r`` is the incidence matrix with its reference bus columns removed (so ``A \,\partial\theta/\partial \mathrm{sw}_e = A_r \,\partial\theta_r/\partial \mathrm{sw}_e``), and we used ``a_{e,r}^\top \theta_r = a_e^\top \theta`` since ``\theta_{\text{refs}} = 0``. The shared scalar ``b_e \,(a_e^\top \theta) = b_e \,(A\theta)_e`` is exactly the negative of branch ``e``'s flow when it is in service (``f_e = -b_e (A\theta)_e`` at ``\mathrm{sw}_e = 1``), so the whole flow sensitivity scales with how heavily branch ``e`` is loaded.
 
 ## Demand Sensitivity
 
@@ -79,7 +91,7 @@ Since ``p = g - d`` and generation is fixed, ``\partial p / \partial d = -I``. T
 \frac{\partial \theta}{\partial d} = -B_r^{-1}
 ```
 
-embedded in the non-reference block (with zero rows/columns for the reference bus). The flow sensitivity follows as:
+embedded in the non-reference block (with zero rows/columns for the reference buses). The flow sensitivity follows as:
 
 ```math
 \frac{\partial f}{\partial d} = W A \frac{\partial \theta}{\partial d}

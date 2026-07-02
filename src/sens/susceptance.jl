@@ -37,9 +37,10 @@ Susceptance b affects:
 - Weight matrix: W = Diag(-b .* sw)
 - Flow definition: f = W * A * theta
 
-The affected KKT conditions are:
-- K_theta = B' * nu_bal + (WA)' * nu_flow + e_ref * eta_ref + A'*(gamma_ub - gamma_lb)
-  (gamma term has no b-dependence, so ∂K_theta/∂b only comes from B and WA terms)
+The affected KKT conditions are (E_ref is the n × n_ref selection matrix for the
+per-island reference buses, so E_ref * eta_ref is a length-n vector):
+- K_theta = B' * nu_bal + (WA)' * nu_flow + E_ref * eta_ref + A' * Diag(sw) * (gamma_ub - gamma_lb)
+  (the eta_ref and gamma terms have no b-dependence, so ∂K_theta/∂b only comes from B and WA terms)
 - K_power_bal = G_inc * g + psh - d - B * theta
 - K_flow_def = f - W * A * theta
 
@@ -50,8 +51,7 @@ Derivatives:
 function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
-    dim = kkt_dims(net)
-    idx = kkt_indices(n, m, k)
+    dim, idx = _dc_kkt_layout(prob)
 
     theta = sol.va
     nu_bal = sol.nu_bal
@@ -91,8 +91,8 @@ Compute column `e` of ∂K/∂b. ~6 nonzeros from the incidence structure of bra
 """
 function calc_kkt_jacobian_susceptance_column(prob::DCOPFProblem, sol::DCOPFSolution, e::Int)
     net = prob.network
-    col = zeros(kkt_dims(net))
-    idx = kkt_indices(net)
+    dim, idx = _dc_kkt_layout(prob)
+    col = zeros(dim)
     A = net.A; sw = net.sw; θ = sol.va
     Aθ_e = dot(A[e, :], θ)
     f_bus, t_bus = _branch_bus_indices(A, e)

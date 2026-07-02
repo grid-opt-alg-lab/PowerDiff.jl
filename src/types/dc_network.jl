@@ -20,6 +20,31 @@
 # Laplacian B = A' * Diag(-b .* sw) * A.
 
 """
+Internal cache for the energized DC topology. The incidence matrix structure is
+fixed after construction, while `b` and `sw` may change in place.
+
+The cache is prewarmed by constructors and refreshed by topology readers when
+`b` or `sw` changes. It is not a synchronization primitive: callers sharing a
+`DCNetwork` across threads must treat topology fields as read only, or serialize
+mutations and the first topology read after each mutation.
+"""
+mutable struct _DCTopologyCache
+    # Branch endpoints as sequential bus indices, cached from the incidence matrix:
+    # from_bus[e]/to_bus[e] are the columns of the +1/-1 entries in row `e` of `A`.
+    # This is the same information `A` already encodes; it is materialized as dense
+    # Int vectors (once, since `A`'s structure is fixed) so the connectivity refresh
+    # can read each branch's endpoints in O(1) instead of rescanning sparse rows.
+    from_bus::Vector{Int}
+    to_bus::Vector{Int}
+    energized::BitVector    # energized[e] == (b[e] * sw[e] != 0)
+    refs::Vector{Int}       # one reference bus per energized island (sorted)
+    non_ref::Vector{Int}    # all buses except `refs`
+    initialized::Bool
+end
+
+_DCTopologyCache() = _DCTopologyCache(Int[], Int[], BitVector(), Int[], Int[], false)
+
+"""
     DCNetwork <: AbstractPowerNetwork
 
 DC network data for B-theta OPF formulation. Uses susceptance-weighted Laplacian
@@ -35,12 +60,15 @@ topology sensitivity analysis.
 - `fmax`, `gmax`, `gmin`: Flow and generation limits
 - `angmax`, `angmin`: Phase angle difference limits
 - `cq`, `cl`: Quadratic and linear generation cost coefficients
-- `c_shed`: Load-shedding cost per bus (penalty for involuntary load curtailment)
-- `ref_bus`: Reference bus index (phase angle = 0)
+- `c_shed`: Load shedding cost per bus (penalty for involuntary load curtailment)
+- `ref_bus`: Preferred reference bus index (phase angle = 0)
 - `tau`: Regularization parameter for strong convexity
 - `id_map`: Bidirectional mapping between original and sequential element IDs
 - `demand`: Real power demand aggregated per bus
 - `pg_init`: Initial real generation aggregated per bus
+- `topology_cache`: Internal energized island cache. This cache is mutable even
+  though `DCNetwork` is an immutable struct; concurrent direct mutations of
+  `b`/`sw` are unsupported.
 """
 struct DCNetwork <: AbstractPowerNetwork
     n::Int
@@ -63,6 +91,7 @@ struct DCNetwork <: AbstractPowerNetwork
     ref_bus::Int
     tau::Float64
     id_map::IDMapping
+    topology_cache::_DCTopologyCache
 end
 
 # =============================================================================
@@ -85,7 +114,7 @@ Solution container for DC OPF problem, storing both primal and dual variables.
 - `rho_ub`, `rho_lb`: Generator upper/lower bound duals
 - `mu_lb`, `mu_ub`: Load shedding lower/upper bound duals
 - `gamma_lb`, `gamma_ub`: Phase angle difference lower/upper bound duals
-- `eta_ref`: Reference bus constraint dual (`va[ref_bus] == 0`)
+- `eta_ref`: Reference bus constraint duals (`va[reference_buses(net)] == 0`)
 - `objective`: Optimal objective value
 - `B_r_factor`: Cached factorization of reduced susceptance matrix `B[non_ref, non_ref]`
 """
@@ -104,7 +133,7 @@ struct DCOPFSolution{F<:Factorization{Float64}} <: AbstractOPFSolution
     mu_ub::Vector{Float64}
     gamma_lb::Vector{Float64}
     gamma_ub::Vector{Float64}
-    eta_ref::Float64
+    eta_ref::Vector{Float64}
     objective::Float64
     B_r_factor::F
 end
@@ -116,19 +145,19 @@ DC power flow solution (phase angles from reduced-Laplacian solve, no optimizati
 Supports both generation and demand for flexible sensitivity analysis.
 
 Unlike DCOPFSolution, this represents a simple power flow solution
-`θ_r = B_r \\ p_r` where `B_r` is the susceptance matrix with the reference bus row and
-column deleted (invertible for a connected network), without optimal dispatch or
+`θ_r = B_r \\ p_r` where `B_r` is the susceptance matrix with one reference row and
+column deleted per energized island, without optimal dispatch or
 constraint handling.
 
 # Fields
 - `net`: DCNetwork data
-- `va`: Phase angles (rad), with `va[ref_bus] = 0`
+- `va`: Phase angles (rad), with `va[reference_buses(net)] = 0`
 - `p`: Net injection vector (p = pg - d)
 - `pg`: Generation vector
 - `d`: Demand vector
 - `f`: Branch flows (computed from va)
 - `B_r_factor`: Factorization of `B[non_ref, non_ref]` (Cholesky for inductive networks, LU fallback)
-- `non_ref`: Indices of non-reference buses
+- `non_ref`: Indices excluding one reference bus per energized island
 """
 struct DCPowerFlowState{F<:Factorization{Float64}} <: AbstractPowerFlowState
     net::DCNetwork
@@ -164,7 +193,7 @@ const DEFAULT_SHED_COST_MULTIPLIER = 10
 # the network tables the DCNetwork and ACNetwork constructors consume. The only
 # logic beyond re-keying to source bus ids is the OPF solver modeling PowerIO leaves
 # to the consumer: polynomial cost interpretation, finite flow limits, default
-# angle-difference bounds, and rejection of records PowerDiff does not model.
+# angle difference bounds, and rejection of records PowerDiff does not model.
 
 """
     parse_file(path::String; library=nothing, from=nothing, filetype=nothing) -> PowerIO.Network
@@ -274,7 +303,7 @@ load/shunt aggregation, reference-bus inference (`type == 3`), source bus ids on
 This adapter keys bus references back to source bus ids (so [`IDMapping`](@ref)'s
 sorted ordering is preserved) and applies the OPF modeling PowerIO leaves to the
 consumer: polynomial cost interpretation (rejecting PWL and higher-than-quadratic),
-a finite flow-limit fallback when `rate_a == 0`, default angle-difference bounds,
+a finite flow limit fallback when `rate_a == 0`, default angle difference bounds,
 and rejection of storage / HVDC records that PowerDiff does not model.
 
 The returned `bus`/`gen`/`branch` rows mirror the field names the network
@@ -404,7 +433,7 @@ function _fallback_rate_a(r::Float64, x::Float64, angmin::Float64, angmax::Float
     return ymag * max(fr_vmax, to_vmax) * cmax
 end
 
-# Default angle-difference bounds (radians in, radians out). MATPOWER angmin == angmax
+# Default angle difference bounds (radians in, radians out). MATPOWER angmin == angmax
 # == 0 means unbounded; treat ±90° or wider and the zero case as a ±60° window, the
 # MATPOWER/PowerModels convention. PowerIO's `to_powerdata` already converts to radians.
 function _normalize_angle_bounds(angmin::Float64, angmax::Float64)
@@ -508,7 +537,7 @@ function DCNetwork(data::NamedTuple; tau::Float64=DEFAULT_TAU, ref_bus::Union{No
     demand = calc_demand_vector(data, id_map)
     pg_init = _calc_generation_vector(data, id_map)
 
-    # Load-shedding cost: high penalty to discourage shedding when feasible.
+    # Load shedding cost: high penalty to discourage shedding when feasible.
     # Guard the reduction so a generator-free network (valid for pure DC power flow
     # built via the NamedTuple constructor) falls back to a unit marginal cost
     # instead of `maximum` throwing on an empty collection.
@@ -535,8 +564,11 @@ function DCNetwork(data::NamedTuple; tau::Float64=DEFAULT_TAU, ref_bus::Union{No
         end
     end
 
-    return DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, angmax, angmin,
-                     cq, cl, c_shed, demand, pg_init, ref_bus, tau, id_map)
+    net = DCNetwork(n, m, k, A, G_inc, b, sw, fmax, gmax, gmin, angmax, angmin,
+                    cq, cl, c_shed, demand, pg_init, ref_bus, tau, id_map,
+                    _DCTopologyCache())
+    _refresh_topology_cache!(net)
+    return net
 end
 
 """
@@ -566,7 +598,7 @@ function DCNetwork(
     length(demand) == n || throw(DimensionMismatch("demand length $(length(demand)) must match number of buses $n"))
     length(pg_init) == n || throw(DimensionMismatch("pg_init length $(length(pg_init)) must match number of buses $n"))
     all(c_shed .> 0) || throw(ArgumentError("c_shed must be strictly positive at all buses"))
-    return DCNetwork(
+    net = DCNetwork(
         n, m, k,
         sparse(Float64.(A)), sparse(Float64.(G_inc)),
         Float64.(b), Float64.(sw),
@@ -576,8 +608,11 @@ function DCNetwork(
         Float64.(c_shed),
         Float64.(demand), Float64.(pg_init),
         ref_bus, tau,
-        IDMapping(n, m, k)
+        IDMapping(n, m, k),
+        _DCTopologyCache()
     )
+    _refresh_topology_cache!(net)
+    return net
 end
 
 # =============================================================================
@@ -624,24 +659,140 @@ function calc_susceptance_matrix(network::DCNetwork)
     return sparse(network.A' * W * network.A)
 end
 
+@inline _is_energized(net::DCNetwork, e::Int) =
+    !iszero(getfield(net, :b)[e] * getfield(net, :sw)[e])
+
+function _topology_cache_valid(net::DCNetwork)
+    cache = getfield(net, :topology_cache)
+    cache.initialized || return false
+    energized = cache.energized
+    m = getfield(net, :m)
+    length(energized) == m || return false
+    @inbounds for e in 1:m
+        energized[e] == _is_energized(net, e) || return false
+    end
+    return true
+end
+
+# Recompute the energized-island partition and its reference buses.
+#
+# Energized branches (b[e]*sw[e] != 0) define the connectivity graph; buses joined
+# by them form one island. We run union-find over those branches, then pick one
+# reference bus per island: the lowest bus index in each, except the configured
+# `ref_bus`, which is forced to be the reference for its own island. Buses with no
+# energized branch are singleton islands that reference themselves.
+function _refresh_topology_cache!(net::DCNetwork)
+    cache = net.topology_cache
+
+    # Union-find over buses. `parent[i]` points toward i's component root; a bus is
+    # its own parent until merged. find_root uses path halving, union_roots! keeps
+    # the lower index as root so the partition (and thus refs) is deterministic.
+    parent = collect(1:net.n)
+
+    function find_root(i::Int)
+        while parent[i] != i
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        end
+        return i
+    end
+
+    function union_roots!(i::Int, j::Int)
+        root_i = find_root(i)
+        root_j = find_root(j)
+        root_i == root_j && return nothing
+        if root_i < root_j
+            parent[root_j] = root_i
+        else
+            parent[root_i] = root_j
+        end
+        return nothing
+    end
+
+    # Cache the branch endpoints from `A` once. `A`'s structure is fixed after
+    # construction, so this only runs the first time (or if `m` somehow changed).
+    if length(cache.from_bus) != net.m
+        cache.from_bus = zeros(Int, net.m)
+        cache.to_bus = zeros(Int, net.m)
+        rows, cols, nz_values = findnz(net.A)
+        @inbounds for p in eachindex(rows)
+            if nz_values[p] > 0
+                cache.from_bus[rows[p]] = cols[p]   # +1 entry -> from bus
+            else
+                cache.to_bus[rows[p]] = cols[p]     # -1 entry -> to bus
+            end
+        end
+    end
+
+    # Recompute the energized flags (these track `b`/`sw`) and union the endpoints
+    # of every energized branch so each island collapses to a single root.
+    resize!(cache.energized, net.m)
+    @inbounds for e in 1:net.m
+        cache.energized[e] = _is_energized(net, e)
+        cache.energized[e] || continue
+        cache.from_bus[e] > 0 && cache.to_bus[e] > 0 ||
+            error("Incidence matrix row $e must have exactly two nonzero entries")
+        union_roots!(cache.from_bus[e], cache.to_bus[e])
+    end
+
+    # One reference per island: start with the lowest bus index in each component...
+    refs_by_root = Dict{Int,Int}()
+    @inbounds for bus in 1:net.n
+        root = find_root(bus)
+        refs_by_root[root] = min(get(refs_by_root, root, bus), bus)
+    end
+    # ...then force the configured ref_bus to be the reference for its island.
+    refs_by_root[find_root(net.ref_bus)] = net.ref_bus
+    cache.refs = sort!(collect(values(refs_by_root)))
+    cache.non_ref = setdiff(1:net.n, cache.refs)
+    cache.initialized = true
+    return cache
+end
+
+function _topology_cache(net::DCNetwork)
+    # Refresh mutates `net.topology_cache`. Constructors prewarm this cache, so
+    # normal read only sharing across threads does not first touch it. If callers
+    # mutate `b` or `sw` directly, they must serialize that mutation and the next
+    # topology read; the exposed vectors themselves are not thread safe.
+    _topology_cache_valid(net) || _refresh_topology_cache!(net)
+    return getfield(net, :topology_cache)
+end
+
+_reference_buses(net::DCNetwork) = _topology_cache(net).refs
+
+"""
+    reference_buses(net::DCNetwork) → Vector{Int}
+
+Return one deterministic reference bus for each energized island.
+
+The configured `net.ref_bus` is preserved for its island. Every other island,
+including an isolated bus, uses its lowest sequential bus index. A branch is
+energized when `b[e] * sw[e] != 0`.
+"""
+reference_buses(net::DCNetwork) = copy(_reference_buses(net))
+
+"""Return bus indices after removing one reference bus per energized island."""
+_non_reference_buses(net::DCNetwork) = copy(_topology_cache(net).non_ref)
+
 """
     _factorize_B_r(net::DCNetwork) → (factor, non_ref)
 
 Factorize the reduced susceptance matrix `B[non_ref, non_ref]`.
 
 Uses Cholesky for standard inductive networks (~2x faster), with LU fallback
-for edge cases (capacitive branches or disconnected networks) where B_r is not
-positive definite. Follows the approach of AcceleratedDCPowerFlows.jl.
+for edge cases such as capacitive branches where B_r is not positive definite.
+One reference row and column is removed per energized island, so disconnected
+networks and isolated buses remain well-defined.
 """
 function _factorize_B_r(net::DCNetwork)
     B = calc_susceptance_matrix(net)
-    non_ref = setdiff(1:net.n, net.ref_bus)
+    non_ref = _non_reference_buses(net)
     B_r = B[non_ref, non_ref]
     factor = try
         cholesky(Symmetric(B_r))
     catch e
         e isa PosDefException || rethrow()
-        _SILENCE_WARNINGS[] || @warn "Reduced susceptance matrix B_r is not positive definite (e.g., capacitive branches or disconnected subnetwork); falling back to LU factorization. Results remain correct."
+        _SILENCE_WARNINGS[] || @warn "Reduced susceptance matrix B_r is not positive definite (e.g., capacitive branches); falling back to LU factorization. Results remain correct."
         lu(B_r)
     end
     return factor, non_ref
@@ -670,9 +821,9 @@ Solve DC power flow for given generation and demand.
 
 Computes phase angles θ by solving the reduced system:
     B_r * θ_r = p_r
-where B_r is the susceptance-weighted Laplacian with the reference bus row and
-column deleted (invertible for a connected network), and p_r is the net injection
-with the reference entry removed. The reference bus angle is zero by construction.
+where B_r is the susceptance-weighted Laplacian with one reference bus row and
+column deleted per energized island, and p_r is the net injection with those
+reference entries removed. Reference bus angles are zero by construction.
 
 # Arguments
 - `net`: DCNetwork containing topology and parameters
@@ -701,7 +852,7 @@ function DCPowerFlowState(net::DCNetwork, g::AbstractVector{<:Real}, d::Abstract
     # Factorize reduced susceptance matrix (Cholesky with LU fallback)
     F, non_ref = _factorize_B_r(net)
 
-    # Solve reduced system: θ[non_ref] = B_r \ p[non_ref], θ[ref] = 0
+    # Solve reduced system: θ[non_ref] = B_r \ p[non_ref], θ[refs] = 0
     θ = zeros(n)
     θ[non_ref] = F \ p[non_ref]
 

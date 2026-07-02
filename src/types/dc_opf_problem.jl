@@ -50,8 +50,8 @@ precomputed at construction time).
 - `dz_dsw`: Full KKT derivative w.r.t. switching (or nothing)
 - `dz_dfmax`: Full KKT derivative w.r.t. flow limits (or nothing)
 - `dz_db`: Full KKT derivative w.r.t. susceptances (or nothing)
-- `b_r_factor`: Cached reduced susceptance factorization (topology-dependent, survives demand changes)
-- `work`: Scratch workspace for VJP/JVP KKT solves (lazily allocated on first call, survives invalidation since its size depends only on `(n, m, k)` which are fixed at construction)
+- `b_r_factor`: Cached reduced susceptance factorization (topology dependent, survives demand changes)
+- `work`: Scratch workspace for VJP/JVP KKT solves (lazily allocated on first call)
 """
 mutable struct DCSensitivityCache
     solution::Union{Nothing,DCOPFSolution}
@@ -97,12 +97,13 @@ end
 """
     invalidate_topology!(cache::DCSensitivityCache)
 
-Clear all cached data including topology-dependent `b_r_factor`.
+Clear all cached data including topology dependent `b_r_factor` and `work`.
 Called when network topology changes (switching, susceptances).
 """
 function invalidate_topology!(cache::DCSensitivityCache)
     invalidate!(cache)
     cache.b_r_factor = nothing
+    cache.work = nothing
     return nothing
 end
 
@@ -122,6 +123,9 @@ B-θ formulation of DC OPF wrapped around a JuMP model.
 - `d`: Demand parameter (can be updated for sensitivity analysis)
 - `cons`: Named tuple of constraint references
 - `cache`: Mutable sensitivity cache for avoiding redundant KKT solves
+- `_n_ref`: Number of energized island reference constraints in the currently
+  built JuMP model (internal). Invariant after `_rebuild_jump_model!`:
+  `_n_ref == length(cons.ref)`.
 - `_optimizer`: Optimizer factory for model rebuilds (internal)
 - `_silent`: Whether to suppress solver output (internal)
 """
@@ -135,6 +139,7 @@ mutable struct DCOPFProblem{O} <: AbstractOPFProblem
     d::Vector{Float64}
     cons::NamedTuple
     cache::DCSensitivityCache
+    _n_ref::Int
     _optimizer::O
     _silent::Bool
 end
@@ -175,9 +180,19 @@ function DCOPFProblem(network::DCNetwork, d::AbstractVector; optimizer=Ipopt.Opt
 
     _debug_negative_demand(d)
 
+    # The model/variable/constraint fields start empty; `_rebuild_jump_model!`
+    # below builds the JuMP model and fills va/pg/f/psh, cons, and _n_ref.
+    # Arguments are positional to match the DCOPFProblem field order.
     prob = DCOPFProblem(
-        JuMP.Model(), network, VariableRef[], VariableRef[], VariableRef[], VariableRef[],
-        Float64.(d), (;), DCSensitivityCache(), optimizer, silent
+        JuMP.Model(),                                                # model: replaced on rebuild
+        network,
+        VariableRef[], VariableRef[], VariableRef[], VariableRef[],  # va, pg, f, psh: filled on rebuild
+        Float64.(d),                                                 # d: demand parameter, normalized to Float64
+        (;),                                                         # cons: filled on rebuild
+        DCSensitivityCache(),                                        # cache: empty sensitivity cache
+        0,                                                           # _n_ref: set to length(refs) on rebuild
+        optimizer,                                                   # _optimizer: factory for model (re)builds
+        silent,                                                      # _silent: suppress solver output
     )
     _rebuild_jump_model!(prob)
     return prob
@@ -192,6 +207,12 @@ _is_ipopt_optimizer(opt::MOI.OptimizerWithAttributes) = opt.optimizer_constructo
 
 Build (or rebuild) the JuMP model from current network parameters.
 Called by the constructor and by `update_switching!` after mutating `network.sw`.
+
+This function owns the `_n_ref == length(prob.cons.ref)` invariant. Directly
+mutating `prob.network.sw` or moving `prob.network.b` across zero changes the
+energized island topology without rebuilding the JuMP model, so callers must use
+`update_switching!` for switch changes and rebuild the problem after
+topology changing susceptance edits.
 """
 function _rebuild_jump_model!(prob::DCOPFProblem)
     network = prob.network
@@ -244,8 +265,9 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     shed_lb = @constraint(model, psh .>= 0)
     shed_ub = @constraint(model, psh .<= _shed_capacity.(d))
 
-    # Reference bus
-    ref_con = @constraint(model, va[network.ref_bus] == 0.0)
+    # One angle reference per energized island removes the Laplacian nullspace.
+    refs = _reference_buses(network)
+    ref_con = @constraint(model, [i in refs], va[i] == 0.0)
 
     # Open lines should not constrain angle differences.
     phase_diff_lb = @constraint(model, network.sw .* (network.A * va) .>= network.sw .* network.angmin)
@@ -256,6 +278,9 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     prob.pg = pg
     prob.f = f
     prob.psh = psh
+    # Cache the reference-constraint count for KKT layout hot paths. This value
+    # belongs to the built JuMP model and must stay equal to length(ref_con).
+    prob._n_ref = length(refs)
     prob.cons = (
         power_bal = power_bal,
         flow_def = flow_def,

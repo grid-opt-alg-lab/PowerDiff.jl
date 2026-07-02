@@ -111,7 +111,7 @@ export DCNetwork, DCPowerFlowState
 export DCOPFProblem, DCOPFSolution
 export DCSensitivityCache, invalidate!
 export solve!, update_demand!, update_fmax!, update_switching!
-export calc_demand_vector, calc_susceptance_matrix
+export calc_demand_vector, calc_susceptance_matrix, reference_buses
 
 # DC Sensitivity Functions (convenience wrappers)
 export calc_generation_participation_factors, calc_ptdf_from_sensitivity
@@ -143,57 +143,5 @@ PTDF sign convention: `PTDF = ∂f/∂p`.
 ptdf_matrix(state::DCPowerFlowState) = -Matrix(calc_sensitivity(state, :f, :d))
 
 export ptdf_matrix
-
-# =============================================================================
-# APF extension stubs — implemented in ext/PowerDiffAPFExt.jl
-# =============================================================================
-
-const _APF_HINT = "Load AcceleratedDCPowerFlows first: `using AcceleratedDCPowerFlows`"
-
-"""
-    to_apf_network(net::DCNetwork) → APF.Network
-
-Convert a `DCNetwork` to an AcceleratedDCPowerFlows network. Requires `using AcceleratedDCPowerFlows`.
-"""
-function to_apf_network end
-
-"""
-    apf_ptdf(net::DCNetwork; kwargs...) → APF.FullPTDF
-
-Build an APF `FullPTDF` from a `DCNetwork`. Keyword arguments are forwarded to
-`APF.full_ptdf`. Requires `using AcceleratedDCPowerFlows`.
-"""
-function apf_ptdf end
-
-"""
-    apf_lodf(net::DCNetwork; kwargs...) → APF.FullLODF
-
-Build an APF `FullLODF` from a `DCNetwork`. Keyword arguments are forwarded to
-`APF.full_lodf`. Requires `using AcceleratedDCPowerFlows`.
-"""
-function apf_lodf end
-
-"""
-    compare_ptdf(state::DCPowerFlowState; atol=1e-8) → NamedTuple
-
-Cross-validate PowerDiff PTDF against AcceleratedDCPowerFlows PTDF.
-Returns `(match, maxerr)` where `match` is true if all entries agree within `atol`.
-Requires `using AcceleratedDCPowerFlows`.
-"""
-function compare_ptdf end
-
-"""
-    materialize_apf_ptdf(Phi::APF.FullPTDF) → Matrix{Float64}
-
-Materialize a dense PTDF matrix from an APF `FullPTDF` object. Requires `using AcceleratedDCPowerFlows`.
-"""
-function materialize_apf_ptdf end
-
-# Fallback methods with informative error when APF is not loaded
-for fn in (:to_apf_network, :apf_ptdf, :apf_lodf, :compare_ptdf, :materialize_apf_ptdf)
-    @eval $fn(args...; kwargs...) = error("$($fn) requires AcceleratedDCPowerFlows. " * _APF_HINT)
-end
-
-export to_apf_network, apf_ptdf, apf_lodf, compare_ptdf, materialize_apf_ptdf
 
 end # module PowerDiff

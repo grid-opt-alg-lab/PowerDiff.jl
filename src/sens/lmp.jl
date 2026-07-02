@@ -25,8 +25,8 @@
 # LMP Decomposition (for analysis):
 #     LMP = ν_bal = energy_component + congestion_component
 # where:
-#     congestion_component = B_r⁻¹ [A_r' Diag(-b .* sw) (λ_ub - λ_lb) + A_r'(γ_ub - γ_lb)]  (non-ref block)
-#     energy_component = ν_bal - congestion_component  (uniform for connected network)
+#     congestion_component = B_r⁻¹ [A_r' Diag(-b .* sw) (λ_ub - λ_lb) + A_r' Diag(sw) (γ_ub - γ_lb)]  (non-ref block)
+#     energy_component = ν_bal - congestion_component  (uniform within each island)
 #
 # Sign conventions (DC OPF):
 #     - Our LMPs are positive (cost increases when demand increases)
@@ -76,14 +76,18 @@ end
 
 Extract the congestion component of LMPs for analysis.
 
-From the θ-stationarity KKT condition:
-    B' * ν_bal + (WA)' * ν_flow + e_ref * η_ref + A'*(γ_ub - γ_lb) = 0
+From the θ-stationarity KKT condition, where `E_ref` is the `n × n_ref` matrix
+that selects the one reference bus per energized island (so `E_ref * η_ref` is a
+length-`n` vector aligned with the bus stationarity rows):
+    B' * ν_bal + (WA)' * ν_flow + E_ref * η_ref + A' Diag(sw) (γ_ub - γ_lb) = 0
 
-The congestion RHS includes both flow limit duals and angle difference duals:
-    congestion[non_ref] = B_r \\ (A' W (λ_ub - λ_lb) + A'(γ_ub - γ_lb))[non_ref]
+Neglecting the O(τ²) flow regularization (so ν_flow ≈ λ_ub - λ_lb), the congestion
+RHS gathers the flow limit and angle difference dual contributions:
+    congestion[non_ref] = B_r \\ (A' W (λ_ub - λ_lb) + A' Diag(sw) (γ_ub - γ_lb))[non_ref]
 
 The congestion component captures price differentiation due to binding flow and angle
-constraints, with the reference bus congestion component equal to zero.
+constraints. Only the non-reference rows are populated, so every energized island
+reference bus has a congestion component of exactly zero.
 
 # Returns
 Vector (length n) of congestion contributions to each bus's LMP.
@@ -91,10 +95,16 @@ Vector (length n) of congestion contributions to each bus's LMP.
 function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork;
                                    B_r_factor=sol.B_r_factor)
     w = -net.b  # positive weights (b < 0 for inductive lines)
-    non_ref = setdiff(1:net.n, net.ref_bus)
+    non_ref = _non_reference_buses(net)
 
     At = net.A'
-    rhs_full = At * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb) + At * (sol.gamma_ub - sol.gamma_lb)
+    # Angle difference constraints are gated by `sw` in the model, so their
+    # stationarity contribution carries the same `Diag(sw)` factor: the gate is the
+    # identity on fully closed branches (sw == 1), scales the contribution on
+    # fractional branches (0 < sw < 1), and zeroes the term on open branches
+    # (sw == 0), matching the gated angle dual the solver returns.
+    rhs_full = At * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb) +
+               At * Diagonal(net.sw) * (sol.gamma_ub - sol.gamma_lb)
 
     result = zeros(net.n)
     result[non_ref] = B_r_factor \ rhs_full[non_ref]
@@ -106,8 +116,9 @@ end
 
 Extract the energy (non-congestion) component of LMPs for analysis.
 
-This is the uniform price component: energy = ν_bal - congestion
-For a connected network, this should be approximately constant across all buses.
+This is the uniform price component: energy = ν_bal - congestion.
+It is exactly uniform within each energized island in the unregularized limit;
+the O(τ²) flow regularization perturbs that uniformity slightly.
 
 # Returns
 Vector (length n) of energy contributions to each bus's LMP.
@@ -176,4 +187,3 @@ function calc_qlmp(prob::ACOPFProblem)
     sol = _ensure_ac_solved!(prob)
     return calc_qlmp(sol, prob)
 end
-

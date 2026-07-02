@@ -61,6 +61,7 @@ update_switching!
 update_fmax!
 calc_demand_vector
 calc_susceptance_matrix
+reference_buses
 calc_lmp
 calc_qlmp
 calc_congestion_component
@@ -103,14 +104,4 @@ AbstractPowerNetwork
 AbstractPowerFlowState
 AbstractOPFSolution
 AbstractOPFProblem
-```
-
-## AcceleratedDCPowerFlows Extension
-
-```@docs
-to_apf_network
-apf_ptdf
-apf_lodf
-compare_ptdf
-materialize_apf_ptdf
 ```

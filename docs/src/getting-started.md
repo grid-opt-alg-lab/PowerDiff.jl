@@ -29,7 +29,7 @@ suggested `calc_sensitivity` commands to try.
 
 ## DC Power Flow
 
-DC power flow computes voltage angles from the reduced system ``\theta_r = B_r^{-1} p_r``, where ``B_r`` is the susceptance-weighted Laplacian with the reference bus row and column deleted.
+DC power flow computes voltage angles from the reduced system ``\theta_r = B_r^{-1} p_r``, where ``B_r`` is the susceptance-weighted Laplacian with one reference row and column deleted per energized island.
 
 ```julia
 dc_net = DCNetwork(net)

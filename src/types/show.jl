@@ -66,6 +66,15 @@ Base.getproperty(sol::DCOPFSolution, s::Symbol) = _alias_getproperty(sol, _DC_OP
 Base.getproperty(prob::DCOPFProblem, s::Symbol) = _alias_getproperty(prob, _DC_OPF_PROBLEM_ALIASES, s)
 Base.getproperty(sol::ACOPFSolution, s::Symbol) = _alias_getproperty(sol, _AC_OPF_SOLUTION_ALIASES, s)
 
+_range_str(v; digits=2) =
+    isempty(v) ? "empty" : "[$(round(minimum(v); digits=digits)), $(round(maximum(v); digits=digits))]"
+
+_range_str(lo, hi; digits=2) =
+    isempty(lo) || isempty(hi) ? "empty" : "[$(round(minimum(lo); digits=digits)), $(round(maximum(hi); digits=digits))]"
+
+_max_abs_str(v; digits=2) =
+    isempty(v) ? "empty" : string(round(maximum(abs, v); digits=digits))
+
 # =============================================================================
 # DCNetwork
 # =============================================================================
@@ -76,11 +85,11 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", net::DCNetwork)
     println(io, "DCNetwork ($(net.n) buses, $(net.m) branches, $(net.k) gens)")
-    println(io, "  Reference bus: $(net.ref_bus)")
+    println(io, "  Reference buses: $(reference_buses(net))")
     n_open = count(x -> x < 1.0, net.sw)
     println(io, "  Open branches: $n_open/$(net.m)")
-    println(io, "  Flow limits:   [$(round(minimum(net.fmax); digits=2)), $(round(maximum(net.fmax); digits=2))]")
-    println(io, "  Gen capacity:  [$(round(minimum(net.gmin); digits=2)), $(round(maximum(net.gmax); digits=2))]")
+    println(io, "  Flow limits:   $(_range_str(net.fmax))")
+    println(io, "  Gen capacity:  $(_range_str(net.gmin, net.gmax))")
     print(io, "  tau = $(net.tau)")
 end
 
@@ -111,7 +120,7 @@ end
 function Base.show(io::IO, ::MIME"text/plain", state::DCPowerFlowState)
     println(io, "DCPowerFlowState ($(state.net.n) buses, $(state.net.m) branches)")
     println(io, "  max|va|: $(round(maximum(abs, state.va); digits=4)) rad")
-    println(io, "  max|f|: $(round(maximum(abs, state.f); digits=4)) p.u.")
+    println(io, "  max|f|: $(_max_abs_str(state.f; digits=4)) p.u.")
     print(io, "  Total demand: $(round(sum(state.d); digits=2)) p.u.")
 end
 
@@ -142,8 +151,8 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", sol::DCOPFSolution)
     println(io, "DCOPFSolution (objective = $(round(sol.objective; digits=2)))")
-    println(io, "  Generators: $(length(sol.pg))  (range: [$(round(minimum(sol.pg); digits=2)), $(round(maximum(sol.pg); digits=2))])")
-    println(io, "  Flows:      $(length(sol.f)) (max |f| = $(round(maximum(abs, sol.f); digits=2)))")
+    println(io, "  Generators: $(length(sol.pg))  (range: $(_range_str(sol.pg)))")
+    println(io, "  Flows:      $(length(sol.f)) (max |f| = $(_max_abs_str(sol.f)))")
     print(io, "  Shedding:   $(round(sum(sol.psh); digits=2)) p.u. total")
 end
 

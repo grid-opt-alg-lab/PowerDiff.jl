@@ -96,7 +96,8 @@ function solve!(prob::DCOPFProblem)
     μ_ub = -dual.(prob.cons.shed_ub)
     γ_lb = dual.(prob.cons.phase_diff_lb)
     γ_ub = -dual.(prob.cons.phase_diff_ub)
-    η_ref = dual(prob.cons.ref)
+    refs = reference_buses(prob.network)
+    η_ref = [dual(prob.cons.ref[i]) for i in refs]
 
     # Post-process phase angle difference duals for strict complementarity.
     # Interior point solvers leave gamma ≈ 1e-8 for non binding constraints.

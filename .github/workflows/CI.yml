@@ -28,14 +28,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        julia-version: ['1.9', '1.11']
+        julia-version: ['1.10', '1.11']
         os: [ubuntu-latest]
         include:
           - julia-version: '1'
             os: macos-latest
-          - julia-version: 'nightly'
-            os: ubuntu-latest
-    continue-on-error: ${{ matrix.julia-version == 'nightly' }}
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v3
@@ -45,20 +42,17 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
 
-  # APF extension — only on main push and scheduled runs.
-  # Pinned to Julia 1.12 because upstream AcceleratedDCPowerFlows restricted
-  # its compat to julia = "1.12" in commit 4a9eb58 (2026-04-08).
-  test-apf-extension:
-    if: github.event_name != 'pull_request'
-    name: APF Extension (Julia 1.12)
+  # Nightly is informational and only runs on the scheduled workflow.
+  test-nightly:
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: julia-actions/setup-julia@v3
         with:
-          version: '1.12'
+          version: 'nightly'
       - uses: julia-actions/cache@v3
-      - name: Install APF (unregistered)
-        run: julia --project=. -e 'using Pkg; Pkg.add(url="https://github.com/mtanneau/AcceleratedDCPowerFlows.jl.git")'
       - uses: julia-actions/julia-buildpkg@v1
+        continue-on-error: true
       - uses: julia-actions/julia-runtest@v1
+        continue-on-error: true

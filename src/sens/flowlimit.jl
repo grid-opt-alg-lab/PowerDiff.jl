@@ -53,8 +53,7 @@ function calc_kkt_jacobian_flowlimit(prob::DCOPFProblem, sol::DCOPFSolution)
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim = kkt_dims(n, m, k)
-    idx = kkt_indices(n, m, k)
+    dim, idx = _dc_kkt_layout(prob)
 
     lambda_lb = getfield(sol, :lam_lb)
     lambda_ub = getfield(sol, :lam_ub)
@@ -84,8 +83,8 @@ end
 Compute column `e` of ∂K/∂fmax. Only 2 nonzeros: `lam_lb[e]` and `lam_ub[e]`.
 """
 function calc_kkt_jacobian_flowlimit_column(net::DCNetwork, sol::DCOPFSolution, e::Int)
-    col = zeros(kkt_dims(net))
-    idx = kkt_indices(net)
+    dim, idx = _dc_kkt_layout(net)
+    col = zeros(dim)
     col[idx.lam_lb[e]] = sol.lam_lb[e]
     col[idx.lam_ub[e]] = sol.lam_ub[e]
     return col

@@ -23,7 +23,8 @@ development/
 
 # Experiments and generated artifacts
 experiments/*
-# Track only the runnable script and its environment.
+# Track runnable scripts and their environment.
 !experiments/Project.toml
 !experiments/ipp_market_planning.jl
+!experiments/apf_integration.jl
 presentation.html
