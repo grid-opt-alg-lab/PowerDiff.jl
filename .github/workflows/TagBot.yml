@@ -1,8 +1,25 @@
 name: TagBot
+
+# Tags vX.Y.Z and creates the GitHub release here after each PowerDiff version
+# merges into the General registry. Triggered by the JuliaTagBot service
+# commenting on the TagBot trigger issue; a manual dispatch is the recovery
+# path (TagBot re-scans all registered versions on every run and backfills any
+# release it has not created yet).
+#
+# The `permissions` block is required: TagBot pushes the tag over SSH but
+# creates the GitHub *release* through the API with GITHUB_TOKEN, which needs
+# `contents: write`. Without it the tag lands while the release is silently
+# skipped — a bare tag with no release object.
 on:
   issue_comment:
     types: [created]
   workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
 jobs:
   TagBot:
     if: github.event_name == 'workflow_dispatch' || github.actor == 'JuliaTagBot'
@@ -10,5 +27,9 @@ jobs:
     steps:
       - uses: JuliaRegistries/TagBot@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ssh: ${{ secrets.DOCUMENTER_KEY }}
+          # TAGBOT_TOKEN is optional, but fixes backfills for old registered
+          # versions whose tagged commits changed workflow files.
+          token: ${{ secrets.TAGBOT_TOKEN || secrets.GITHUB_TOKEN }}
+          # Prefer a dedicated write deploy key; reuse a Documenter key if the
+          # repository already has one.
+          ssh: ${{ secrets.TAGBOT_SSH || secrets.DOCUMENTER_KEY }}

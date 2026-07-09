@@ -7,7 +7,7 @@ This guide walks through the main workflows: DC power flow, DC OPF with LMP anal
 ```julia
 using PowerDiff
 
-# Parse a supported PowerIO case into a PowerIO.Network
+# Parse a supported PowerIO case into a PowerIO.BalancedNetwork
 net = parse_file("case14.m")
 ```
 
