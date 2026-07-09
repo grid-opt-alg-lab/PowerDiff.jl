@@ -189,17 +189,17 @@ const DEFAULT_SHED_COST_MULTIPLIER = 10
 # and `PowerIO.to_powerdata` returns normalized, per-unit, status/isolated-filtered
 # data with the reference bus inferred (`type == 3`), source bus ids on `bus_i`,
 # loads/shunts aggregated per bus, and polynomial costs collapsed and rescaled.
-# These thin wrappers return a `PowerIO.Network`, and `_network_data` turns one into
+# These thin wrappers return a `PowerIO.BalancedNetwork`, and `_network_data` turns one into
 # the network tables the DCNetwork and ACNetwork constructors consume. The only
 # logic beyond re-keying to source bus ids is the OPF solver modeling PowerIO leaves
 # to the consumer: polynomial cost interpretation, finite flow limits, default
 # angle difference bounds, and rejection of records PowerDiff does not model.
 
 """
-    parse_file(path::String; library=nothing, from=nothing, filetype=nothing) -> PowerIO.Network
-    parse_file(io::IO; from="matpower", filetype=nothing) -> PowerIO.Network
+    parse_file(path::String; library=nothing, from=nothing, filetype=nothing) -> PowerIO.BalancedNetwork
+    parse_file(io::IO; from="matpower", filetype=nothing) -> PowerIO.BalancedNetwork
 
-Parse a supported PowerIO network file into a `PowerIO.Network`.
+Parse a supported PowerIO network file into a `PowerIO.BalancedNetwork`.
 
 For paths, PowerIO infers the format from the extension unless `from` is given.
 For streams, pass `from` (or `filetype`) because there is no extension. JSON formats
@@ -233,10 +233,10 @@ function parse_file(io::Union{IO,String}; library=nothing, filetype=nothing, fro
 end
 
 """
-    parse_matpower(io::IO) -> PowerIO.Network
-    parse_matpower(file::String; library=nothing) -> PowerIO.Network
+    parse_matpower(io::IO) -> PowerIO.BalancedNetwork
+    parse_matpower(file::String; library=nothing) -> PowerIO.BalancedNetwork
 
-Parse MATPOWER v2 data into a `PowerIO.Network`.
+Parse MATPOWER v2 data into a `PowerIO.BalancedNetwork`.
 """
 function parse_matpower(io::IO)
     try
@@ -293,7 +293,7 @@ function _format_token(x)
 end
 
 """
-    _network_data(net::PowerIO.Network) -> NamedTuple
+    _network_data(net::PowerIO.BalancedNetwork) -> NamedTuple
 
 Build PowerDiff network tables from `PowerIO.to_powerdata(net)`.
 
@@ -458,7 +458,7 @@ function DCNetwork(net::Dict{String,<:Any}; kwargs...)
 end
 
 """
-    DCNetwork(net::PowerIO.Network; tau=DEFAULT_TAU, ref_bus=nothing)
+    DCNetwork(net::PowerIO.BalancedNetwork; tau=DEFAULT_TAU, ref_bus=nothing)
 
 Construct a DCNetwork from a parsed PowerIO network.
 
@@ -468,10 +468,10 @@ net = parse_file("case14.m")
 dc_net = DCNetwork(net)
 ```
 """
-DCNetwork(net::PowerIO.Network; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing) =
+DCNetwork(net::PowerIO.BalancedNetwork; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing) =
     DCNetwork(_network_data(net); tau=tau, ref_bus=ref_bus)
 
-# Build from PowerDiff network tables (see `_network_data`). The `PowerIO.Network`
+# Build from PowerDiff network tables (see `_network_data`). The `PowerIO.BalancedNetwork`
 # method runs PowerDiff's modeling deltas; this assumes the tables are already
 # normalized, so programmatic callers can supply ready values directly.
 function DCNetwork(data::NamedTuple; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing)
@@ -628,7 +628,7 @@ function calc_demand_vector(network::DCNetwork)
     return copy(network.demand)
 end
 
-calc_demand_vector(net::PowerIO.Network) = calc_demand_vector(_network_data(net))
+calc_demand_vector(net::PowerIO.BalancedNetwork) = calc_demand_vector(_network_data(net))
 calc_demand_vector(data::NamedTuple) = calc_demand_vector(data, IDMapping(data))
 
 function calc_demand_vector(data::NamedTuple, id_map::IDMapping)
@@ -900,13 +900,13 @@ function DCPowerFlowState(net::Dict{String,<:Any}; kwargs...)
 end
 
 """
-    DCPowerFlowState(net::PowerIO.Network; g=nothing, d=nothing)
+    DCPowerFlowState(net::PowerIO.BalancedNetwork; g=nothing, d=nothing)
 
 Construct DCPowerFlowState from a parsed PowerIO network.
 If `d` is not provided, extracts demand from the network.
 If `g` is not provided, aggregates generation from gen data to buses.
 """
-function DCPowerFlowState(net::PowerIO.Network; g::Union{Nothing,AbstractVector}=nothing, d::Union{Nothing,AbstractVector}=nothing)
+function DCPowerFlowState(net::PowerIO.BalancedNetwork; g::Union{Nothing,AbstractVector}=nothing, d::Union{Nothing,AbstractVector}=nothing)
     net = DCNetwork(net)
 
     if isnothing(d)

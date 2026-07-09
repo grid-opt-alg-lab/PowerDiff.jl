@@ -3,7 +3,7 @@
 PowerIO is PowerDiff's parser and data layer. PowerDiff does not expose a parser
 backend switch.
 
-`PowerDiff.parse_file(path)` resolves the path and returns a `PowerIO.Network` via
+`PowerDiff.parse_file(path)` resolves the path and returns a `PowerIO.BalancedNetwork` via
 `PowerIO.parse_file`. PowerIO infers path formats from extensions unless `from` is
 given. `PowerDiff.parse_file(io)` uses MATPOWER by default because streams have no
 extension; pass `from` for PSS/E RAW, PowerWorld AUX, PowerModels JSON, or Egret
