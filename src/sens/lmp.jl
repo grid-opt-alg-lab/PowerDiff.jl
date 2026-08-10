@@ -25,7 +25,7 @@
 # LMP Decomposition (for analysis):
 #     LMP = ν_bal = energy_component + congestion_component
 # where:
-#     congestion_component = B_r⁻¹ [A_r' Diag(-b .* sw) (λ_ub - λ_lb) + A_r' Diag(sw) (γ_ub - γ_lb)]  (non-ref block)
+#     congestion_component = B_r⁻¹ [A_r' Diag(-b .* sw) (λ_ub - λ_lb) + A_r' Diag(sw_eff) (γ_ub - γ_lb)]  (non-ref block)
 #     energy_component = ν_bal - congestion_component  (uniform within each island)
 #
 # Sign conventions (DC OPF):
@@ -79,11 +79,11 @@ Extract the congestion component of LMPs for analysis.
 From the θ-stationarity KKT condition, where `E_ref` is the `n × n_ref` matrix
 that selects the one reference bus per energized island (so `E_ref * η_ref` is a
 length-`n` vector aligned with the bus stationarity rows):
-    B' * ν_bal + (WA)' * ν_flow + E_ref * η_ref + A' Diag(sw) (γ_ub - γ_lb) = 0
+    B' * ν_bal + (WA)' * ν_flow + E_ref * η_ref + A' Diag(sw_eff) (γ_ub - γ_lb) = 0
 
 Neglecting the O(τ²) flow regularization (so ν_flow ≈ λ_ub - λ_lb), the congestion
 RHS gathers the flow limit and angle difference dual contributions:
-    congestion[non_ref] = B_r \\ (A' W (λ_ub - λ_lb) + A' Diag(sw) (γ_ub - γ_lb))[non_ref]
+    congestion[non_ref] = B_r \\ (A' W (λ_ub - λ_lb) + A' Diag(sw_eff) (γ_ub - γ_lb))[non_ref]
 
 The congestion component captures price differentiation due to binding flow and angle
 constraints. Only the non-reference rows are populated, so every energized island
@@ -96,15 +96,13 @@ function calc_congestion_component(sol::DCOPFSolution, net::DCNetwork;
                                    B_r_factor=sol.B_r_factor)
     w = -net.b  # positive weights (b < 0 for inductive lines)
     non_ref = _non_reference_buses(net)
+    angle_gate = _angle_difference_gates(net)
 
     At = net.A'
-    # Angle difference constraints are gated by `sw` in the model, so their
-    # stationarity contribution carries the same `Diag(sw)` factor: the gate is the
-    # identity on fully closed branches (sw == 1), scales the contribution on
-    # fractional branches (0 < sw < 1), and zeroes the term on open branches
-    # (sw == 0), matching the gated angle dual the solver returns.
+    # Match the model's effective angle gate: preserve fractional switching on
+    # energized branches and remove the contribution whenever b[e] * sw[e] == 0.
     rhs_full = At * Diagonal(w .* net.sw) * (sol.lam_ub - sol.lam_lb) +
-               At * Diagonal(net.sw) * (sol.gamma_ub - sol.gamma_lb)
+               At * Diagonal(angle_gate) * (sol.gamma_ub - sol.gamma_lb)
 
     result = zeros(net.n)
     result[non_ref] = B_r_factor \ rhs_full[non_ref]

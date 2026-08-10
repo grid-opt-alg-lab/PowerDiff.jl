@@ -445,8 +445,8 @@ s.t. G_inc * g + psh - d = B * θ   (ν_bal)
      f = W * A * θ                  (ν_flow)
      f ≥ -fmax                      (λ_lb)
      f ≤ fmax                       (λ_ub)
-     A * θ ≥ angmin                 (γ_lb)
-     A * θ ≤ angmax                 (γ_ub)
+     sw_eff .* (A * θ) ≥ sw_eff .* angmin   (γ_lb)
+     sw_eff .* (A * θ) ≤ sw_eff .* angmax   (γ_ub)
      g ≥ gmin                       (ρ_lb)
      g ≤ gmax                       (ρ_ub)
      0 ≤ psh                        (μ_lb)
@@ -454,9 +454,11 @@ s.t. G_inc * g + psh - d = B * θ   (ν_bal)
      θ[refs] = 0                    (η_ref)
 ```
 
+Here `sw_eff[e] = sw[e]` when `b[e] * sw[e] != 0` and zero otherwise.
+
 # Returns
 Vector of KKT residuals (should be zero at optimum):
-1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + E_ref * η_ref + A' * Diag(sw) * (γ_ub - γ_lb) = 0
+1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + E_ref * η_ref + A' * Diag(sw_eff) * (γ_ub - γ_lb) = 0
    (E_ref is the n × n_ref selection matrix for the per-island reference buses)
 2. Stationarity w.r.t. g: 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub = 0
 3. Stationarity w.r.t. f: τ² * f - ν_flow - λ_lb + λ_ub = 0
@@ -490,12 +492,13 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     W = Diagonal(-net.b .* net.sw)
     B_mat = net.A' * W * net.A
     WA = W * net.A
+    angle_gate = _angle_difference_gates(net)
 
     refs = _reference_buses(net)
 
     # KKT conditions
     # 1. Stationarity w.r.t. θ
-    K_θ = B_mat' * ν_bal + WA' * ν_flow + net.A' * (net.sw .* (γ_ub - γ_lb))
+    K_θ = B_mat' * ν_bal + WA' * ν_flow + net.A' * (angle_gate .* (γ_ub - γ_lb))
     K_θ[refs] .+= η_ref
 
     # 2. Stationarity w.r.t. g
@@ -513,8 +516,8 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
 
     # 6. Complementary slackness: phase angle difference bounds
     Aθ = net.A * θ
-    K_γ_lb = γ_lb .* net.sw .* (Aθ - net.angmin)
-    K_γ_ub = γ_ub .* net.sw .* (net.angmax - Aθ)
+    K_γ_lb = γ_lb .* angle_gate .* (Aθ - net.angmin)
+    K_γ_ub = γ_ub .* angle_gate .* (net.angmax - Aθ)
 
     # 7. Complementary slackness: generation bounds
     K_ρ_lb = ρ_lb .* (g - net.gmin)
@@ -620,6 +623,7 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     G_inc = getfield(net, :G_inc)
     b = getfield(net, :b)
     sw = getfield(net, :sw)
+    angle_gate = _angle_difference_gates(net)
     fmax = getfield(net, :fmax)
     gmin = getfield(net, :gmin)
     gmax = getfield(net, :gmax)
@@ -668,8 +672,8 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     # SparseMatrixCSC diagonals and structural setindex! insertions.
 
     # va columns:
-    # ∂K_γ_lb/∂θ = Diag(γ_lb .* sw) * A
-    # ∂K_γ_ub/∂θ = -Diag(γ_ub .* sw) * A
+    # ∂K_γ_lb/∂θ = Diag(γ_lb .* sw_eff) * A
+    # ∂K_γ_ub/∂θ = -Diag(γ_ub .* sw_eff) * A
     # ∂K_power_bal/∂θ = -B
     # ∂K_flow_def/∂θ = -W*A, where W = Diag(-b .* sw)
     # ∂K_ref/∂θ_ref = 1
@@ -678,12 +682,12 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         for p in nzrange(A, j)
             e = rowvals(A)[p]
             aej = nonzeros(A)[p]
-            _push_csc_entry!(rowval, nzval, idx.gamma_lb[e], gamma_lb[e] * sw[e] * aej)
+            _push_csc_entry!(rowval, nzval, idx.gamma_lb[e], gamma_lb[e] * angle_gate[e] * aej)
         end
         for p in nzrange(A, j)
             e = rowvals(A)[p]
             aej = nonzeros(A)[p]
-            _push_csc_entry!(rowval, nzval, idx.gamma_ub[e], -gamma_ub[e] * sw[e] * aej)
+            _push_csc_entry!(rowval, nzval, idx.gamma_ub[e], -gamma_ub[e] * angle_gate[e] * aej)
         end
         for p in nzrange(B_mat, j)
             _push_csc_entry!(rowval, nzval, idx.nu_bal[rowvals(B_mat)[p]], -nonzeros(B_mat)[p])
@@ -755,23 +759,23 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     end
 
     # gamma columns:
-    # ∂K_θ/∂γ_lb = -A' * Diag(sw)
-    # ∂K_γ_lb/∂γ_lb = Diag(sw .* (A*θ - angmin))
-    # ∂K_θ/∂γ_ub = A' * Diag(sw)
-    # ∂K_γ_ub/∂γ_ub = Diag(sw .* (angmax - A*θ))
+    # ∂K_θ/∂γ_lb = -A' * Diag(sw_eff)
+    # ∂K_γ_lb/∂γ_lb = Diag(sw_eff .* (A*θ - angmin))
+    # ∂K_θ/∂γ_ub = A' * Diag(sw_eff)
+    # ∂K_γ_ub/∂γ_ub = Diag(sw_eff .* (angmax - A*θ))
     @inbounds for e in 1:m
         start_col!(idx.gamma_lb[e])
         for p in A_rowptr[e]:(A_rowptr[e + 1] - 1)
-            _push_csc_entry!(rowval, nzval, idx.va[A_rowcols[p]], -sw[e] * A_rowvals[p])
+            _push_csc_entry!(rowval, nzval, idx.va[A_rowcols[p]], -angle_gate[e] * A_rowvals[p])
         end
-        _push_csc_entry!(rowval, nzval, idx.gamma_lb[e], sw[e] * (Aθ[e] - angmin[e]))
+        _push_csc_entry!(rowval, nzval, idx.gamma_lb[e], angle_gate[e] * (Aθ[e] - angmin[e]))
     end
     @inbounds for e in 1:m
         start_col!(idx.gamma_ub[e])
         for p in A_rowptr[e]:(A_rowptr[e + 1] - 1)
-            _push_csc_entry!(rowval, nzval, idx.va[A_rowcols[p]], sw[e] * A_rowvals[p])
+            _push_csc_entry!(rowval, nzval, idx.va[A_rowcols[p]], angle_gate[e] * A_rowvals[p])
         end
-        _push_csc_entry!(rowval, nzval, idx.gamma_ub[e], sw[e] * (angmax[e] - Aθ[e]))
+        _push_csc_entry!(rowval, nzval, idx.gamma_ub[e], angle_gate[e] * (angmax[e] - Aθ[e]))
     end
 
     # rho columns:
@@ -926,8 +930,6 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
 
     θ = sol.va
 
-    # Current switching state
-    s = net.sw
     b = net.b
     A = net.A
 
@@ -953,12 +955,15 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
         Ae_dot_ν = dot(A_e_vec, ν_bal)
         J_s[idx.va, e] = -b[e] * A_e_vec * (Ae_dot_ν + ν_flow[e])
 
-        # ∂K_θ/∂s_e from gated angle difference bounds
-        J_s[idx.va, e] += A_e_vec * (sol.gamma_ub[e] - sol.gamma_lb[e])
+        # ∂K_θ/∂s_e from gated angle difference bounds. When b[e] == 0,
+        # changing switching alone cannot energize the branch, so this derivative
+        # vanishes with the gate.
+        dgate_dsw = _angle_difference_gate_dsw(net, e)
+        J_s[idx.va, e] += dgate_dsw * A_e_vec * (sol.gamma_ub[e] - sol.gamma_lb[e])
 
         # ∂K_γ/∂s_e from gated complementary slackness
-        J_s[idx.gamma_lb[e], e] = sol.gamma_lb[e] * (Aθ_e - net.angmin[e])
-        J_s[idx.gamma_ub[e], e] = sol.gamma_ub[e] * (net.angmax[e] - Aθ_e)
+        J_s[idx.gamma_lb[e], e] = dgate_dsw * sol.gamma_lb[e] * (Aθ_e - net.angmin[e])
+        J_s[idx.gamma_ub[e], e] = dgate_dsw * sol.gamma_ub[e] * (net.angmax[e] - Aθ_e)
     end
 
     return J_s
@@ -1002,12 +1007,13 @@ function calc_kkt_jacobian_switching_column(prob::DCOPFProblem, sol::DCOPFSoluti
     col[idx.va[f_bus]] += coeff
     col[idx.va[t_bus]] -= coeff
     # gated angle difference stationarity contribution
-    coeff_ang = sol.gamma_ub[e] - sol.gamma_lb[e]
+    dgate_dsw = _angle_difference_gate_dsw(net, e)
+    coeff_ang = dgate_dsw * (sol.gamma_ub[e] - sol.gamma_lb[e])
     col[idx.va[f_bus]] += coeff_ang
     col[idx.va[t_bus]] -= coeff_ang
     # gated angle difference complementary slackness
-    col[idx.gamma_lb[e]] = sol.gamma_lb[e] * (Aθ_e - net.angmin[e])
-    col[idx.gamma_ub[e]] = sol.gamma_ub[e] * (net.angmax[e] - Aθ_e)
+    col[idx.gamma_lb[e]] = dgate_dsw * sol.gamma_lb[e] * (Aθ_e - net.angmin[e])
+    col[idx.gamma_ub[e]] = dgate_dsw * sol.gamma_ub[e] * (net.angmax[e] - Aθ_e)
     return col
 end
 

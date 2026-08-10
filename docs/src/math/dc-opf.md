@@ -17,7 +17,7 @@ f &= W A \theta & (\nu_{\text{flow}}) \\
 -f_{\max} \leq f &\leq f_{\max} & (\lambda_{\text{lb}}, \lambda_{\text{ub}}) \\
 g_{\min} \leq g &\leq g_{\max} & (\rho_{\text{lb}}, \rho_{\text{ub}}) \\
 0 \leq \text{psh} &\leq d_+ & (\mu_{\text{lb}}, \mu_{\text{ub}}) \\
-\mathrm{sw} \circ \alpha_{\min} \leq \mathrm{sw} \circ A\theta &\leq \mathrm{sw} \circ \alpha_{\max} & (\gamma_{\text{lb}}, \gamma_{\text{ub}}) \\
+\mathrm{sw}_{\mathrm{eff}} \circ \alpha_{\min} \leq \mathrm{sw}_{\mathrm{eff}} \circ A\theta &\leq \mathrm{sw}_{\mathrm{eff}} \circ \alpha_{\max} & (\gamma_{\text{lb}}, \gamma_{\text{ub}}) \\
 \theta_{\text{refs}} &= 0 & (\eta_{\text{ref}})
 \end{aligned}
 ```
@@ -32,7 +32,7 @@ where:
 - ``c_{\text{shed}}`` is the load shedding cost vector
 - ``d_+ = \max(d, 0)`` is the curtailable portion of signed net demand; negative net demand remains in power balance as an injection
 - ``\tau`` is a small regularization parameter for numerical conditioning
-- the angle difference limits are gated by ``\mathrm{sw}`` so an open branch (``\mathrm{sw}_e = 0``) imposes no limit; the factor cancels for a branch in service (``\mathrm{sw}_e = 1``)
+- ``\mathrm{sw}_{\mathrm{eff},e} = \mathrm{sw}_e`` when ``b_e \mathrm{sw}_e \ne 0`` and is zero otherwise, so angle difference limits use the same energized predicate as the island partition while retaining fractional switching on energized branches
 - ``\text{refs}`` contains one reference bus per energized island, including isolated buses. The choice is deterministic: the configured ``\text{ref_bus}`` is the reference for its island, and every other island uses its lowest sequential bus index
 
 The built OPF model stores one reference constraint for each entry of
@@ -65,12 +65,12 @@ with total dimension ``5n + 6m + 3k + n_{\text{ref}}``.
 
 The KKT residual ``K(z, p)`` consists of:
 
-1. **Stationarity w.r.t. ``\theta``**: ``B^\top \nu_{\text{bal}} + (WA)^\top \nu_{\text{flow}} + E_{\text{ref}} \eta_{\text{ref}} + A^\top \operatorname{diag}(\mathrm{sw}) (\gamma_{\text{ub}} - \gamma_{\text{lb}}) = 0``, where ``E_{\text{ref}} \in \mathbb{R}^{n \times n_{\text{ref}}}`` selects the per-island reference buses
+1. **Stationarity w.r.t. ``\theta``**: ``B^\top \nu_{\text{bal}} + (WA)^\top \nu_{\text{flow}} + E_{\text{ref}} \eta_{\text{ref}} + A^\top \operatorname{diag}(\mathrm{sw}_{\mathrm{eff}}) (\gamma_{\text{ub}} - \gamma_{\text{lb}}) = 0``, where ``E_{\text{ref}} \in \mathbb{R}^{n \times n_{\text{ref}}}`` selects the per-island reference buses
 2. **Stationarity w.r.t. ``g``**: ``2 C_q g + c_l - G_{\text{inc}}^\top \nu_{\text{bal}} - \rho_{\text{lb}} + \rho_{\text{ub}} = 0``
 3. **Stationarity w.r.t. ``f``**: ``\tau^2 f - \nu_{\text{flow}} - \lambda_{\text{lb}} + \lambda_{\text{ub}} = 0``
 4. **Stationarity w.r.t. psh**: ``c_{\text{shed}} - \nu_{\text{bal}} - \mu_{\text{lb}} + \mu_{\text{ub}} = 0``
 5. **Complementary slackness (flow bounds)**: ``\lambda_{\text{lb}} \circ (f + f_{\max}) = 0``, ``\lambda_{\text{ub}} \circ (f_{\max} - f) = 0``
-5b. **Complementary slackness (angle differences)**: ``\gamma_{\text{lb}} \circ \mathrm{sw} \circ (A\theta - \alpha_{\min}) = 0``, ``\gamma_{\text{ub}} \circ \mathrm{sw} \circ (\alpha_{\max} - A\theta) = 0``
+5b. **Complementary slackness (angle differences)**: ``\gamma_{\text{lb}} \circ \mathrm{sw}_{\mathrm{eff}} \circ (A\theta - \alpha_{\min}) = 0``, ``\gamma_{\text{ub}} \circ \mathrm{sw}_{\mathrm{eff}} \circ (\alpha_{\max} - A\theta) = 0``
 5c. **Complementary slackness (generation/shedding bounds)**: ``\rho \circ (\cdot) = 0``, ``\mu \circ (\cdot) = 0``
 6. **Primal feasibility**: ``G_{\text{inc}} g + \text{psh} - d - B\theta = 0``
 7. **Flow definition**: ``f - WA\theta = 0``
@@ -102,7 +102,8 @@ the collapsed bound ``0 \leq \text{psh} \leq 0``.
 
 ### Switching (``\mathrm{sw}``)
 
-Switching enters the Laplacian ``B``, the weight matrix ``W``, and the angle difference limits gated by ``\mathrm{sw}``, with elementary perturbations:
+Switching enters the Laplacian ``B``, the weight matrix ``W``, and the angle difference limits gated by ``\mathrm{sw}_{\mathrm{eff}}``. Within a fixed energized regime,
+``\partial \mathrm{sw}_{\mathrm{eff},e}/\partial \mathrm{sw}_e = 1`` when ``b_e \ne 0`` and is zero when ``b_e = 0``. The elementary network perturbations are:
 
 ```math
 \frac{\partial B}{\partial \mathrm{sw}_e} = -b_e \, a_e a_e^\top, \qquad
@@ -121,17 +122,20 @@ where ``a_e^\top`` is row ``e`` of ``A`` (so ``a_e^\top \theta = (A\theta)_e``) 
   && \text{(flow definition)} \\
 \frac{\partial K_{\theta}}{\partial \mathrm{sw}_e}
   &= -b_e\,\bigl(a_e^\top \nu_{\text{bal}} + (\nu_{\text{flow}})_e\bigr)\, a_e
-     + (\gamma_{\text{ub},e} - \gamma_{\text{lb},e})\, a_e
+     + \frac{\partial \mathrm{sw}_{\mathrm{eff},e}}{\partial \mathrm{sw}_e}
+       (\gamma_{\text{ub},e} - \gamma_{\text{lb},e})\, a_e
   && (\theta\text{ stationarity}) \\
 \frac{\partial K_{\gamma_{\text{lb}}}}{\partial \mathrm{sw}_e}
-  &= \gamma_{\text{lb},e}\,\bigl((A\theta)_e - \alpha_{\min,e}\bigr)\, e_e, \quad
+  &= \frac{\partial \mathrm{sw}_{\mathrm{eff},e}}{\partial \mathrm{sw}_e}
+     \gamma_{\text{lb},e}\,\bigl((A\theta)_e - \alpha_{\min,e}\bigr)\, e_e, \quad
 \frac{\partial K_{\gamma_{\text{ub}}}}{\partial \mathrm{sw}_e}
-   = \gamma_{\text{ub},e}\,\bigl(\alpha_{\max,e} - (A\theta)_e\bigr)\, e_e
+   = \frac{\partial \mathrm{sw}_{\mathrm{eff},e}}{\partial \mathrm{sw}_e}
+     \gamma_{\text{ub},e}\,\bigl(\alpha_{\max,e} - (A\theta)_e\bigr)\, e_e
   && \text{(angle limits)}
 \end{aligned}
 ```
 
-Each block is rank-1 in the incidence row ``a_e`` or supported on branch ``e`` alone, so every column of ``\partial K / \partial \mathrm{sw}`` has only a handful of nonzeros. The stationarity block combines the Laplacian term (``\partial B / \partial \mathrm{sw}_e``), the flow coupling term (``\partial W / \partial \mathrm{sw}_e``), and the gated angle limit term (``\partial \operatorname{diag}(\mathrm{sw}) / \partial \mathrm{sw}_e = e_e e_e^\top``).
+Each block is rank-1 in the incidence row ``a_e`` or supported on branch ``e`` alone, so every column of ``\partial K / \partial \mathrm{sw}`` has only a handful of nonzeros. The stationarity block combines the Laplacian term (``\partial B / \partial \mathrm{sw}_e``), the flow coupling term (``\partial W / \partial \mathrm{sw}_e``), and the effective angle gate derivative above.
 
 Sensitivities are defined while the energized island partition is fixed. Opening
 or closing a bridge splits or merges islands and changes the reference set, so
@@ -159,7 +163,7 @@ Flow limits enter the complementary slackness conditions:
 
 ### Susceptances (``b``)
 
-Susceptances affect the same blocks as switching (through ``B`` and ``W``), but with different partial derivatives since ``B = A^\top \operatorname{diag}(-b \circ \mathrm{sw}) A``.
+Susceptances affect the same blocks as switching through ``B`` and ``W``, but with different partial derivatives since ``B = A^\top \operatorname{diag}(-b \circ \mathrm{sw}) A``. The effective angle gate is locally constant in ``b`` on either side of zero, so its ``b`` derivative is zero within a fixed energized regime. At ``b_e = 0`` the gate and, potentially, the island partition change nonsmoothly; the analytical parameter Jacobian uses a zero gate derivative at that boundary.
 
 ## LMP Decomposition
 
@@ -172,7 +176,7 @@ Locational marginal prices are the power balance duals ``\nu_{\text{bal}}``, dec
 The congestion component is extracted by solving:
 
 ```math
-\text{congestion}[\text{non-ref}] = B_r^{-1} \left(A_r^\top W (\lambda_{\text{ub}}^{\text{std}} - \lambda_{\text{lb}}^{\text{std}}) + A_r^\top \operatorname{diag}(\mathrm{sw}) (\gamma_{\text{ub}}^{\text{std}} - \gamma_{\text{lb}}^{\text{std}})\right)
+\text{congestion}[\text{non-ref}] = B_r^{-1} \left(A_r^\top W (\lambda_{\text{ub}}^{\text{std}} - \lambda_{\text{lb}}^{\text{std}}) + A_r^\top \operatorname{diag}(\mathrm{sw}_{\mathrm{eff}}) (\gamma_{\text{ub}}^{\text{std}} - \gamma_{\text{lb}}^{\text{std}})\right)
 ```
 
 where ``\lambda^{\text{std}}``, ``\gamma^{\text{std}}`` use the standard sign convention (non-negative for binding constraints). The ``\gamma`` terms capture congestion from binding phase angle difference limits. The energy component is uniform within each energized island and reflects that island's marginal cost of generation.
