@@ -268,53 +268,10 @@ function _extract_dz_column(prob::DCOPFProblem, dz_col::Vector{Float64}, op::Sym
 end
 
 # =============================================================================
-# Dimension Calculations
+# KKT Layout
 # =============================================================================
 
-"""
-    kkt_dims(prob::DCOPFProblem)
-    kkt_dims(network::DCNetwork)
-
-Compute the dimension of the flattened KKT variable vector.
-
-The KKT system includes:
-- Primal: va (n), pg (k), f (m), psh (n)
-- Dual (inequality): lam_lb (m), lam_ub (m), gamma_lb (m), gamma_ub (m), rho_lb (k), rho_ub (k), mu_lb (n), mu_ub (n)
-- Dual (equality): nu_bal (n), nu_flow (m)
-- Reference bus constraints: n_ref
-
-Total: 5n + 6m + 3k + n_ref
-"""
-function kkt_dims(prob::DCOPFProblem)
-    net = getfield(prob, :network)
-    return _dc_kkt_dims(getfield(net, :n), getfield(net, :m), getfield(net, :k),
-                        getfield(prob, :_n_ref))
-end
-kkt_dims(n::Int, m::Int, k::Int) = _dc_kkt_dims(n, m, k, 1)
 _dc_kkt_dims(n::Int, m::Int, k::Int, n_ref::Int) = 5n + 6m + 3k + n_ref
-
-function kkt_dims(net::DCNetwork)
-    n = getfield(net, :n)
-    m = getfield(net, :m)
-    k = getfield(net, :k)
-    n_ref = length(_reference_buses(net))
-    # va(n) + pg(k) + f(m) + psh(n) + lam_lb(m) + lam_ub(m) + gamma_lb(m) + gamma_ub(m) + rho_lb(k) + rho_ub(k) + mu_lb(n) + mu_ub(n) + nu_bal(n) + nu_flow(m) + ref(n_ref)
-    return _dc_kkt_dims(n, m, k, n_ref)
-end
-
-"""
-    kkt_indices(n, m, k) → NamedTuple
-
-Compute all KKT variable indices from network dimensions.
-Single source of truth for index calculations.
-
-# Variable ordering
-[va(n), pg(k), f(m), psh(n), lam_lb(m), lam_ub(m), gamma_lb(m), gamma_ub(m), rho_lb(k), rho_ub(k), mu_lb(n), mu_ub(n), nu_bal(n), nu_flow(m), eta(n_ref)]
-
-# Returns
-NamedTuple with index ranges for each variable block.
-"""
-kkt_indices(n::Int, m::Int, k::Int) = _dc_kkt_indices(n, m, k, 1)
 
 function _dc_kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
     i = 0
@@ -344,29 +301,43 @@ function _dc_kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
     )
 end
 
-kkt_indices(net::DCNetwork) = _dc_kkt_indices(net.n, net.m, net.k, length(_reference_buses(net)))
-
-function kkt_indices(prob::DCOPFProblem)
-    net = getfield(prob, :network)
-    return _dc_kkt_indices(getfield(net, :n), getfield(net, :m), getfield(net, :k),
-                           getfield(prob, :_n_ref))
+@inline function _dc_kkt_layout(n::Int, m::Int, k::Int, n_ref::Int)
+    return _dc_kkt_dims(n, m, k, n_ref), _dc_kkt_indices(n, m, k, n_ref)
 end
 
-function _dc_kkt_layout(net::DCNetwork)
+"""Return the DC KKT dimension for `n` buses, `m` branches, and `k` generators, assuming one reference bus."""
+kkt_dims(n::Int, m::Int, k::Int) = first(_dc_kkt_layout(n, m, k, 1))
+
+"""Return the DC KKT index ranges for `n` buses, `m` branches, and `k` generators, assuming one reference bus."""
+kkt_indices(n::Int, m::Int, k::Int) = last(_dc_kkt_layout(n, m, k, 1))
+
+"""
+    kkt_layout(network::DCNetwork) → (dim, indices)
+    kkt_layout(prob::DCOPFProblem) → (dim, indices)
+
+Return the dimension and named index ranges of the flattened DC KKT variable
+vector.
+
+The variable ordering is `[va, pg, f, psh, lam_lb, lam_ub, gamma_lb,
+gamma_ub, rho_lb, rho_ub, mu_lb, mu_ub, nu_bal, nu_flow, η]`. With `n`
+buses, `m` branches, `k` generators, and `n_ref` energized islands, the total
+dimension is `5n + 6m + 3k + n_ref`.
+"""
+function kkt_layout(net::DCNetwork)
+    n = getfield(net, :n)
+    m = getfield(net, :m)
+    k = getfield(net, :k)
     n_ref = length(_reference_buses(net))
-    n = getfield(net, :n)
-    m = getfield(net, :m)
-    k = getfield(net, :k)
-    return _dc_kkt_dims(n, m, k, n_ref), _dc_kkt_indices(n, m, k, n_ref)
+    return _dc_kkt_layout(n, m, k, n_ref)
 end
 
-function _dc_kkt_layout(prob::DCOPFProblem)
+function kkt_layout(prob::DCOPFProblem)
     net = getfield(prob, :network)
-    n_ref = getfield(prob, :_n_ref)
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    return _dc_kkt_dims(n, m, k, n_ref), _dc_kkt_indices(n, m, k, n_ref)
+    n_ref = getfield(prob, :_n_ref)
+    return _dc_kkt_layout(n, m, k, n_ref)
 end
 
 # =============================================================================
@@ -615,7 +586,7 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     k = getfield(net, :k)
     refs = _reference_buses(net)
     n_ref = length(refs)
-    dim = _dc_kkt_dims(n, m, k, n_ref)
+    dim, idx = kkt_layout(prob)
     A = getfield(net, :A)
     G_inc = getfield(net, :G_inc)
     b = getfield(net, :b)
@@ -644,8 +615,7 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     W = Diagonal(-b .* sw)
     B_mat = sparse(A' * W * A)
 
-    # Build Jacobian blocks using centralized index calculation
-    idx = _dc_kkt_indices(n, m, k, n_ref)
+    # Build Jacobian blocks using the centralized layout.
     A_rowptr, A_rowcols, A_rowvals = _sparse_row_storage(A)
     G_rowptr, G_rowcols, G_rowvals = _sparse_row_storage(G_inc)
     rowval = Int[]
@@ -859,7 +829,7 @@ function calc_kkt_jacobian_demand(net::DCNetwork, d::AbstractVector, sol::DCOPFS
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim, idx = _dc_kkt_layout(net)
+    dim, idx = kkt_layout(net)
     mu_ub = getfield(sol, :mu_ub)
 
     colptr = Vector{Int}(undef, n + 1)
@@ -887,7 +857,7 @@ Compute column `j` of the KKT parameter Jacobian ∂K/∂d.
 Only 1-2 nonzeros: always `nu_bal[j]`, plus `mu_ub[j]` if `d[j] > 0`.
 """
 function calc_kkt_jacobian_demand_column(net::DCNetwork, d::AbstractVector, sol::DCOPFSolution, j::Int)
-    dim, idx = _dc_kkt_layout(net)
+    dim, idx = kkt_layout(net)
     col = zeros(dim)
     col[idx.nu_bal[j]] = -1.0
     col[idx.mu_ub[j]] = sol.mu_ub[j] * _shed_capacity_derivative(d[j])
@@ -922,7 +892,7 @@ enabling gradient-based optimization for topology control.
 function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
-    dim, idx = _dc_kkt_layout(prob)
+    dim, idx = kkt_layout(prob)
 
     θ = sol.va
 
@@ -986,7 +956,7 @@ Compute column `e` of the KKT parameter Jacobian ∂K/∂sw.
 """
 function calc_kkt_jacobian_switching_column(prob::DCOPFProblem, sol::DCOPFSolution, e::Int)
     net = prob.network
-    dim, idx = _dc_kkt_layout(prob)
+    dim, idx = kkt_layout(prob)
     col = zeros(dim)
     A = net.A; b = net.b; θ = sol.va
     Aθ_e = dot(A[e, :], θ)
