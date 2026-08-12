@@ -124,6 +124,22 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
         @test all(isfinite, Matrix(dpg_dsw))
         @test all(isfinite, Matrix(df_dsw))
 
+        # The matrix-free :sw path must carry the same gated angle difference terms
+        # as the materialized Jacobian. `prob_cold` is never passed to
+        # calc_sensitivity, so prob.cache.dz_dsw stays empty and vjp/jvp take the
+        # inline `_dc_topo_vjp!`/`_dc_topo_jvp!` route rather than the cached
+        # matrix multiply. With gamma_ub[2] binding above, dropping those terms
+        # makes the two paths disagree.
+        prob_cold = DCOPFProblem(net, d)
+        solve!(prob_cold)
+        v_sw = randn(m)
+        w_pg = randn(k)
+        w_f = randn(m)
+        @test jvp(prob_cold, :pg, :sw, v_sw) ≈ Matrix(dpg_dsw) * v_sw atol=1e-8
+        @test jvp(prob_cold, :f, :sw, v_sw) ≈ Matrix(df_dsw) * v_sw atol=1e-8
+        @test vjp(prob_cold, :pg, :sw, w_pg) ≈ Matrix(dpg_dsw)' * w_pg atol=1e-8
+        @test vjp(prob_cold, :f, :sw, w_f) ≈ Matrix(df_dsw)' * w_f atol=1e-8
+
         ε = 1e-5
         for e in 1:m
             sw_pert = copy(net.sw)
