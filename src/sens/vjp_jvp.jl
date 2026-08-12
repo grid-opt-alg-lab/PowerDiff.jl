@@ -108,8 +108,8 @@ end
 # split between `calc_kkt_jacobian_switching` and `calc_kkt_jacobian_susceptance`.
 function _dc_topo_vjp!(out, prob, sol, u, idx, param::Symbol)
     net = prob.network
-    coeff = param === :sw ? net.b : net.sw
     gated = param === :sw
+    coeff = gated ? net.b : net.sw
     A = net.A
     Aθ = A * sol.va
     Au_nb = A * @view(u[idx.nu_bal])
@@ -181,7 +181,8 @@ end
 # `_dc_topo_vjp!` for why only `:sw` carries the gated angle difference terms.
 function _dc_topo_jvp!(v, prob, sol, tang, idx, param::Symbol)
     net = prob.network
-    coeff = param === :sw ? net.b : net.sw
+    gated = param === :sw
+    coeff = gated ? net.b : net.sw
     A = net.A
     Aθ = A * sol.va
     Aν = A * sol.nu_bal
@@ -199,7 +200,7 @@ function _dc_topo_jvp!(v, prob, sol, tang, idx, param::Symbol)
     # `:sw` also moves the gated angle difference limits. The va contribution folds
     # into w_va so it rides the same transpose-matvec; the gamma blocks scatter
     # directly.
-    if param === :sw
+    if gated
         @inbounds for e in 1:net.m
             dgate = _angle_difference_gate_dsw(net, e)
             w_va[e] += dgate * (sol.gamma_ub[e] - sol.gamma_lb[e]) * tang[e]
