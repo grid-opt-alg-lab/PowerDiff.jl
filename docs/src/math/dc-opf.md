@@ -32,7 +32,7 @@ where:
 - ``c_{\text{shed}}`` is the load shedding cost vector
 - ``d_+ = \max(d, 0)`` is the curtailable portion of signed net demand; negative net demand remains in power balance as an injection
 - ``\tau`` is a small regularization parameter for numerical conditioning
-- ``\mathrm{sw}_{\mathrm{eff},e} = \mathrm{sw}_e`` when ``b_e \mathrm{sw}_e \ne 0`` and is zero otherwise, so angle difference limits use the same energized predicate as the island partition while retaining fractional switching on energized branches
+- ``\mathrm{sw}_{\mathrm{eff},e} = \mathrm{sw}_e`` when ``b_e \mathrm{sw}_e \ne 0`` and is zero otherwise, so angle difference limits use the same energized predicate as the island partition. A de-energized branch (``\mathrm{sw}_{\mathrm{eff},e} = 0``) imposes no limit; on an energized branch the gate multiplies both sides, so the factor cancels and the primal constraint is exactly ``\alpha_{\min,e} \leq (A\theta)_e \leq \alpha_{\max,e}`` for every ``\mathrm{sw}_e \in (0, 1]``. Fractional switching therefore rescales the angle limit duals rather than relaxing the limit
 - ``\text{refs}`` contains one reference bus per energized island, including isolated buses. The choice is deterministic: the configured ``\text{ref_bus}`` is the reference for its island, and every other island uses its lowest sequential bus index
 
 The built OPF model stores one reference constraint for each entry of
