@@ -538,6 +538,22 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
         @test Jsw_zero_col == Jsw_zero[:, 3]
         @test Jsw_zero[:, 3] ≈ Jsw_zero_fd atol=1e-10
 
+        # The matrix-free dK/dsw applies the gate through its own
+        # `_angle_difference_gate_dsw` call site, so it can drift from the
+        # materialized column above. Drive the inline scatter/gather directly
+        # rather than through vjp/jvp: those resolve the solution from the cache
+        # and would discard the synthetic gammas, and the solver canonicalizes
+        # gamma to zero on a de-energized branch, which would make the b == 0
+        # gate vacuous.
+        tang_zero = randn(3)
+        u_zero = randn(size(Jsw_zero, 1))
+        jvp_free = zeros(size(Jsw_zero, 1))
+        vjp_free = zeros(3)
+        PowerDiff._dc_param_jvp!(jvp_free, prob_zero, sol_zero_gamma, :sw, tang_zero, idx_zero)
+        PowerDiff._dc_param_vjp!(vjp_free, prob_zero, sol_zero_gamma, :sw, u_zero, idx_zero)
+        @test jvp_free ≈ Jsw_zero * tang_zero atol=1e-12
+        @test vjp_free ≈ -Jsw_zero' * u_zero atol=1e-12
+
         Jb_zero = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_zero, sol_zero_gamma))
         Jb_zero_plain = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_zero, sol_zero))
         @test Jb_zero ≈ Jb_zero_plain atol=1e-12
@@ -564,6 +580,18 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
             @test Jsw_col ≈ Jsw[:, 3] atol=1e-12
             @test Jsw[:, 3] ≈ Jsw_fd atol=1e-8 rtol=1e-7
             @test norm(Jsw[:, 3] - Jsw_plain[:, 3]) > 1.0
+
+            # Same matrix-free cross-check as at b == 0, but with dgate == 1 so
+            # the gated terms are non-vacuous on branch 3.
+            idx_side = kkt_indices(prob_side)
+            tang_side = randn(3)
+            u_side = randn(size(Jsw, 1))
+            jvp_side = zeros(size(Jsw, 1))
+            vjp_side = zeros(3)
+            PowerDiff._dc_param_jvp!(jvp_side, prob_side, sol_side_gamma, :sw, tang_side, idx_side)
+            PowerDiff._dc_param_vjp!(vjp_side, prob_side, sol_side_gamma, :sw, u_side, idx_side)
+            @test jvp_side ≈ Jsw * tang_side atol=1e-12
+            @test vjp_side ≈ -Jsw' * u_side atol=1e-12
 
             Jb = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_side, sol_side_gamma))
             Jb_plain = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_side, sol_side))
