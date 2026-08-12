@@ -30,9 +30,19 @@ jvp
 jvp!
 vjp
 vjp!
-kkt_dims
 dict_to_vec
 vec_to_dict
+```
+
+## KKT Layout
+
+`kkt_layout` is the primary interface for inspecting a DC or AC KKT system.
+`kkt_dims` and `kkt_indices` return the individual parts of the same layout.
+
+```@docs
+kkt_layout
+kkt_dims
+kkt_indices
 ```
 
 ## Introspection

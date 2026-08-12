@@ -32,51 +32,12 @@
 _ref_bus_indices(prob::ACOPFProblem) = prob.data.ref_bus_keys
 
 # =============================================================================
-# Dimension Calculations
+# KKT Layout
 # =============================================================================
 
-"""
-    kkt_dims(prob::ACOPFProblem)
+_ac_kkt_dims(n::Int, m::Int, k::Int, n_ref::Int) = 6n + 12m + 6k + n_ref
 
-Compute the dimension of the flattened KKT variable vector for AC OPF.
-
-The KKT system includes:
-- Primal: va (n), vm (n), pg (k), qg (k)
-- Dual (equality): ν_p_bal (n), ν_q_bal (n), ν_ref_bus (n_ref)
-- Dual (inequality): λ_thermal_fr (m), λ_thermal_to (m),
-                     λ_angle_lb (m), λ_angle_ub (m),
-                     μ_vm_lb (n), μ_vm_ub (n),
-                     ρ_pg_lb (k), ρ_pg_ub (k), ρ_qg_lb (k), ρ_qg_ub (k),
-                     σ_p_fr_lb (m), σ_p_fr_ub (m), σ_q_fr_lb (m), σ_q_fr_ub (m),
-                     σ_p_to_lb (m), σ_p_to_ub (m), σ_q_to_lb (m), σ_q_to_ub (m)
-
-Total: 6n + 12m + 6k + n_ref
-"""
-function kkt_dims(prob::ACOPFProblem)
-    n, m, k = prob.network.n, prob.network.m, prob.n_gen
-    n_ref = length(prob.data.ref_bus_keys)
-    return 6n + 12m + 6k + n_ref
-end
-
-"""
-    kkt_indices(n, m, k, n_ref) → NamedTuple
-
-Compute all KKT variable indices from problem dimensions.
-Single source of truth for index calculations.
-
-# Variable ordering
-[va(n), vm(n), pg(k), qg(k),
- ν_p_bal(n), ν_q_bal(n), ν_ref_bus(n_ref),
- λ_thermal_fr(m), λ_thermal_to(m), λ_angle_lb(m), λ_angle_ub(m),
- μ_vm_lb(n), μ_vm_ub(n),
- ρ_pg_lb(k), ρ_pg_ub(k), ρ_qg_lb(k), ρ_qg_ub(k),
- σ_p_fr_lb(m), σ_p_fr_ub(m), σ_q_fr_lb(m), σ_q_fr_ub(m),
- σ_p_to_lb(m), σ_p_to_ub(m), σ_q_to_lb(m), σ_q_to_ub(m)]
-
-# Returns
-NamedTuple with index ranges for each variable block.
-"""
-function kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
+function _ac_kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
     i = 0
     # Primal
     idx_va = (i+1):(i+n); i += n
@@ -130,9 +91,34 @@ function kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
     )
 end
 
-function kkt_indices(prob::ACOPFProblem)
+@inline function _ac_kkt_layout(n::Int, m::Int, k::Int, n_ref::Int)
+    return _ac_kkt_dims(n, m, k, n_ref), _ac_kkt_indices(n, m, k, n_ref)
+end
+
+"""Return the AC KKT index ranges for the supplied bus, branch, generator, and reference-bus counts."""
+kkt_indices(n::Int, m::Int, k::Int, n_ref::Int) =
+    last(_ac_kkt_layout(n, m, k, n_ref))
+
+"""
+    kkt_layout(network::ACNetwork) → (dim, indices)
+    kkt_layout(prob::ACOPFProblem) → (dim, indices)
+
+Return the dimension and named index ranges of the flattened AC KKT variable
+vector.
+
+The layout contains the `va`, `vm`, `pg`, and `qg` primal blocks followed by
+the power-balance, reference-bus, thermal-limit, angle-limit, voltage-limit,
+generation-limit, and reduced-space flow-bound dual blocks. With `n` buses,
+`m` branches, `k` generators, and `n_ref` reference buses, the total dimension
+is `6n + 12m + 6k + n_ref`.
+"""
+function kkt_layout(net::ACNetwork)
+    return _ac_kkt_layout(net.n, net.m, length(net.gen_bus), length(net.ref_bus_keys))
+end
+
+function kkt_layout(prob::ACOPFProblem)
     n_ref = length(prob.data.ref_bus_keys)
-    kkt_indices(prob.network.n, prob.network.m, prob.n_gen, n_ref)
+    return _ac_kkt_layout(prob.network.n, prob.network.m, prob.n_gen, n_ref)
 end
 
 # =============================================================================
@@ -143,7 +129,7 @@ end
     flatten_variables(sol::ACOPFSolution, prob::ACOPFProblem)
 
 Flatten solution primal and dual variables into a single vector for KKT evaluation.
-Ordering matches `kkt_indices`.
+Ordering matches the indices returned by `kkt_layout`.
 """
 function flatten_variables(sol::ACOPFSolution, prob::ACOPFProblem)
     return vcat(
@@ -633,7 +619,7 @@ function calc_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothing}
         sol = _ensure_ac_solved!(prob)
     end
 
-    idx = kkt_indices(prob)
+    dim, idx = kkt_layout(prob)
     constants = _extract_kkt_constants(prob)
     prob.cache.kkt_constants = constants
     cq = _extract_gen_cq(prob)
@@ -642,7 +628,6 @@ function calc_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothing}
     vars = unflatten_variables(flatten_variables(sol, prob), idx)
     n, m, k = prob.network.n, prob.network.m, prob.n_gen
 
-    dim = kkt_dims(prob)
     row_idxs = Int[]
     col_idxs = Int[]
     vals = Float64[]
@@ -1203,9 +1188,9 @@ function calc_kkt_jacobian_param(prob::ACOPFProblem, sol::ACOPFSolution, param::
     haskey(_AC_PARAM_EXTRACT, param) || throw(ArgumentError(
         "Unknown AC OPF parameter: $param. Valid: $(keys(_AC_PARAM_EXTRACT))"))
 
-    idx = kkt_indices(prob)
+    dim, idx = kkt_layout(prob)
     p0 = _AC_PARAM_EXTRACT[param](prob)
-    Jp = zeros(Float64, kkt_dims(prob), length(p0))
+    Jp = zeros(Float64, dim, length(p0))
 
     constants = _require_kkt_constants(prob)
 
@@ -1359,10 +1344,10 @@ Compute a single analytical column of ∂K/∂param without materializing the fu
 parameter Jacobian.
 """
 function _calc_ac_kkt_param_column(prob::ACOPFProblem, sol::ACOPFSolution, param::Symbol, col_idx::Int)
-    idx = kkt_indices(prob)
+    dim, idx = kkt_layout(prob)
     vars = sol
     p0 = _AC_PARAM_EXTRACT[param](prob)
-    Kcol = zeros(Float64, kkt_dims(prob))
+    Kcol = zeros(Float64, dim)
 
     constants = _require_kkt_constants(prob)
 

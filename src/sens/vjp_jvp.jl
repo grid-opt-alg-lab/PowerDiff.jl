@@ -268,10 +268,10 @@ function _dcopf_vjp(prob::DCOPFProblem, op::Symbol, param::Symbol, adj::Abstract
 end
 
 function _dcopf_jvp(prob::DCOPFProblem, op::Symbol, param::Symbol, tang::AbstractVector)
-    idx = kkt_indices(prob)
+    dim, idx = kkt_layout(prob)
     odim = length(_dc_operand_kkt_rows(idx, op))
     out = Vector{Float64}(undef, odim)
-    work = Vector{Float64}(undef, kkt_dims(prob))
+    work = Vector{Float64}(undef, dim)
     return _dcopf_jvp!(out, prob, op, param, tang, work)
 end
 
@@ -398,7 +398,7 @@ end
 # =============================================================================
 
 function _acopf_vjp(prob::ACOPFProblem, op::Symbol, param::Symbol, adj::AbstractVector)
-    idx = kkt_indices(prob)
+    dim, idx = kkt_layout(prob)
     op_rows = _ac_operand_kkt_rows(idx, op)
     sign = _ac_operand_sign(op)
 
@@ -414,7 +414,7 @@ function _acopf_vjp(prob::ACOPFProblem, op::Symbol, param::Symbol, adj::Abstract
     kkt_lu = _ensure_ac_kkt_factor!(prob)
     ctx = _ac_kkt_context(prob)
 
-    w = zeros(kkt_dims(prob))
+    w = zeros(dim)
     w[op_rows] .= sign .* adj
     u = kkt_lu' \ w
 
@@ -425,7 +425,7 @@ function _acopf_vjp(prob::ACOPFProblem, op::Symbol, param::Symbol, adj::Abstract
 end
 
 function _acopf_jvp(prob::ACOPFProblem, op::Symbol, param::Symbol, tang::AbstractVector)
-    idx = kkt_indices(prob)
+    dim, idx = kkt_layout(prob)
     op_rows = _ac_operand_kkt_rows(idx, op)
     sign = _ac_operand_sign(op)
 
@@ -440,7 +440,7 @@ function _acopf_jvp(prob::ACOPFProblem, op::Symbol, param::Symbol, tang::Abstrac
     kkt_lu = _ensure_ac_kkt_factor!(prob)
     ctx = _ac_kkt_context(prob)
 
-    v = zeros(kkt_dims(prob))
+    v = zeros(dim)
     _ac_param_jvp!(v, prob, ctx, param, tang)
     u = kkt_lu \ v
 

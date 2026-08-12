@@ -88,7 +88,8 @@ end
         solve!(prob)
 
         @test reference_buses(net) == [1]
-        dim_connected = kkt_dims(prob)
+        dim_connected, idx_connected = kkt_layout(prob)
+        @test last(idx_connected.η) == dim_connected
         out = zeros(net.n)
         jvp!(out, prob, :lmp, :d, ones(net.n))
         @test length(prob.cache.work) == dim_connected
@@ -102,7 +103,12 @@ end
         @test length(prob.cons.ref) == 2
 
         sol = solve!(prob)
-        @test kkt_dims(prob) == dim_connected + 1
+        dim_islanded, idx_islanded = kkt_layout(prob)
+        @test dim_islanded == dim_connected + 1
+        @test length(idx_islanded.η) == 2
+        @test kkt_layout(net) == (dim_islanded, idx_islanded)
+        @test kkt_dims(prob) == dim_islanded
+        @test kkt_indices(prob) == idx_islanded
         @test sol.va[reference_buses(net)] ≈ zeros(2) atol=1e-8
         @test norm(kkt(flatten_variables(sol, prob), prob, d), Inf) < 1e-4
 
