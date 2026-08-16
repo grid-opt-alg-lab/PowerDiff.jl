@@ -12,7 +12,7 @@ mpc.areas = [1 1];
 mpc.bus_name = ['one'; 'two'];
 """
 
-# `parse_file`/`parse_matpower` return a PowerIO.Network; `_network_data` applies
+# `parse_file`/`parse_matpower` return a PowerIO.BalancedNetwork; `_network_data` applies
 # PowerDiff's normalization (per-unit via PowerIO, cost right-align, rate_a fallback,
 # angle defaults, storage/HVDC rejection) into the tables the constructors consume.
 _inline_data() = PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(_INLINE_CASE)))
@@ -46,7 +46,7 @@ _inline_data() = PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(_INLI
 
     @testset "Multiline arrays and artifact path" begin
         parsed = PowerDiff.parse_file("pglib_opf_case14_ieee.m"; library=:pglib)
-        @test parsed isa PowerIO.Network
+        @test parsed isa PowerIO.BalancedNetwork
         nd = PowerDiff._network_data(parsed)
         @test length(nd.bus) == 14
         @test length(nd.branch) == 20
@@ -74,7 +74,7 @@ _inline_data() = PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(_INLI
     end
 
     @testset "Parser contract" begin
-        @test PowerDiff.parse_file(IOBuffer(_INLINE_CASE)) isa PowerIO.Network
+        @test PowerDiff.parse_file(IOBuffer(_INLINE_CASE)) isa PowerIO.BalancedNetwork
         @test_throws ArgumentError PowerDiff.parse_file(IOBuffer(_INLINE_CASE); backend=:native)
     end
 end

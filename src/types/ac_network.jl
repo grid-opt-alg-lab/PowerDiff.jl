@@ -207,10 +207,10 @@ function ACNetwork(net::Dict{String,<:Any}; idx_slack::Union{Nothing,Int}=nothin
     throw(ArgumentError("dictionary constructors were removed; parse a network file with PowerDiff.parse_file"))
 end
 
-ACNetwork(net::PowerIO.Network; idx_slack::Union{Nothing,Int}=nothing) =
+ACNetwork(net::PowerIO.BalancedNetwork; idx_slack::Union{Nothing,Int}=nothing) =
     ACNetwork(_network_data(net); idx_slack=idx_slack)
 
-# Build from PowerDiff network tables (see `_network_data`). The `PowerIO.Network`
+# Build from PowerDiff network tables (see `_network_data`). The `PowerIO.BalancedNetwork`
 # method runs PowerDiff's modeling deltas; this assumes the tables are already
 # normalized, so programmatic callers can supply ready values directly.
 function ACNetwork(data::NamedTuple; idx_slack::Union{Nothing,Int}=nothing)
