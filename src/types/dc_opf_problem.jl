@@ -269,9 +269,11 @@ function _rebuild_jump_model!(prob::DCOPFProblem)
     refs = _reference_buses(network)
     ref_con = @constraint(model, [i in refs], va[i] == 0.0)
 
-    # Open lines should not constrain angle differences.
-    phase_diff_lb = @constraint(model, network.sw .* (network.A * va) .>= network.sw .* network.angmin)
-    phase_diff_ub = @constraint(model, network.sw .* (network.A * va) .<= network.sw .* network.angmax)
+    # De-energized lines should not constrain angle differences. Use the same
+    # b[e] * sw[e] != 0 predicate as the energized-island partition.
+    angle_gate = _angle_difference_gates(network)
+    phase_diff_lb = @constraint(model, angle_gate .* (network.A * va) .>= angle_gate .* network.angmin)
+    phase_diff_ub = @constraint(model, angle_gate .* (network.A * va) .<= angle_gate .* network.angmax)
 
     prob.model = model
     prob.va = va

@@ -662,6 +662,27 @@ end
 @inline _is_energized(net::DCNetwork, e::Int) =
     !iszero(getfield(net, :b)[e] * getfield(net, :sw)[e])
 
+# Phase-angle bounds use the switching value on energized branches and vanish
+# everywhere else. This preserves the existing continuous switching scaling while
+# making the bound topology agree with the energized-island predicate above.
+@inline _angle_difference_gate(net::DCNetwork, e::Int) =
+    _is_energized(net, e) ? getfield(net, :sw)[e] : zero(getfield(net, :sw)[e])
+
+function _angle_difference_gates(net::DCNetwork)
+    gates = similar(getfield(net, :sw))
+    @inbounds for e in eachindex(gates)
+        gates[e] = _angle_difference_gate(net, e)
+    end
+    return gates
+end
+
+# Within a fixed energized regime, the gate is `sw` when b != 0 and zero when
+# b == 0. Crossing b == 0 is a nonsmooth topology boundary, so its local
+# susceptance derivative follows the same zero convention used at other topology
+# boundaries.
+@inline _angle_difference_gate_dsw(net::DCNetwork, e::Int) =
+    iszero(getfield(net, :b)[e]) ? zero(getfield(net, :sw)[e]) : one(getfield(net, :sw)[e])
+
 function _topology_cache_valid(net::DCNetwork)
     cache = getfield(net, :topology_cache)
     cache.initialized || return false

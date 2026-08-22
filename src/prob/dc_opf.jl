@@ -105,6 +105,13 @@ function solve!(prob::DCOPFProblem)
     Atheta = net.A * θ_val
     TOL = COMPLEMENTARITY_SNAP_TOL
     for e in 1:net.m
+        if iszero(_angle_difference_gate(net, e))
+            # A de-energized branch has a constant 0 <= 0 pair of constraints.
+            # Canonicalize its otherwise arbitrary duals to zero.
+            γ_lb[e] = 0.0
+            γ_ub[e] = 0.0
+            continue
+        end
         if net.angmax[e] - Atheta[e] > TOL  # upper angle not binding
             γ_ub[e] = 0.0
         else
