@@ -62,10 +62,8 @@ function _dc_param_vjp!(out::AbstractVector, prob::DCOPFProblem,
         _dc_cost_quadratic_vjp!(out, sol, u, idx, prob.network.k)
     elseif param === :fmax
         _dc_flowlimit_vjp!(out, sol, u, idx, prob.network.m)
-    elseif param === :sw
-        _dc_topo_vjp!(out, prob, sol, u, idx, prob.network.b)
-    else  # :b
-        _dc_topo_vjp!(out, prob, sol, u, idx, prob.network.sw)
+    else  # :sw or :b
+        _dc_topo_vjp!(out, prob, sol, u, idx, param)
     end
     return out
 end
@@ -99,17 +97,33 @@ function _dc_flowlimit_vjp!(out, sol, u, idx, m)
     end
 end
 
-# `:sw`/`:b` — 3 KKT blocks (nu_bal, nu_flow, va), vectorized via sparse matvecs.
-# `coeff` is net.b for :sw, net.sw for :b (the coefficient that multiplies the parameter).
-function _dc_topo_vjp!(out, prob, sol, u, idx, coeff)
-    A = prob.network.A
+# `:sw`/`:b` — nu_bal, nu_flow, and va blocks from B and W, vectorized via sparse
+# matvecs. `coeff` is the other factor of the `b .* sw` product: net.b for :sw and
+# net.sw for :b.
+#
+# `:sw` additionally moves the gated angle difference limits, contributing to the va
+# block and to both gamma blocks. `:b` does not: the effective gate is locally
+# constant in b within a fixed energized regime, and zero by convention at the
+# nonsmooth b == 0 boundary (see `_angle_difference_gate_dsw`). This mirrors the
+# split between `calc_kkt_jacobian_switching` and `calc_kkt_jacobian_susceptance`.
+function _dc_topo_vjp!(out, prob, sol, u, idx, param::Symbol)
+    net = prob.network
+    gated = param === :sw
+    coeff = gated ? net.b : net.sw
+    A = net.A
     Aθ = A * sol.va
     Au_nb = A * @view(u[idx.nu_bal])
     Au_va = A * @view(u[idx.va])
     Aν = A * sol.nu_bal
-    @inbounds for e in 1:prob.network.m
+    @inbounds for e in 1:net.m
         out[e] = -coeff[e] * (Aθ[e] * (Au_nb[e] + u[idx.nu_flow[e]]) -
                                (Aν[e] + sol.nu_flow[e]) * Au_va[e])
+        if gated
+            dgate = _angle_difference_gate_dsw(net, e)
+            out[e] -= dgate * ((sol.gamma_ub[e] - sol.gamma_lb[e]) * Au_va[e] +
+                               sol.gamma_lb[e] * (Aθ[e] - net.angmin[e]) * u[idx.gamma_lb[e]] +
+                               sol.gamma_ub[e] * (net.angmax[e] - Aθ[e]) * u[idx.gamma_ub[e]])
+        end
     end
 end
 
@@ -130,10 +144,8 @@ function _dc_param_jvp!(v::AbstractVector, prob::DCOPFProblem,
         _dc_cost_quadratic_jvp!(v, sol, tang, idx, prob.network.k)
     elseif param === :fmax
         _dc_flowlimit_jvp!(v, sol, tang, idx, prob.network.m)
-    elseif param === :sw
-        _dc_topo_jvp!(v, prob, sol, tang, idx, prob.network.b)
-    else  # :b
-        _dc_topo_jvp!(v, prob, sol, tang, idx, prob.network.sw)
+    else  # :sw or :b
+        _dc_topo_jvp!(v, prob, sol, tang, idx, param)
     end
     return v
 end
@@ -165,9 +177,13 @@ function _dc_flowlimit_jvp!(v, sol, tang, idx, m)
     end
 end
 
-# `:sw`/`:b` — 2 sparse transpose-matvecs + elementwise scatter
-function _dc_topo_jvp!(v, prob, sol, tang, idx, coeff)
-    A = prob.network.A
+# `:sw`/`:b` — 2 sparse transpose-matvecs + elementwise scatter. See
+# `_dc_topo_vjp!` for why only `:sw` carries the gated angle difference terms.
+function _dc_topo_jvp!(v, prob, sol, tang, idx, param::Symbol)
+    net = prob.network
+    gated = param === :sw
+    coeff = gated ? net.b : net.sw
+    A = net.A
     Aθ = A * sol.va
     Aν = A * sol.nu_bal
 
@@ -180,6 +196,19 @@ function _dc_topo_jvp!(v, prob, sol, tang, idx, coeff)
 
     # va block: v[va] += A' * (-coeff .* (Aν .+ nu_flow) .* tang)
     w_va = (-coeff) .* (Aν .+ sol.nu_flow) .* tang
+
+    # `:sw` also moves the gated angle difference limits. The va contribution folds
+    # into w_va so it rides the same transpose-matvec; the gamma blocks scatter
+    # directly.
+    if gated
+        @inbounds for e in 1:net.m
+            dgate = _angle_difference_gate_dsw(net, e)
+            w_va[e] += dgate * (sol.gamma_ub[e] - sol.gamma_lb[e]) * tang[e]
+            v[idx.gamma_lb[e]] += dgate * sol.gamma_lb[e] * (Aθ[e] - net.angmin[e]) * tang[e]
+            v[idx.gamma_ub[e]] += dgate * sol.gamma_ub[e] * (net.angmax[e] - Aθ[e]) * tang[e]
+        end
+    end
+
     mul!(@view(v[idx.va]), A', w_va, 1.0, 1.0)
 end
 

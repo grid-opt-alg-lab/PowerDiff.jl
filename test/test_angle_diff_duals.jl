@@ -124,6 +124,22 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
         @test all(isfinite, Matrix(dpg_dsw))
         @test all(isfinite, Matrix(df_dsw))
 
+        # The matrix-free :sw path must carry the same gated angle difference terms
+        # as the materialized Jacobian. `prob_cold` is never passed to
+        # calc_sensitivity, so prob.cache.dz_dsw stays empty and vjp/jvp take the
+        # inline `_dc_topo_vjp!`/`_dc_topo_jvp!` route rather than the cached
+        # matrix multiply. With gamma_ub[2] binding above, dropping those terms
+        # makes the two paths disagree.
+        prob_cold = DCOPFProblem(net, d)
+        solve!(prob_cold)
+        v_sw = randn(m)
+        w_pg = randn(k)
+        w_f = randn(m)
+        @test jvp(prob_cold, :pg, :sw, v_sw) ≈ Matrix(dpg_dsw) * v_sw atol=1e-8
+        @test jvp(prob_cold, :f, :sw, v_sw) ≈ Matrix(df_dsw) * v_sw atol=1e-8
+        @test vjp(prob_cold, :pg, :sw, w_pg) ≈ Matrix(dpg_dsw)' * w_pg atol=1e-8
+        @test vjp(prob_cold, :f, :sw, w_f) ≈ Matrix(df_dsw)' * w_f atol=1e-8
+
         ε = 1e-5
         for e in 1:m
             sw_pert = copy(net.sw)
@@ -522,6 +538,22 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
         @test Jsw_zero_col == Jsw_zero[:, 3]
         @test Jsw_zero[:, 3] ≈ Jsw_zero_fd atol=1e-10
 
+        # The matrix-free dK/dsw applies the gate through its own
+        # `_angle_difference_gate_dsw` call site, so it can drift from the
+        # materialized column above. Drive the inline scatter/gather directly
+        # rather than through vjp/jvp: those resolve the solution from the cache
+        # and would discard the synthetic gammas, and the solver canonicalizes
+        # gamma to zero on a de-energized branch, which would make the b == 0
+        # gate vacuous.
+        tang_zero = randn(3)
+        u_zero = randn(size(Jsw_zero, 1))
+        jvp_free = zeros(size(Jsw_zero, 1))
+        vjp_free = zeros(3)
+        PowerDiff._dc_param_jvp!(jvp_free, prob_zero, sol_zero_gamma, :sw, tang_zero, idx_zero)
+        PowerDiff._dc_param_vjp!(vjp_free, prob_zero, sol_zero_gamma, :sw, u_zero, idx_zero)
+        @test jvp_free ≈ Jsw_zero * tang_zero atol=1e-12
+        @test vjp_free ≈ -Jsw_zero' * u_zero atol=1e-12
+
         Jb_zero = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_zero, sol_zero_gamma))
         Jb_zero_plain = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_zero, sol_zero))
         @test Jb_zero ≈ Jb_zero_plain atol=1e-12
@@ -548,6 +580,18 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
             @test Jsw_col ≈ Jsw[:, 3] atol=1e-12
             @test Jsw[:, 3] ≈ Jsw_fd atol=1e-8 rtol=1e-7
             @test norm(Jsw[:, 3] - Jsw_plain[:, 3]) > 1.0
+
+            # Same matrix-free cross-check as at b == 0, but with dgate == 1 so
+            # the gated terms are non-vacuous on branch 3.
+            idx_side = kkt_indices(prob_side)
+            tang_side = randn(3)
+            u_side = randn(size(Jsw, 1))
+            jvp_side = zeros(size(Jsw, 1))
+            vjp_side = zeros(3)
+            PowerDiff._dc_param_jvp!(jvp_side, prob_side, sol_side_gamma, :sw, tang_side, idx_side)
+            PowerDiff._dc_param_vjp!(vjp_side, prob_side, sol_side_gamma, :sw, u_side, idx_side)
+            @test jvp_side ≈ Jsw * tang_side atol=1e-12
+            @test vjp_side ≈ -Jsw' * u_side atol=1e-12
 
             Jb = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_side, sol_side_gamma))
             Jb_plain = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_side, sol_side))

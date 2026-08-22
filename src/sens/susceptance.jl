@@ -82,7 +82,6 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
 
         # dK_flow_def/db_e: only row e is nonzero
         J_b[idx.nu_flow[e], e] = sw[e] * Atheta_e
-
     end
 
     return J_b

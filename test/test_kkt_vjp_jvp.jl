@@ -30,14 +30,23 @@
         prob = DCOPFProblem(basic)
         solve!(prob)
 
+        # DC OPF vjp/jvp short-circuit to a cached dz/dp matrix multiply once
+        # calc_sensitivity has materialized one for that parameter. Comparing
+        # against S on the same problem therefore only exercises that fast path.
+        # `prob_cold` is deliberately never passed to calc_sensitivity — the
+        # inline `_dc_param_vjp!`/`_dc_param_jvp!` route is only reachable through
+        # it, so keep the two instances separate.
+        prob_cold = DCOPFProblem(basic)
+        solve!(prob_cold)
+
         @testset "VJP matches S' * w — all (op, param)" begin
             for (op, param) in [(:lmp, :d), (:pg, :d), (:f, :sw), (:va, :cq),
                                 (:psh, :cl), (:lmp, :fmax), (:f, :b)]
                 S = calc_sensitivity(prob, op, param)
                 w = randn(size(S, 1))
                 expected = S.matrix' * w
-                result = vjp(prob, op, param, w)
-                @test result ≈ expected atol=1e-10
+                @test vjp(prob_cold, op, param, w) ≈ expected atol=1e-10  # inline path
+                @test vjp(prob, op, param, w) ≈ expected atol=1e-10       # cached path
             end
         end
 
@@ -47,8 +56,8 @@
                 S = calc_sensitivity(prob, op, param)
                 v = randn(size(S, 2))
                 expected = S.matrix * v
-                result = jvp(prob, op, param, v)
-                @test result ≈ expected atol=1e-10
+                @test jvp(prob_cold, op, param, v) ≈ expected atol=1e-10  # inline path
+                @test jvp(prob, op, param, v) ≈ expected atol=1e-10       # cached path
             end
         end
 
