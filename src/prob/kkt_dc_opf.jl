@@ -268,53 +268,10 @@ function _extract_dz_column(prob::DCOPFProblem, dz_col::Vector{Float64}, op::Sym
 end
 
 # =============================================================================
-# Dimension Calculations
+# KKT Layout
 # =============================================================================
 
-"""
-    kkt_dims(prob::DCOPFProblem)
-    kkt_dims(network::DCNetwork)
-
-Compute the dimension of the flattened KKT variable vector.
-
-The KKT system includes:
-- Primal: va (n), pg (k), f (m), psh (n)
-- Dual (inequality): lam_lb (m), lam_ub (m), gamma_lb (m), gamma_ub (m), rho_lb (k), rho_ub (k), mu_lb (n), mu_ub (n)
-- Dual (equality): nu_bal (n), nu_flow (m)
-- Reference bus constraints: n_ref
-
-Total: 5n + 6m + 3k + n_ref
-"""
-function kkt_dims(prob::DCOPFProblem)
-    net = getfield(prob, :network)
-    return _dc_kkt_dims(getfield(net, :n), getfield(net, :m), getfield(net, :k),
-                        getfield(prob, :_n_ref))
-end
-kkt_dims(n::Int, m::Int, k::Int) = _dc_kkt_dims(n, m, k, 1)
 _dc_kkt_dims(n::Int, m::Int, k::Int, n_ref::Int) = 5n + 6m + 3k + n_ref
-
-function kkt_dims(net::DCNetwork)
-    n = getfield(net, :n)
-    m = getfield(net, :m)
-    k = getfield(net, :k)
-    n_ref = length(_reference_buses(net))
-    # va(n) + pg(k) + f(m) + psh(n) + lam_lb(m) + lam_ub(m) + gamma_lb(m) + gamma_ub(m) + rho_lb(k) + rho_ub(k) + mu_lb(n) + mu_ub(n) + nu_bal(n) + nu_flow(m) + ref(n_ref)
-    return _dc_kkt_dims(n, m, k, n_ref)
-end
-
-"""
-    kkt_indices(n, m, k) → NamedTuple
-
-Compute all KKT variable indices from network dimensions.
-Single source of truth for index calculations.
-
-# Variable ordering
-[va(n), pg(k), f(m), psh(n), lam_lb(m), lam_ub(m), gamma_lb(m), gamma_ub(m), rho_lb(k), rho_ub(k), mu_lb(n), mu_ub(n), nu_bal(n), nu_flow(m), eta(n_ref)]
-
-# Returns
-NamedTuple with index ranges for each variable block.
-"""
-kkt_indices(n::Int, m::Int, k::Int) = _dc_kkt_indices(n, m, k, 1)
 
 function _dc_kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
     i = 0
@@ -344,29 +301,43 @@ function _dc_kkt_indices(n::Int, m::Int, k::Int, n_ref::Int)
     )
 end
 
-kkt_indices(net::DCNetwork) = _dc_kkt_indices(net.n, net.m, net.k, length(_reference_buses(net)))
-
-function kkt_indices(prob::DCOPFProblem)
-    net = getfield(prob, :network)
-    return _dc_kkt_indices(getfield(net, :n), getfield(net, :m), getfield(net, :k),
-                           getfield(prob, :_n_ref))
+@inline function _dc_kkt_layout(n::Int, m::Int, k::Int, n_ref::Int)
+    return _dc_kkt_dims(n, m, k, n_ref), _dc_kkt_indices(n, m, k, n_ref)
 end
 
-function _dc_kkt_layout(net::DCNetwork)
+"""Return the DC KKT dimension for `n` buses, `m` branches, and `k` generators, assuming one reference bus."""
+kkt_dims(n::Int, m::Int, k::Int) = first(_dc_kkt_layout(n, m, k, 1))
+
+"""Return the DC KKT index ranges for `n` buses, `m` branches, and `k` generators, assuming one reference bus."""
+kkt_indices(n::Int, m::Int, k::Int) = last(_dc_kkt_layout(n, m, k, 1))
+
+"""
+    kkt_layout(network::DCNetwork) → (dim, indices)
+    kkt_layout(prob::DCOPFProblem) → (dim, indices)
+
+Return the dimension and named index ranges of the flattened DC KKT variable
+vector.
+
+The variable ordering is `[va, pg, f, psh, lam_lb, lam_ub, gamma_lb,
+gamma_ub, rho_lb, rho_ub, mu_lb, mu_ub, nu_bal, nu_flow, η]`. With `n`
+buses, `m` branches, `k` generators, and `n_ref` energized islands, the total
+dimension is `5n + 6m + 3k + n_ref`.
+"""
+function kkt_layout(net::DCNetwork)
+    n = getfield(net, :n)
+    m = getfield(net, :m)
+    k = getfield(net, :k)
     n_ref = length(_reference_buses(net))
-    n = getfield(net, :n)
-    m = getfield(net, :m)
-    k = getfield(net, :k)
-    return _dc_kkt_dims(n, m, k, n_ref), _dc_kkt_indices(n, m, k, n_ref)
+    return _dc_kkt_layout(n, m, k, n_ref)
 end
 
-function _dc_kkt_layout(prob::DCOPFProblem)
+function kkt_layout(prob::DCOPFProblem)
     net = getfield(prob, :network)
-    n_ref = getfield(prob, :_n_ref)
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    return _dc_kkt_dims(n, m, k, n_ref), _dc_kkt_indices(n, m, k, n_ref)
+    n_ref = getfield(prob, :_n_ref)
+    return _dc_kkt_layout(n, m, k, n_ref)
 end
 
 # =============================================================================
@@ -445,8 +416,8 @@ s.t. G_inc * g + psh - d = B * θ   (ν_bal)
      f = W * A * θ                  (ν_flow)
      f ≥ -fmax                      (λ_lb)
      f ≤ fmax                       (λ_ub)
-     A * θ ≥ angmin                 (γ_lb)
-     A * θ ≤ angmax                 (γ_ub)
+     sw_eff .* (A * θ) ≥ sw_eff .* angmin   (γ_lb)
+     sw_eff .* (A * θ) ≤ sw_eff .* angmax   (γ_ub)
      g ≥ gmin                       (ρ_lb)
      g ≤ gmax                       (ρ_ub)
      0 ≤ psh                        (μ_lb)
@@ -454,9 +425,11 @@ s.t. G_inc * g + psh - d = B * θ   (ν_bal)
      θ[refs] = 0                    (η_ref)
 ```
 
+Here `sw_eff[e] = sw[e]` when `b[e] * sw[e] != 0` and zero otherwise.
+
 # Returns
 Vector of KKT residuals (should be zero at optimum):
-1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + E_ref * η_ref + A' * Diag(sw) * (γ_ub - γ_lb) = 0
+1. Stationarity w.r.t. θ: B' * ν_bal + (W*A)' * ν_flow + E_ref * η_ref + A' * Diag(sw_eff) * (γ_ub - γ_lb) = 0
    (E_ref is the n × n_ref selection matrix for the per-island reference buses)
 2. Stationarity w.r.t. g: 2*Cq * g + cl - G_inc' * ν_bal - ρ_lb + ρ_ub = 0
 3. Stationarity w.r.t. f: τ² * f - ν_flow - λ_lb + λ_ub = 0
@@ -490,12 +463,13 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
     W = Diagonal(-net.b .* net.sw)
     B_mat = net.A' * W * net.A
     WA = W * net.A
+    angle_gate = _angle_difference_gates(net)
 
     refs = _reference_buses(net)
 
     # KKT conditions
     # 1. Stationarity w.r.t. θ
-    K_θ = B_mat' * ν_bal + WA' * ν_flow + net.A' * (net.sw .* (γ_ub - γ_lb))
+    K_θ = B_mat' * ν_bal + WA' * ν_flow + net.A' * (angle_gate .* (γ_ub - γ_lb))
     K_θ[refs] .+= η_ref
 
     # 2. Stationarity w.r.t. g
@@ -513,8 +487,8 @@ function kkt(z::AbstractVector, net::DCNetwork, d::AbstractVector)
 
     # 6. Complementary slackness: phase angle difference bounds
     Aθ = net.A * θ
-    K_γ_lb = γ_lb .* net.sw .* (Aθ - net.angmin)
-    K_γ_ub = γ_ub .* net.sw .* (net.angmax - Aθ)
+    K_γ_lb = γ_lb .* angle_gate .* (Aθ - net.angmin)
+    K_γ_ub = γ_ub .* angle_gate .* (net.angmax - Aθ)
 
     # 7. Complementary slackness: generation bounds
     K_ρ_lb = ρ_lb .* (g - net.gmin)
@@ -615,11 +589,12 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     k = getfield(net, :k)
     refs = _reference_buses(net)
     n_ref = length(refs)
-    dim = _dc_kkt_dims(n, m, k, n_ref)
+    dim, idx = kkt_layout(prob)
     A = getfield(net, :A)
     G_inc = getfield(net, :G_inc)
     b = getfield(net, :b)
     sw = getfield(net, :sw)
+    angle_gate = _angle_difference_gates(net)
     fmax = getfield(net, :fmax)
     gmin = getfield(net, :gmin)
     gmax = getfield(net, :gmax)
@@ -644,8 +619,7 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     W = Diagonal(-b .* sw)
     B_mat = sparse(A' * W * A)
 
-    # Build Jacobian blocks using centralized index calculation
-    idx = _dc_kkt_indices(n, m, k, n_ref)
+    # Build Jacobian blocks using the centralized layout.
     A_rowptr, A_rowcols, A_rowvals = _sparse_row_storage(A)
     G_rowptr, G_rowcols, G_rowvals = _sparse_row_storage(G_inc)
     rowval = Int[]
@@ -668,8 +642,8 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     # SparseMatrixCSC diagonals and structural setindex! insertions.
 
     # va columns:
-    # ∂K_γ_lb/∂θ = Diag(γ_lb .* sw) * A
-    # ∂K_γ_ub/∂θ = -Diag(γ_ub .* sw) * A
+    # ∂K_γ_lb/∂θ = Diag(γ_lb .* sw_eff) * A
+    # ∂K_γ_ub/∂θ = -Diag(γ_ub .* sw_eff) * A
     # ∂K_power_bal/∂θ = -B
     # ∂K_flow_def/∂θ = -W*A, where W = Diag(-b .* sw)
     # ∂K_ref/∂θ_ref = 1
@@ -678,12 +652,12 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
         for p in nzrange(A, j)
             e = rowvals(A)[p]
             aej = nonzeros(A)[p]
-            _push_csc_entry!(rowval, nzval, idx.gamma_lb[e], gamma_lb[e] * sw[e] * aej)
+            _push_csc_entry!(rowval, nzval, idx.gamma_lb[e], gamma_lb[e] * angle_gate[e] * aej)
         end
         for p in nzrange(A, j)
             e = rowvals(A)[p]
             aej = nonzeros(A)[p]
-            _push_csc_entry!(rowval, nzval, idx.gamma_ub[e], -gamma_ub[e] * sw[e] * aej)
+            _push_csc_entry!(rowval, nzval, idx.gamma_ub[e], -gamma_ub[e] * angle_gate[e] * aej)
         end
         for p in nzrange(B_mat, j)
             _push_csc_entry!(rowval, nzval, idx.nu_bal[rowvals(B_mat)[p]], -nonzeros(B_mat)[p])
@@ -755,23 +729,23 @@ function calc_kkt_jacobian(net::DCNetwork, d::AbstractVector, prob::DCOPFProblem
     end
 
     # gamma columns:
-    # ∂K_θ/∂γ_lb = -A' * Diag(sw)
-    # ∂K_γ_lb/∂γ_lb = Diag(sw .* (A*θ - angmin))
-    # ∂K_θ/∂γ_ub = A' * Diag(sw)
-    # ∂K_γ_ub/∂γ_ub = Diag(sw .* (angmax - A*θ))
+    # ∂K_θ/∂γ_lb = -A' * Diag(sw_eff)
+    # ∂K_γ_lb/∂γ_lb = Diag(sw_eff .* (A*θ - angmin))
+    # ∂K_θ/∂γ_ub = A' * Diag(sw_eff)
+    # ∂K_γ_ub/∂γ_ub = Diag(sw_eff .* (angmax - A*θ))
     @inbounds for e in 1:m
         start_col!(idx.gamma_lb[e])
         for p in A_rowptr[e]:(A_rowptr[e + 1] - 1)
-            _push_csc_entry!(rowval, nzval, idx.va[A_rowcols[p]], -sw[e] * A_rowvals[p])
+            _push_csc_entry!(rowval, nzval, idx.va[A_rowcols[p]], -angle_gate[e] * A_rowvals[p])
         end
-        _push_csc_entry!(rowval, nzval, idx.gamma_lb[e], sw[e] * (Aθ[e] - angmin[e]))
+        _push_csc_entry!(rowval, nzval, idx.gamma_lb[e], angle_gate[e] * (Aθ[e] - angmin[e]))
     end
     @inbounds for e in 1:m
         start_col!(idx.gamma_ub[e])
         for p in A_rowptr[e]:(A_rowptr[e + 1] - 1)
-            _push_csc_entry!(rowval, nzval, idx.va[A_rowcols[p]], sw[e] * A_rowvals[p])
+            _push_csc_entry!(rowval, nzval, idx.va[A_rowcols[p]], angle_gate[e] * A_rowvals[p])
         end
-        _push_csc_entry!(rowval, nzval, idx.gamma_ub[e], sw[e] * (angmax[e] - Aθ[e]))
+        _push_csc_entry!(rowval, nzval, idx.gamma_ub[e], angle_gate[e] * (angmax[e] - Aθ[e]))
     end
 
     # rho columns:
@@ -859,7 +833,7 @@ function calc_kkt_jacobian_demand(net::DCNetwork, d::AbstractVector, sol::DCOPFS
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim, idx = _dc_kkt_layout(net)
+    dim, idx = kkt_layout(net)
     mu_ub = getfield(sol, :mu_ub)
 
     colptr = Vector{Int}(undef, n + 1)
@@ -887,7 +861,7 @@ Compute column `j` of the KKT parameter Jacobian ∂K/∂d.
 Only 1-2 nonzeros: always `nu_bal[j]`, plus `mu_ub[j]` if `d[j] > 0`.
 """
 function calc_kkt_jacobian_demand_column(net::DCNetwork, d::AbstractVector, sol::DCOPFSolution, j::Int)
-    dim, idx = _dc_kkt_layout(net)
+    dim, idx = kkt_layout(net)
     col = zeros(dim)
     col[idx.nu_bal[j]] = -1.0
     col[idx.mu_ub[j]] = sol.mu_ub[j] * _shed_capacity_derivative(d[j])
@@ -922,12 +896,10 @@ enabling gradient-based optimization for topology control.
 function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
-    dim, idx = _dc_kkt_layout(prob)
+    dim, idx = kkt_layout(prob)
 
     θ = sol.va
 
-    # Current switching state
-    s = net.sw
     b = net.b
     A = net.A
 
@@ -953,12 +925,15 @@ function calc_kkt_jacobian_switching(prob::DCOPFProblem, sol::DCOPFSolution)
         Ae_dot_ν = dot(A_e_vec, ν_bal)
         J_s[idx.va, e] = -b[e] * A_e_vec * (Ae_dot_ν + ν_flow[e])
 
-        # ∂K_θ/∂s_e from gated angle difference bounds
-        J_s[idx.va, e] += A_e_vec * (sol.gamma_ub[e] - sol.gamma_lb[e])
+        # ∂K_θ/∂s_e from gated angle difference bounds. When b[e] == 0,
+        # changing switching alone cannot energize the branch, so this derivative
+        # vanishes with the gate.
+        dgate_dsw = _angle_difference_gate_dsw(net, e)
+        J_s[idx.va, e] += dgate_dsw * A_e_vec * (sol.gamma_ub[e] - sol.gamma_lb[e])
 
         # ∂K_γ/∂s_e from gated complementary slackness
-        J_s[idx.gamma_lb[e], e] = sol.gamma_lb[e] * (Aθ_e - net.angmin[e])
-        J_s[idx.gamma_ub[e], e] = sol.gamma_ub[e] * (net.angmax[e] - Aθ_e)
+        J_s[idx.gamma_lb[e], e] = dgate_dsw * sol.gamma_lb[e] * (Aθ_e - net.angmin[e])
+        J_s[idx.gamma_ub[e], e] = dgate_dsw * sol.gamma_ub[e] * (net.angmax[e] - Aθ_e)
     end
 
     return J_s
@@ -986,7 +961,7 @@ Compute column `e` of the KKT parameter Jacobian ∂K/∂sw.
 """
 function calc_kkt_jacobian_switching_column(prob::DCOPFProblem, sol::DCOPFSolution, e::Int)
     net = prob.network
-    dim, idx = _dc_kkt_layout(prob)
+    dim, idx = kkt_layout(prob)
     col = zeros(dim)
     A = net.A; b = net.b; θ = sol.va
     Aθ_e = dot(A[e, :], θ)
@@ -1002,12 +977,13 @@ function calc_kkt_jacobian_switching_column(prob::DCOPFProblem, sol::DCOPFSoluti
     col[idx.va[f_bus]] += coeff
     col[idx.va[t_bus]] -= coeff
     # gated angle difference stationarity contribution
-    coeff_ang = sol.gamma_ub[e] - sol.gamma_lb[e]
+    dgate_dsw = _angle_difference_gate_dsw(net, e)
+    coeff_ang = dgate_dsw * (sol.gamma_ub[e] - sol.gamma_lb[e])
     col[idx.va[f_bus]] += coeff_ang
     col[idx.va[t_bus]] -= coeff_ang
     # gated angle difference complementary slackness
-    col[idx.gamma_lb[e]] = sol.gamma_lb[e] * (Aθ_e - net.angmin[e])
-    col[idx.gamma_ub[e]] = sol.gamma_ub[e] * (net.angmax[e] - Aθ_e)
+    col[idx.gamma_lb[e]] = dgate_dsw * sol.gamma_lb[e] * (Aθ_e - net.angmin[e])
+    col[idx.gamma_ub[e]] = dgate_dsw * sol.gamma_ub[e] * (net.angmax[e] - Aθ_e)
     return col
 end
 

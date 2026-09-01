@@ -39,8 +39,8 @@ Susceptance b affects:
 
 The affected KKT conditions are (E_ref is the n × n_ref selection matrix for the
 per-island reference buses, so E_ref * eta_ref is a length-n vector):
-- K_theta = B' * nu_bal + (WA)' * nu_flow + E_ref * eta_ref + A' * Diag(sw) * (gamma_ub - gamma_lb)
-  (the eta_ref and gamma terms have no b-dependence, so ∂K_theta/∂b only comes from B and WA terms)
+- K_theta = B' * nu_bal + (WA)' * nu_flow + E_ref * eta_ref + A' * Diag(sw_eff) * (gamma_ub - gamma_lb)
+  (within a fixed energized regime, sw_eff is locally constant in b, so ∂K_theta/∂b only comes from B and WA terms)
 - K_power_bal = G_inc * g + psh - d - B * theta
 - K_flow_def = f - W * A * theta
 
@@ -51,7 +51,7 @@ Derivatives:
 function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
     net = prob.network
     n, m, k = net.n, net.m, net.k
-    dim, idx = _dc_kkt_layout(prob)
+    dim, idx = kkt_layout(prob)
 
     theta = sol.va
     nu_bal = sol.nu_bal
@@ -66,6 +66,9 @@ function calc_kkt_jacobian_susceptance(prob::DCOPFProblem, sol::DCOPFSolution)
     # Precompute A * theta once (invariant across branches)
     Atheta = A * theta
 
+    # The effective angle gate is locally constant in b on either side of zero.
+    # Its derivative is also defined as zero at the nonsmooth b == 0 boundary,
+    # so the gamma blocks make no contribution to this Jacobian.
     for e in 1:m
         A_e_vec = Vector(A[e, :])
         Atheta_e = Atheta[e]
@@ -91,7 +94,7 @@ Compute column `e` of ∂K/∂b. ~6 nonzeros from the incidence structure of bra
 """
 function calc_kkt_jacobian_susceptance_column(prob::DCOPFProblem, sol::DCOPFSolution, e::Int)
     net = prob.network
-    dim, idx = _dc_kkt_layout(prob)
+    dim, idx = kkt_layout(prob)
     col = zeros(dim)
     A = net.A; sw = net.sw; θ = sol.va
     Aθ_e = dot(A[e, :], θ)
@@ -106,5 +109,7 @@ function calc_kkt_jacobian_susceptance_column(prob::DCOPFProblem, sol::DCOPFSolu
     coeff = -sw[e] * (sol.nu_bal[f_bus] - sol.nu_bal[t_bus] + sol.nu_flow[e])
     col[idx.va[f_bus]] += coeff
     col[idx.va[t_bus]] -= coeff
+    # The effective angle gate has zero b derivative within a fixed energized
+    # regime and by convention at the nonsmooth b[e] == 0 boundary.
     return col
 end

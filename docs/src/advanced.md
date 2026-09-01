@@ -124,9 +124,13 @@ prob = ACOPFProblem(net; silent=true)
 exa_prob = ACOPFProblem(net; backend=:exa, silent=true)
 ```
 
-## KKT System Access (Qualified)
+## KKT System Access
 
-KKT internals are available via qualified access (`PowerDiff.function_name`), not exported:
+`kkt_layout` is the primary public entry point for the flattened KKT system. It
+returns the dimension and named index ranges together so they always describe
+the same layout. `kkt_dims` and `kkt_indices` are conveniences for
+callers that need only one part. Lower-level KKT operators remain available via
+qualified access (`PowerDiff.function_name`).
 
 ```julia
 using PowerDiff
@@ -137,14 +141,16 @@ z = PD.flatten_variables(sol, prob)     # Solution → vector
 vars = PD.unflatten_variables(z, prob)  # Vector → named tuple
 K = PD.kkt(z, prob, d)                  # KKT residuals
 J = PD.calc_kkt_jacobian(prob)          # Sparse Jacobian dK/dz
-dim = PD.kkt_dims(dc_net)              # KKT dimension
-idx = PD.kkt_indices(dc_net)           # Named index ranges
+dim, idx = kkt_layout(dc_net)           # Dimension and named index ranges
 
 # AC OPF — same unified API
 z = PD.flatten_variables(sol, ac_prob)
 J = PD.calc_kkt_jacobian(ac_prob)       # Sparse analytical Jacobian
-dim = PD.kkt_dims(ac_prob)             # KKT dimension
-idx = PD.kkt_indices(ac_prob)          # Named index ranges
+dim, idx = kkt_layout(ac_prob)
+
+# Thin conveniences when only one component is needed
+dim = kkt_dims(ac_prob)
+idx = kkt_indices(ac_prob)
 ```
 
 ## LMP Sign Conventions

@@ -1,0 +1,119 @@
+name: Register Package
+
+# Sets the version in Project.toml, commits it to main, and posts the
+# `@JuliaRegistrator register` comment on that commit *with a release-notes
+# block*. The notes matter: a pre-1.0 minor bump is a breaking release, and
+# General's AutoMerge holds a breaking version whose trigger carries no change
+# description (it must mention "breaking" or "changelog"). The General PR
+# AutoMerges (~15 minutes for a new version); TagBot then tags here. A green run
+# only means the comment was posted: registration errors (duplicate version,
+# compat problems) surface as Registrator replies on the commit thread and the
+# General PR. Manual fallback — comment on any commit:
+#
+#     @JuliaRegistrator register
+#
+#     Release notes:
+#
+#     ## Breaking changes
+#     ...
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to register (no leading v), or the component to bump (major/minor/patch)
+        required: true
+      release_notes:
+        description: >-
+          Release notes for the General PR. A breaking (pre-1.0 minor) bump must
+          mention "breaking" or "changelog". CHANGELOG.md must already have a
+          top section for the target version; leave this blank to use that
+          section as the release notes.
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set the version in Project.toml
+        id: ver
+        env:
+          INPUT: ${{ inputs.version }}
+        run: |
+          cur=$(grep -E '^version *= *"' Project.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          if [[ "$INPUT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            new="$INPUT"
+          else
+            IFS=. read -r MA MI PA <<< "$cur"
+            case "$INPUT" in
+              major) new="$((MA + 1)).0.0" ;;
+              minor) new="${MA}.$((MI + 1)).0" ;;
+              patch) new="${MA}.${MI}.$((PA + 1))" ;;
+              *) echo "::error::version must be X.Y.Z or major/minor/patch (got '$INPUT')"; exit 1 ;;
+            esac
+          fi
+          sed -i -E "0,/^version *= *\".*\"/s//version = \"$new\"/" Project.toml
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          echo "Set version to $new (was $cur)"
+
+      - name: Validate changelog entry
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          top=$(awk '/^## / { sub(/^##[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print; exit }' CHANGELOG.md)
+          if [ "$top" != "$VERSION" ]; then
+            echo "::error::top CHANGELOG.md section must be ## $VERSION, found ## ${top:-<none>}"
+            exit 1
+          fi
+          body=$(awk 'BEGIN { seen = 0 } /^## / { if (seen) exit; seen = 1; next } seen { print }' CHANGELOG.md)
+          if ! printf '%s\n' "$body" | grep -q '[^[:space:]]'; then
+            echo "::error::CHANGELOG.md section $VERSION is empty"
+            exit 1
+          fi
+          if ! printf '%s\n' "$body" | grep -q '^- '; then
+            echo "::error::CHANGELOG.md section $VERSION must include at least one bullet"
+            exit 1
+          fi
+
+      - name: Collect release notes
+        id: notes
+        env:
+          INPUT_NOTES: ${{ inputs.release_notes }}
+        run: |
+          if [ -n "$INPUT_NOTES" ]; then
+            notes="$INPUT_NOTES"
+          else
+            # The top CHANGELOG section: first `## ` heading up to the next one.
+            notes=$(awk '/^## /{n++; if (n == 2) exit} n >= 1' CHANGELOG.md)
+          fi
+          {
+            echo "notes<<RELEASE_NOTES_EOF"
+            echo "$notes"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Commit the version bump
+        id: commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -am "Set version to ${{ steps.ver.outputs.version }}" \
+            || echo "version already ${{ steps.ver.outputs.version }}; nothing to commit"
+          git push origin main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger JuliaRegistrator with release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.commit.outputs.sha }}
+          NOTES: ${{ steps.notes.outputs.notes }}
+        run: |
+          body=$(printf '@JuliaRegistrator register\n\nRelease notes:\n\n%s\n' "$NOTES")
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/comments" -f body="$body"

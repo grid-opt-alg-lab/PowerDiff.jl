@@ -124,6 +124,22 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
         @test all(isfinite, Matrix(dpg_dsw))
         @test all(isfinite, Matrix(df_dsw))
 
+        # The matrix-free :sw path must carry the same gated angle difference terms
+        # as the materialized Jacobian. `prob_cold` is never passed to
+        # calc_sensitivity, so prob.cache.dz_dsw stays empty and vjp/jvp take the
+        # inline `_dc_topo_vjp!`/`_dc_topo_jvp!` route rather than the cached
+        # matrix multiply. With gamma_ub[2] binding above, dropping those terms
+        # makes the two paths disagree.
+        prob_cold = DCOPFProblem(net, d)
+        solve!(prob_cold)
+        v_sw = randn(m)
+        w_pg = randn(k)
+        w_f = randn(m)
+        @test jvp(prob_cold, :pg, :sw, v_sw) ≈ Matrix(dpg_dsw) * v_sw atol=1e-8
+        @test jvp(prob_cold, :f, :sw, v_sw) ≈ Matrix(df_dsw) * v_sw atol=1e-8
+        @test vjp(prob_cold, :pg, :sw, w_pg) ≈ Matrix(dpg_dsw)' * w_pg atol=1e-8
+        @test vjp(prob_cold, :f, :sw, w_f) ≈ Matrix(df_dsw)' * w_f atol=1e-8
+
         ε = 1e-5
         for e in 1:m
             sw_pert = copy(net.sw)
@@ -420,5 +436,170 @@ import PowerDiff: kkt, kkt_indices, flatten_variables
         ungated = zeros(net.n)
         ungated[non_ref] = sol.B_r_factor \ rhs_ungated[non_ref]
         @test !isapprox(cong, ungated; atol=1e-3)
+    end
+
+    @testset "Zero-susceptance angle gating" begin
+        A_gate = sparse([
+            1.0 -1.0  0.0
+            0.0  1.0 -1.0
+            1.0  0.0 -1.0
+        ])
+        G_gate = sparse(Matrix(1.0I, 3, 3))
+        d_gate = [0.1, 0.1, 0.1]
+
+        function make_gate_network(b3; exclude_raw_angle=false)
+            angle_min = exclude_raw_angle ? [-Float64(pi), -Float64(pi), 0.1] : fill(-Float64(pi), 3)
+            angle_max = exclude_raw_angle ? [Float64(pi), Float64(pi), 0.2] : fill(Float64(pi), 3)
+            return DCNetwork(3, 3, 3, A_gate, G_gate, [-10.0, -10.0, b3];
+                sw=[1.0, 0.8, 0.6], fmax=fill(10.0, 3),
+                gmax=fill(10.0, 3), gmin=zeros(3),
+                angmin=angle_min, angmax=angle_max,
+                cq=ones(3), cl=[10.0, 20.0, 30.0], ref_bus=1, tau=1e-3)
+        end
+
+        function with_test_gamma(sol, e)
+            gamma_lb = copy(sol.gamma_lb)
+            gamma_ub = copy(sol.gamma_ub)
+            gamma_lb[e] = 1.25
+            gamma_ub[e] = 3.5
+            return DCOPFSolution(
+                copy(sol.va), copy(sol.pg), copy(sol.f), copy(sol.psh),
+                copy(sol.nu_bal), copy(sol.nu_flow),
+                copy(sol.lam_ub), copy(sol.lam_lb),
+                copy(sol.rho_ub), copy(sol.rho_lb),
+                copy(sol.mu_lb), copy(sol.mu_ub),
+                gamma_lb, gamma_ub, copy(sol.eta_ref), sol.objective, sol.B_r_factor,
+            )
+        end
+
+        function finite_difference_kkt_column(net, z, field, e, h)
+            values = getfield(net, field)
+            base = values[e]
+            try
+                values[e] = base + h
+                plus = kkt(z, net, d_gate)
+                values[e] = base - h
+                minus = kkt(z, net, d_gate)
+                return (plus - minus) / (2h)
+            finally
+                values[e] = base
+                reference_buses(net)  # refresh the topology cache after restoration
+            end
+        end
+
+        # A zero-b bridge splits the buses into separate energized islands. Its
+        # raw angle interval excludes zero, so the old sw-only gate made this
+        # otherwise independent two-island problem infeasible.
+        A_bridge = sparse(reshape([1.0, -1.0], 1, 2))
+        net_bridge = DCNetwork(2, 1, 2, A_bridge, sparse(Matrix(1.0I, 2, 2)), [0.0];
+            sw=[1.0], fmax=[10.0], gmax=[10.0, 10.0], gmin=zeros(2),
+            angmin=[0.1], angmax=[0.2], cq=ones(2), cl=[10.0, 20.0],
+            ref_bus=1, tau=1e-3)
+        @test reference_buses(net_bridge) == [1, 2]
+        prob_bridge = DCOPFProblem(net_bridge, [0.1, 0.1])
+        @test length(prob_bridge.cons.ref) == 2
+        sol_bridge = solve!(prob_bridge)
+        @test (net_bridge.A * sol_bridge.va)[1] < net_bridge.angmin[1]
+        @test iszero(sol_bridge.gamma_lb[1])
+        @test iszero(sol_bridge.gamma_ub[1])
+
+        # The zero-b branch is redundant for connectivity, but its raw angle
+        # interval deliberately excludes the solved angle. It must impose no model
+        # constraint because b[3] * sw[3] == 0.
+        net_zero = make_gate_network(0.0; exclude_raw_angle=true)
+        @test PowerDiff._angle_difference_gates(net_zero) == [1.0, 0.8, 0.0]
+        @test reference_buses(net_zero) == [1]
+        prob_zero = DCOPFProblem(net_zero, d_gate)
+        sol_zero = solve!(prob_zero)
+        @test (net_zero.A * sol_zero.va)[3] < net_zero.angmin[3]
+        @test iszero(sol_zero.gamma_lb[3])
+        @test iszero(sol_zero.gamma_ub[3])
+
+        z_zero = flatten_variables(sol_zero, prob_zero)
+        idx_zero = kkt_indices(prob_zero)
+        @test norm(kkt(z_zero, prob_zero, d_gate), Inf) < 1e-5
+
+        # Nonzero test multipliers make every gamma path load bearing without
+        # relying on an arbitrary solver dual for the constant 0 <= 0 constraints.
+        sol_zero_gamma = with_test_gamma(sol_zero, 3)
+        z_zero_gamma = flatten_variables(sol_zero_gamma, prob_zero)
+        @test kkt(z_zero_gamma, prob_zero, d_gate) ≈ kkt(z_zero, prob_zero, d_gate) atol=1e-12
+
+        Jz_zero = Matrix(PowerDiff.calc_kkt_jacobian(prob_zero; sol=sol_zero_gamma))
+        Jz_zero_fd = ForwardDiff.jacobian(z -> kkt(z, prob_zero, d_gate), z_zero_gamma)
+        @test Jz_zero ≈ Jz_zero_fd atol=1e-10 rtol=1e-10
+        @test all(iszero, Jz_zero[:, idx_zero.gamma_lb[3]])
+        @test all(iszero, Jz_zero[:, idx_zero.gamma_ub[3]])
+
+        Jsw_zero = Matrix(PowerDiff.calc_kkt_jacobian_switching(prob_zero, sol_zero_gamma))
+        Jsw_zero_col = PowerDiff.calc_kkt_jacobian_switching_column(prob_zero, sol_zero_gamma, 3)
+        Jsw_zero_fd = finite_difference_kkt_column(net_zero, z_zero_gamma, :sw, 3, 1e-6)
+        @test all(iszero, Jsw_zero[:, 3])
+        @test Jsw_zero_col == Jsw_zero[:, 3]
+        @test Jsw_zero[:, 3] ≈ Jsw_zero_fd atol=1e-10
+
+        # The matrix-free dK/dsw applies the gate through its own
+        # `_angle_difference_gate_dsw` call site, so it can drift from the
+        # materialized column above. Drive the inline scatter/gather directly
+        # rather than through vjp/jvp: those resolve the solution from the cache
+        # and would discard the synthetic gammas, and the solver canonicalizes
+        # gamma to zero on a de-energized branch, which would make the b == 0
+        # gate vacuous.
+        tang_zero = randn(3)
+        u_zero = randn(size(Jsw_zero, 1))
+        jvp_free = zeros(size(Jsw_zero, 1))
+        vjp_free = zeros(3)
+        PowerDiff._dc_param_jvp!(jvp_free, prob_zero, sol_zero_gamma, :sw, tang_zero, idx_zero)
+        PowerDiff._dc_param_vjp!(vjp_free, prob_zero, sol_zero_gamma, :sw, u_zero, idx_zero)
+        @test jvp_free ≈ Jsw_zero * tang_zero atol=1e-12
+        @test vjp_free ≈ -Jsw_zero' * u_zero atol=1e-12
+
+        Jb_zero = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_zero, sol_zero_gamma))
+        Jb_zero_plain = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_zero, sol_zero))
+        @test Jb_zero ≈ Jb_zero_plain atol=1e-12
+        @test PowerDiff.calc_kkt_jacobian_susceptance_column(prob_zero, sol_zero_gamma, 3) ≈ Jb_zero[:, 3] atol=1e-12
+
+        # A synthetic gamma on the zero-b branch must not leak into congestion.
+        @test calc_congestion_component(sol_zero_gamma, net_zero) ≈
+              calc_congestion_component(sol_zero, net_zero) atol=1e-12
+
+        # On either side of zero, sw_eff == sw and is locally constant in b.
+        # Verify both analytic parameter Jacobians without crossing the nonsmooth
+        # b == 0 boundary.
+        for b3 in (-1e-3, 1e-3)
+            net_side = make_gate_network(b3)
+            prob_side = DCOPFProblem(net_side, d_gate)
+            sol_side = solve!(prob_side)
+            sol_side_gamma = with_test_gamma(sol_side, 3)
+            z_side_gamma = flatten_variables(sol_side_gamma, prob_side)
+
+            Jsw = Matrix(PowerDiff.calc_kkt_jacobian_switching(prob_side, sol_side_gamma))
+            Jsw_plain = Matrix(PowerDiff.calc_kkt_jacobian_switching(prob_side, sol_side))
+            Jsw_col = PowerDiff.calc_kkt_jacobian_switching_column(prob_side, sol_side_gamma, 3)
+            Jsw_fd = finite_difference_kkt_column(net_side, z_side_gamma, :sw, 3, 1e-6)
+            @test Jsw_col ≈ Jsw[:, 3] atol=1e-12
+            @test Jsw[:, 3] ≈ Jsw_fd atol=1e-8 rtol=1e-7
+            @test norm(Jsw[:, 3] - Jsw_plain[:, 3]) > 1.0
+
+            # Same matrix-free cross-check as at b == 0, but with dgate == 1 so
+            # the gated terms are non-vacuous on branch 3.
+            idx_side = kkt_indices(prob_side)
+            tang_side = randn(3)
+            u_side = randn(size(Jsw, 1))
+            jvp_side = zeros(size(Jsw, 1))
+            vjp_side = zeros(3)
+            PowerDiff._dc_param_jvp!(jvp_side, prob_side, sol_side_gamma, :sw, tang_side, idx_side)
+            PowerDiff._dc_param_vjp!(vjp_side, prob_side, sol_side_gamma, :sw, u_side, idx_side)
+            @test jvp_side ≈ Jsw * tang_side atol=1e-12
+            @test vjp_side ≈ -Jsw' * u_side atol=1e-12
+
+            Jb = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_side, sol_side_gamma))
+            Jb_plain = Matrix(PowerDiff.calc_kkt_jacobian_susceptance(prob_side, sol_side))
+            Jb_col = PowerDiff.calc_kkt_jacobian_susceptance_column(prob_side, sol_side_gamma, 3)
+            Jb_fd = finite_difference_kkt_column(net_side, z_side_gamma, :b, 3, 1e-5)
+            @test Jb_col ≈ Jb[:, 3] atol=1e-12
+            @test Jb[:, 3] ≈ Jb_fd atol=1e-8 rtol=1e-7
+            @test Jb ≈ Jb_plain atol=1e-12
+        end
     end
 end

@@ -23,12 +23,31 @@ using Ipopt
 using JuMP: MOI, optimizer_with_attributes
 
 # Import non-exported KKT functions used by tests
-import PowerDiff: kkt, kkt_dims, kkt_indices, calc_kkt_jacobian,
+import PowerDiff: kkt, calc_kkt_jacobian,
                   flatten_variables, unflatten_variables
 
 PowerModels.silence()
 
 include("common.jl")
+
+struct UnsupportedKKTNetwork <: AbstractPowerNetwork end
+
+@testset "KKT Layout Interface" begin
+    @test all(name -> name in names(PowerDiff), (:kkt_layout, :kkt_dims, :kkt_indices))
+
+    # Convenience accessors for third-party network types identify the missing
+    # primary interface method directly.
+    err = try
+        kkt_dims(UnsupportedKKTNetwork())
+        nothing
+    catch caught
+        caught
+    end
+    @test err isa MethodError
+    if err isa MethodError
+        @test err.f === kkt_layout
+    end
+end
 
 # =============================================================================
 # DC OPF Tests
@@ -149,8 +168,11 @@ end
         # KKT dimension: n(θ) + k(g) + m(f) + n(psh) + n(ν_bal) + m(ν_flow) +
         # 2m(λ_ub/lb) + 2k(ρ_ub/lb) + 2n(μ_ub/lb) + 2m(γ_ub/lb) + 1(η_ref)
         # = 5n + 6m + 3k + 1
-        dim = kkt_dims(dc_net)
+        dim, idx = kkt_layout(dc_net)
         @test dim == 5*dc_net.n + 6*dc_net.m + 3*dc_net.k + 1
+        @test kkt_layout(prob) == (dim, idx)
+        @test kkt_dims(dc_net) == dim
+        @test kkt_indices(dc_net) == idx
 
         # Test flatten/unflatten round-trip
         z = flatten_variables(sol, prob)
@@ -165,7 +187,6 @@ end
         K = kkt(z, prob, d)
         # Note: complementary slackness won't be exactly zero due to interior point solver
         # Check stationarity and feasibility conditions using centralized indices
-        idx = kkt_indices(dc_net)
         # Primal feasibility should be very tight
         @test norm(K[idx.nu_bal]) < 1e-4
     end
@@ -178,7 +199,13 @@ end
     else
         ac_prob = ACOPFProblem(net)
         ac_sol = solve!(ac_prob)
+        dim, idx = kkt_layout(ac_prob)
+        @test kkt_layout(ac_prob.network) == (dim, idx)
+        @test kkt_dims(ac_prob) == dim
+        @test kkt_indices(ac_prob) == idx
+        @test last(idx.sig_q_to_ub) == dim
         z = flatten_variables(ac_sol, ac_prob)
+        @test length(z) == dim
         K = kkt(z, ac_prob)
 
         # No NaN sentinels survived (validates pre-allocated index assignment is complete)

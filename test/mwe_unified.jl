@@ -22,7 +22,7 @@
 using PowerDiff
 using PowerModels
 
-# Load a test network through PowerDiff's PowerIO parser (returns a PowerIO.Network)
+# Load a test network through PowerDiff's PowerIO parser (returns a PowerIO.BalancedNetwork)
 case_path = joinpath(dirname(pathof(PowerModels)), "..", "test", "data", "matpower", "case14.m")
 net_data = PowerDiff.parse_file(case_path)
 

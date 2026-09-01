@@ -101,7 +101,8 @@ export IDMapping
 export calc_sensitivity, calc_sensitivity_column
 export Sensitivity, silence
 export operand_symbols, parameter_symbols
-export jvp, vjp, jvp!, vjp!, dict_to_vec, vec_to_dict, kkt_dims
+export jvp, vjp, jvp!, vjp!, dict_to_vec, vec_to_dict
+export kkt_layout, kkt_dims, kkt_indices
 export parse_file, parse_matpower, parse_matpower_struct, get_path
 
 # DC Power Flow Types

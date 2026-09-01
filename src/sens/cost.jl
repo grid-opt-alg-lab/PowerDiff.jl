@@ -37,7 +37,7 @@ function calc_kkt_jacobian_cost_linear(net::DCNetwork)
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim, idx = _dc_kkt_layout(net)
+    dim, idx = kkt_layout(net)
 
     colptr = Vector{Int}(undef, k + 1)
     rowval = Int[]
@@ -61,7 +61,7 @@ end
 Compute column `j` of ∂K/∂cl. Only 1 nonzero: `pg[j] = 1.0`.
 """
 function calc_kkt_jacobian_cost_linear_column(net::DCNetwork, j::Int)
-    dim, idx = _dc_kkt_layout(net)
+    dim, idx = kkt_layout(net)
     col = zeros(dim)
     col[idx.pg[j]] = 1.0
     return col
@@ -92,7 +92,7 @@ function calc_kkt_jacobian_cost_quadratic(prob::DCOPFProblem, sol::DCOPFSolution
     n = getfield(net, :n)
     m = getfield(net, :m)
     k = getfield(net, :k)
-    dim, idx = _dc_kkt_layout(prob)
+    dim, idx = kkt_layout(prob)
 
     g = getfield(sol, :pg)
 
@@ -120,7 +120,7 @@ end
 Compute column `j` of ∂K/∂cq. Only 1 nonzero: `pg[j] = 2*g[j]`.
 """
 function calc_kkt_jacobian_cost_quadratic_column(net::DCNetwork, sol::DCOPFSolution, j::Int)
-    dim, idx = _dc_kkt_layout(net)
+    dim, idx = kkt_layout(net)
     col = zeros(dim)
     col[idx.pg[j]] = 2.0 * sol.pg[j]
     return col

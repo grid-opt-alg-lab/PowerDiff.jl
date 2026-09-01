@@ -91,18 +91,37 @@ appropriate formulation (DC or AC).
 function calc_kkt_jacobian end
 
 """
-    kkt_dims(prob::AbstractOPFProblem) → Int
+    kkt_layout(system) → (dim, indices)
 
-Total dimension of the KKT system for the given OPF problem.
+Return the layout of the flattened KKT system for an OPF network or problem.
+`dim` is the total dimension and `indices` is a named tuple containing the
+index range of every primal and dual variable block.
+
+This is the primary entry point for KKT shape information. Use `kkt_dims` or
+`kkt_indices` when only one part of the layout is needed.
+"""
+function kkt_layout end
+
+"""
+    kkt_dims(system) → Int
+
+Return the total dimension of the KKT system. This is a convenience equivalent
+to `first(kkt_layout(system))`.
 """
 function kkt_dims end
 
 """
-    kkt_indices(prob::AbstractOPFProblem) → NamedTuple
+    kkt_indices(system) → NamedTuple
 
-Index ranges for primal and dual variables in the flattened KKT vector.
+Return the named index ranges for primal and dual variables in the flattened
+KKT vector. This is a convenience equivalent to `last(kkt_layout(system))`.
 """
 function kkt_indices end
+
+@inline kkt_dims(system::Union{AbstractPowerNetwork,AbstractOPFProblem}) =
+    first(kkt_layout(system))
+@inline kkt_indices(system::Union{AbstractPowerNetwork,AbstractOPFProblem}) =
+    last(kkt_layout(system))
 
 """
     flatten_variables(sol::AbstractOPFSolution, prob::AbstractOPFProblem) → Vector

@@ -105,6 +105,8 @@ with total dimension ``6n + 12m + 6k + n_{\text{ref}}``, where ``n`` is the numb
 
 ## Implicit Differentiation
 
+Optimal AC OPF solutions are differentiated by applying the implicit function theorem to the KKT system, which is the constrained optimization counterpart of implicitly differentiating the power flow equations themselves. The same theory guarantees that the derivative exists under mild regularity (a nonsingular KKT Jacobian at a strictly complementary solution) for generic radial or meshed networks.
+
 ### KKT Jacobian
 
 The KKT Jacobian ``\partial K / \partial z`` is assembled analytically as a
@@ -185,3 +187,9 @@ lmps = calc_sensitivity(ac_prob, :lmp, :d)   # dLMP/dd
 ## Solver
 
 The AC OPF uses [Ipopt](https://github.com/coin-or/Ipopt) as the default nonlinear programming solver, accessed via JuMP.
+
+## References
+
+The implicit differentiation framework underlying these sensitivities, which applies the implicit function theorem to power flow solutions and their optimization counterparts under admittance and topology changes, follows:
+
+- S. Talkington, D. Turizo, S. A. Dorado-Rojas, R. K. Gupta & D. K. Molzahn, ["Differentiating Through Power Flow Solutions for Admittance and Topology Control,"](https://arxiv.org/abs/2510.17071) 2025.
