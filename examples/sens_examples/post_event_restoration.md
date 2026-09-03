@@ -1,5 +1,19 @@
 # Example Use Case: Post-Event Transmission Restoration with PowerDiff
 
+## Running the example
+
+Run the example from the root of the PowerDiff repository so Julia uses the
+package versions specified by `Project.toml`:
+
+```bash
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+julia --project=. examples/sens_examples/post_event_restoration.jl
+```
+
+PowerDiff currently requires PowerIO 0.8.2 or later within the compatible 0.8
+release series. If an older untracked `Manifest.toml` pins PowerIO 0.1.x, it
+must be regenerated from the current `Project.toml` before running the example.
+
 ## Example Problem Setup
 
 After a major disturbance, several transmission lines may be simultaneously damaged. The system operator knows which lines are damaged, but repair resources (crews
