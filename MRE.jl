@@ -16,8 +16,8 @@ using JSON
 
 
 function main()
-    testCase = "MRE_matpowerFiles/RTS_GMLC.m"
-    testCase = "MRE_matpowerFiles/IEEE300.m"
+    #testCase = "MRE_matpowerFiles/RTS_GMLC.m"
+    testCase = "MRE_matpowerFiles/WECC240.m"
     net = PowerModels.parse_file(testCase)
     d = PowerDiff.calc_demand_vector(net)
     dc_net = PowerDiff.DCNetwork(net)
