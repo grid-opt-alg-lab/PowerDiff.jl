@@ -3,7 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+  # `labeled` is listed because the `full-matrix` gate below reads the pull
+  # request's labels: without it, applying the label triggers nothing and the
+  # matrix job stays skipped.
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   schedule:
     # Weekly nightly check (Sundays at 04:00 UTC)
     - cron: '0 4 * * 0'
