@@ -32,36 +32,29 @@ That rewrites `CHANGELOG.md` in place, so run it locally and commit the result.
 Merge the pull request and wait for CI to go green on `main`. That commit is
 what gets registered, and the Register workflow re-runs the suite against it.
 
-## 3. Read the tip of main
+## 3. Run the Register workflow
 
-```bash
-git fetch origin && git rev-parse origin/main
-```
-
-## 4. Run the Register workflow
-
-Actions -> Register -> Run workflow, and paste the SHA from step 3 into
-`expected_sha`. The workflow refuses anything that is not the current tip of
-`main`, checks the version and changelog, checks the version against General
-and against the existing tags, runs the tests, and posts one
-`@JuliaRegistrator register` comment carrying the changelog section as the
-release notes.
+Actions -> Register -> Run workflow, with the branch set to `main`. The
+workflow registers the commit that dispatch resolved, checks the version and
+changelog, checks the version against General and against the existing tags,
+runs the tests, and posts one `@JuliaRegistrator register` comment carrying the
+changelog section as the release notes.
 
 Set `dry_run` to run every check and print the comment without posting it.
 
-## 5. Wait for AutoMerge
+## 4. Wait for AutoMerge
 
 JuliaRegistrator opens a pull request against `JuliaRegistries/General`.
 AutoMerge merges it after about ten minutes if the checks pass. Failures show
 up as replies on the commit comment thread and on the General pull request.
 
-## 6. Wait for TagBot
+## 5. Wait for TagBot
 
 TagBot pushes the `vX.Y.Z` tag and publishes the GitHub release, usually within
 the hour. If it does not, run Actions -> TagBot -> Run workflow; TagBot
 re-scans every registered version and backfills whatever it missed.
 
-## 7. Verify
+## 6. Verify
 
 - the `vX.Y.Z` tag exists and has a GitHub release attached;
 - the release notes contain the changelog section;

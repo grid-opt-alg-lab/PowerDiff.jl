@@ -30,10 +30,6 @@ name: Register
 on:
   workflow_dispatch:
     inputs:
-      expected_sha:
-        description: Full 40-character SHA of the commit to register. Must be the current tip of main.
-        required: true
-        type: string
       dry_run:
         description: Run every check and print the trigger comment without posting it.
         required: false
@@ -60,30 +56,24 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      RELEASE_SHA: ${{ github.sha }}
     steps:
-      # Checks out the exact commit named by the dispatch, not a branch tip that
-      # could move between validation and trigger. The full history is needed so
-      # that the tests see the same tree a tagged checkout will.
+      # `github.sha` is the commit the dispatch resolved its ref to, and the
+      # default checkout takes it. The full history is needed so that the tests
+      # see the same tree a tagged checkout will.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.expected_sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Check that the commit is the tip of main
+      - name: Check that the dispatch names main
         run: |
           set -euo pipefail
-          if ! printf '%s' "$EXPECTED_SHA" | grep -qE '^[0-9a-f]{40}$'; then
-            echo "::error::expected_sha must be a full 40-character lowercase hex SHA, got '$EXPECTED_SHA'"
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "::error::Register runs against main. This dispatch chose '$GITHUB_REF_NAME'."
             exit 1
           fi
-          main_sha=$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)
-          if [ "$main_sha" != "$EXPECTED_SHA" ]; then
-            echo "::error::expected_sha $EXPECTED_SHA is not the tip of main ($main_sha). Re-read the tip with 'git fetch origin && git rev-parse origin/main' and dispatch again."
-            exit 1
-          fi
-          echo "Registering $EXPECTED_SHA, the current tip of main."
+          echo "Registering $RELEASE_SHA from main."
 
       - name: Read the version from Project.toml
         id: version
@@ -241,12 +231,12 @@ jobs:
         id: dedupe
         run: |
           set -euo pipefail
-          existing=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${EXPECTED_SHA}/comments" \
+          existing=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_SHA}/comments" \
             --jq '[.[] | select(.body | test("@JuliaRegistrator\\s+register"; "i"))] | length' \
             | awk '{ total += $1 } END { print total + 0 }')
           echo "existing=$existing" >> "$GITHUB_OUTPUT"
           if [ "$existing" -gt 0 ]; then
-            echo "::notice::$EXPECTED_SHA already carries $existing Registrator trigger comment(s); the trigger step will be skipped."
+            echo "::notice::$RELEASE_SHA already carries $existing Registrator trigger comment(s); the trigger step will be skipped."
           fi
 
       - name: Trigger JuliaRegistrator
@@ -262,10 +252,10 @@ jobs:
           jq -Rs '{body: ("@JuliaRegistrator register\n\nRelease notes:\n\n" + .)}' \
             < "$NOTES_FILE" > "$payload"
           if [ "$DRY_RUN" = "true" ]; then
-            echo "Dry run. The comment below would be posted on $EXPECTED_SHA:"
+            echo "Dry run. The comment below would be posted on $RELEASE_SHA:"
             jq -r .body < "$payload"
             exit 0
           fi
-          gh api "repos/${GITHUB_REPOSITORY}/commits/${EXPECTED_SHA}/comments" \
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${RELEASE_SHA}/comments" \
             --method POST --input - < "$payload"
-          echo "Triggered JuliaRegistrator on $EXPECTED_SHA."
+          echo "Triggered JuliaRegistrator on $RELEASE_SHA."
