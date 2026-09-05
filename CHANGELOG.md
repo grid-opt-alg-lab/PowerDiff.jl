@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+All notable changes to PowerDiff.jl are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html): while the version is
+below 1.0, a minor bump is a **breaking** release.
+
+## [Unreleased]
+
+## [0.2.0] - 2026-09-05
+
+Everything on `main` since v0.1.0 ships here. v0.1.0 was registered against
+PowerIO 0.6, so the 0.7 through 0.11 work, the public KKT layout, the
+energized-branch angle gates and the pull request benchmarks have all been
+unreleased until now.
 
 Tracks **PowerIO 0.11** (powerio C ABI 7). The `[compat]` bound is now
 `PowerIO = "0.11"`; the binding gates its ABI handshake on equality, so it and its
@@ -75,12 +87,35 @@ and nothing that PowerIO computes is computed again here.
 
 ### Added
 
+- A worked post-event transmission restoration example on IEEE 300, screening which
+  outaged branches to repair first with a single `vjp` rather than a full
+  sensitivity matrix, with its write-up. Contributed by @karenkji.
 - A test that the ingest still reproduces MATPOWER's network, comparing
   `ptdf_matrix` against `PowerModels.calc_basic_ptdf_matrix` on three PGLib cases.
   It shares no code with the ingest and pins the topology, the branch susceptances
   and the reference bus together.
 
-## 0.1.0
+### Release tooling
+
+- `Register.yml` replaces `register.yml`, and validates instead of mutating. The
+  version bump and the changelog section now land through an ordinary reviewed pull
+  request, so CI runs on the exact tree that gets registered; the old workflow
+  pushed that commit itself with `GITHUB_TOKEN`, which starts no workflow, making it
+  the one commit on `main` that CI never saw. The replacement takes the commit to
+  register, refuses anything that is not the tip of `main`, re-runs the tests on it,
+  checks the version against General's `Versions.toml`, refuses to trigger twice for
+  the same commit, and offers a dry run.
+- TagBot generates the GitHub release notes from the merged pull requests since the
+  last release, with housekeeping filtered out by label.
+- `CHANGELOG.md` follows Keep a Changelog and is rendered into the documentation by
+  `Changelog.jl`.
+- Every workflow carries an explicit `permissions:` block and a concurrency group,
+  and every third-party action is pinned to a commit SHA. CI reports coverage.
+- The benchmark job skips pull requests from forks instead of failing on them: a
+  fork gets a read-only token, so the step that posts the comment could not succeed.
+- `RELEASING.md` and `CONTRIBUTING.md` are new.
+
+## [0.1.0] - 2026-07-09
 
 First release on the PowerIO 0.6.x data layer, and the first cut through the
 one-click `register.yml` release workflow.

@@ -17,7 +17,7 @@ A Julia package for differentiable power system analysis. Compute sensitivities 
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerDiff.jl.git")
+Pkg.add("PowerDiff")
 ```
 
 ## Quick Example

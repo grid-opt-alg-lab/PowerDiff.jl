@@ -25,7 +25,7 @@ A Julia package for differentiable power system analysis. Compute sensitivities 
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerDiff.jl.git")
+Pkg.add("PowerDiff")
 ```
 
 ## Quick Start
@@ -75,6 +75,11 @@ a reader, so name the one you mean: `from=:powermodels`, `:egret`, `:pandapower`
 `m.diagnostics`, the reader's findings as records you can branch on by `code` and
 `severity`; `m.sources[1].format`, the reader that ran; and enough for
 `PowerIO.emit(m, "psse", path)` to write the case out again.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to run the tests and build the docs.
+Maintainers cutting a release follow [RELEASING.md](RELEASING.md).
 
 ## Dependencies
 
