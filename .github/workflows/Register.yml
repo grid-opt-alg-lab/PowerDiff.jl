@@ -205,6 +205,47 @@ jobs:
           fi
           echo "$VERSION is new and higher than every registered version."
 
+      - name: Check that CI is green on this commit
+        run: |
+          set -euo pipefail
+          # The premise of this workflow is that the commit being registered is
+          # one a reviewed pull request already turned green, so that claim is
+          # checked rather than assumed. A push to main runs the full matrix, so
+          # this covers Julia 1.10, 1.11 and macOS, none of which the release
+          # gate below re-runs.
+          #
+          # Named workflows rather than every check run on the commit: TagBot,
+          # Dependabot and the site deploy also attach runs to a commit, and
+          # none of them says anything about whether the tree is releasable. A
+          # failed TagBot run must not block a release forever.
+          for wf in CI.yml Documentation.yml; do
+            run=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${wf}/runs?head_sha=${RELEASE_SHA}&per_page=100" \
+              --jq '[.workflow_runs[] | select(.event == "push")]
+                    | sort_by(.run_started_at) | last
+                    | if . == null then "none" else "\(.status)\t\(.conclusion // "")\t\(.html_url)" end')
+
+            if [ "$run" = "none" ]; then
+              echo "::error::no $wf run on $RELEASE_SHA. Wait for it to finish on main before registering."
+              exit 1
+            fi
+
+            status=$(printf '%s' "$run" | cut -f1)
+            conclusion=$(printf '%s' "$run" | cut -f2)
+            url=$(printf '%s' "$run" | cut -f3)
+            printf '  %-20s %s %s\n' "$wf" "$status" "$conclusion"
+
+            if [ "$status" != "completed" ]; then
+              echo "::error::$wf on $RELEASE_SHA has not finished ($status): $url"
+              exit 1
+            fi
+            if [ "$conclusion" != "success" ]; then
+              echo "::error::$wf on $RELEASE_SHA concluded '$conclusion': $url"
+              exit 1
+            fi
+          done
+          echo "CI and Documentation are green on $RELEASE_SHA."
+
       - name: Check that the tag does not exist
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -221,8 +262,11 @@ jobs:
           version: '1'
       - uses: julia-actions/cache@a7bed9df697e5d7309d68afe7542a87621a8b6c8 # v3.3.0
       - uses: julia-actions/julia-buildpkg@e3eb439fad4f9aba7da2667e7510e4a46ebc46e1 # v1.7.0
-      # The suite runs against the exact tree being registered. Coverage is
-      # instrumented in CI; a release gate only needs the pass or fail.
+      # Re-run even though CI is required to be green above: `Pkg.test()`
+      # resolves the newest compatible dependencies at the moment it runs, so a
+      # dependency released since that CI run is only caught here, before the
+      # version is registered rather than after. Coverage is instrumented in CI;
+      # a release gate only needs the pass or fail.
       - uses: julia-actions/julia-runtest@6e050c8013b833b1195105ff2fce9cd802f53271 # v1.12.0
         with:
           coverage: false
