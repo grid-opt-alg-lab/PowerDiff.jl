@@ -37,11 +37,14 @@ end
     baseline = PowerDiff._network_data(matpower_net)
 
     @testset "PowerModels JSON" begin
-        text, warnings = PowerIO.to_format(matpower_net, "powermodels-json")
-        @test isempty(warnings)
+        # PowerIO 0.9 returns fidelity findings as `Vector{Diagnostic}`; each element
+        # still reads as its `CODE: message` line. Named `diags` so the local does not
+        # shadow `PowerIO.warnings`, which 0.9 exports.
+        text, diags = PowerIO.to_format(matpower_net, "powermodels-json")
+        @test isempty(diags)
 
         parsed = PowerDiff.parse_file(IOBuffer(text); from=:powermodels)
-        @test PowerIO.source_format(parsed) == "PowerModelsJson"
+        @test PowerIO.source_format(parsed) == "powermodels-json"
         data = PowerDiff._network_data(parsed)
         _assert_network_tables_compatible(data, baseline; label="PowerModels JSON")
         _assert_constructs_and_solves(data; label="PowerModels JSON")
@@ -50,18 +53,18 @@ end
             path = joinpath(dir, "case14.json")
             write(path, text)
             parsed_path = PowerDiff.parse_file(path; from="powermodels-json")
-            @test PowerIO.source_format(parsed_path) == "PowerModelsJson"
+            @test PowerIO.source_format(parsed_path) == "powermodels-json"
             _assert_network_tables_compatible(
                 PowerDiff._network_data(parsed_path), baseline; label="PowerModels JSON path")
         end
     end
 
     @testset "Egret JSON" begin
-        text, warnings = PowerIO.to_format(matpower_net, "egret-json")
-        @test isempty(warnings)
+        text, diags = PowerIO.to_format(matpower_net, "egret-json")
+        @test isempty(diags)
 
         parsed = PowerDiff.parse_file(IOBuffer(text); from=:egret)
-        @test PowerIO.source_format(parsed) == "EgretJson"
+        @test PowerIO.source_format(parsed) == "egret-json"
         data = PowerDiff._network_data(parsed)
         _assert_network_tables_compatible(data, baseline; label="Egret JSON")
         _assert_constructs_and_solves(data; label="Egret JSON")
@@ -70,11 +73,14 @@ end
     end
 
     @testset "PSS/E RAW" begin
-        text, warnings = PowerIO.to_format(matpower_net, "psse")
-        @test warnings isa AbstractVector
+        text, diags = PowerIO.to_format(matpower_net, "psse")
+        @test diags isa AbstractVector
+        @test all(d -> d isa PowerIO.Diagnostic, diags)
+        # A Diagnostic reads as the line it always was, and carries the code as a field.
+        @test all(d -> occursin(d.code, string(d)), diags)
 
         parsed = PowerDiff.parse_file(IOBuffer(text); from=:psse)
-        @test PowerIO.source_format(parsed) == "Psse"
+        @test PowerIO.source_format(parsed) == "psse"
         data = PowerDiff._network_data(parsed)
         _assert_network_tables_compatible(data, baseline; label="PSS/E RAW", demand_rtol=1e-5)
         _assert_constructs_and_solves(data; label="PSS/E RAW")
@@ -83,7 +89,7 @@ end
             path = joinpath(dir, "case14.raw")
             write(path, text)
             parsed_path = PowerDiff.parse_file(path)
-            @test PowerIO.source_format(parsed_path) == "Psse"
+            @test PowerIO.source_format(parsed_path) == "psse"
             _assert_network_tables_compatible(
                 PowerDiff._network_data(parsed_path), baseline; label="PSS/E RAW path", demand_rtol=1e-5)
         end

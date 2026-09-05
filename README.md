@@ -61,9 +61,19 @@ See the [Getting Started guide](https://samueltalkington.com/research/powerdiff/
 
 ## Input Format
 
-PowerDiff reads files through PowerIO. `parse_file` supports MATPOWER `.m`,
-PSS/E `.raw`, PowerWorld `.aux`, PowerModels JSON, and Egret JSON. For streams,
-pass `from`; JSON streams need `from=:egret` or `from=:powermodels`.
+PowerDiff reads files through PowerIO, and `parse_file` reads every transmission
+format the linked PowerIO library does — MATPOWER `.m`, PSS/E `.raw`, PowerWorld,
+PowerModels JSON, Egret JSON, pandapower, PyPSA, PSLF, gridfm, GO Challenge 3 and
+the rest. The format tokens are PowerIO's, so a reader PowerIO gains works here at
+once.
+
+A path's format is inferred from its extension; a stream has no extension, so pass
+`from` (MATPOWER is assumed otherwise). A bare `json` names a container rather than
+a reader, so name the one you mean: `from=:powermodels`, `:egret`, `:pandapower`.
+
+`network_findings(net)` returns what PowerIO reported about the case — what the
+reader could not represent, and what the normalize pass found — as `CODE: message`
+lines you can branch on.
 
 ## Dependencies
 

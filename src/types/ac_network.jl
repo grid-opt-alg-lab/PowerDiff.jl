@@ -207,6 +207,18 @@ function ACNetwork(net::Dict{String,<:Any}; idx_slack::Union{Nothing,Int}=nothin
     throw(ArgumentError("dictionary constructors were removed; parse a network file with PowerDiff.parse_file"))
 end
 
+# Only the reactive generator limits model an absent bound end to end. A non-finite
+# value on any other bound would reach JuMP as an infinite variable bound and the KKT
+# system as `0 * Inf`; name the row and the field instead.
+function _require_finite_bounds(values, field::Symbol)
+    for (i, v) in enumerate(values)
+        isfinite(v) || throw(ArgumentError(
+            "ACNetwork: row $i has non-finite `$field` ($v); only generator reactive " *
+            "limits (`qmin`/`qmax`) may be left unbounded"))
+    end
+    return nothing
+end
+
 ACNetwork(net::PowerIO.BalancedNetwork; idx_slack::Union{Nothing,Int}=nothing) =
     ACNetwork(_network_data(net); idx_slack=idx_slack)
 
@@ -333,6 +345,15 @@ function ACNetwork(data::NamedTuple; idx_slack::Union{Nothing,Int}=nothing)
     end
     vm_min = [bus_tbl[id].vmin for id in id_map.bus_ids]
     vm_max = [bus_tbl[id].vmax for id in id_map.bus_ids]
+
+    # Reactive generator limits may be absent (`±Inf`): the solver model leaves the
+    # bound off and the KKT system pins its multiplier to zero. Every other bound here
+    # becomes a JuMP variable bound and a complementarity row that needs a number, so
+    # say which one is missing rather than letting it reach the solver.
+    _require_finite_bounds(pmin, :pmin)
+    _require_finite_bounds(pmax, :pmax)
+    _require_finite_bounds(vm_min, :vmin)
+    _require_finite_bounds(vm_max, :vmax)
 
     return ACNetwork(
         n_bus, n_branch, sparse(A), incidences, g, b, g_shunt, b_shunt,

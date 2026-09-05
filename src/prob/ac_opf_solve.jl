@@ -137,8 +137,11 @@ function _extract_ac_opf_solution(prob::ACOPFProblem{JuMPBackend})
     # Extract dual variables - generation bounds (inequality)
     ρ_pg_lb = [dual(LowerBoundRef(prob.pg[i])) for i in 1:k]
     ρ_pg_ub = [dual(UpperBoundRef(prob.pg[i])) for i in 1:k]
-    ρ_qg_lb = [dual(LowerBoundRef(prob.qg[i])) for i in 1:k]
-    ρ_qg_ub = [dual(UpperBoundRef(prob.qg[i])) for i in 1:k]
+    # An absent reactive limit has no bound reference and no multiplier. Zero is not a
+    # stand-in there: it is the value the KKT system pins the multiplier of an absent
+    # constraint to, so the solved duals and the residual agree by construction.
+    ρ_qg_lb = [has_lower_bound(prob.qg[i]) ? dual(LowerBoundRef(prob.qg[i])) : 0.0 for i in 1:k]
+    ρ_qg_ub = [has_upper_bound(prob.qg[i]) ? dual(UpperBoundRef(prob.qg[i])) : 0.0 for i in 1:k]
 
     # Extract dual variables - flow variable bounds (inequality)
     σ_p_fr_lb = zeros(m)

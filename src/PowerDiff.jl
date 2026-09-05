@@ -104,6 +104,7 @@ export operand_symbols, parameter_symbols
 export jvp, vjp, jvp!, vjp!, dict_to_vec, vec_to_dict
 export kkt_layout, kkt_dims, kkt_indices
 export parse_file, parse_matpower, parse_matpower_struct, get_path
+export network_findings
 
 # DC Power Flow Types
 export DCNetwork, DCPowerFlowState
@@ -144,5 +145,12 @@ PTDF sign convention: `PTDF = ∂f/∂p`.
 ptdf_matrix(state::DCPowerFlowState) = -Matrix(calc_sensitivity(state, :f, :d))
 
 export ptdf_matrix
+
+function __init__()
+    # A parsed network is backed by a Rust handle that does not survive a process, so
+    # no ingest may reach this session from a precompiled image.
+    _reset_ingest_cache!()
+    return nothing
+end
 
 end # module PowerDiff
