@@ -186,27 +186,29 @@ const DEFAULT_SHED_COST_MULTIPLIER = 10
 # =============================================================================
 #
 # PowerIO is the parser and data layer, and the only one: PowerDiff has no parser
-# backend switch and no second representation of a case. `PowerIO.parse_*` reads every
-# transmission format the linked library ships; `PowerIO.to_normalized` puts a case in
-# per unit with out-of-service and isolated elements dropped, the reference bus
-# inferred, source bus ids preserved, loads and shunts aggregated per bus, and
-# polynomial costs collapsed and rescaled.
+# backend switch and no second representation of a case. `PowerIO.parse` reads every
+# format the linked library ships and returns a `PowerIO.PioModule{T}` carrying the
+# parsed value, the reader's diagnostics, and the source record.
 #
-# These thin wrappers return a `PowerIO.BalancedNetwork`, and `_network_data` turns one
-# into the network tables the DCNetwork and ACNetwork constructors consume — once per
-# network, memoized, so the two constructors cannot describe different cases. The only
-# logic beyond re-keying to source bus ids is the OPF solver modeling PowerIO leaves to
-# the consumer: polynomial cost interpretation, finite flow limits, default angle
-# difference bounds, absent reactive limits, and rejection of records PowerDiff does
-# not model. Everything PowerIO reports about the case travels with it, as data, under
-# `network_findings`.
+# `PowerIO.to_powerdata` states a balanced network in per unit, with radian branch
+# angles, per-bus load and shunt aggregation, rescaled polynomial costs, a `status`
+# flag and a source row number `i` on every row, and the four terminal admittance
+# coefficients `c1..c8` per branch. It is unfiltered: out-of-service rows and
+# isolated buses reach the caller.
+#
+# `_network_data` selects what PowerDiff models -- in-service elements on buses that
+# are not isolated -- and adds the OPF modeling PowerIO leaves to its consumers:
+# polynomial cost interpretation, a finite thermal limit when the source states
+# none, default angle-difference bounds, and refusal of records PowerDiff has no
+# model for. It derives no electrical quantity: the series admittance and the
+# terminal charging terms are read off PowerIO's coefficients.
 
 """
-    parse_file(path::String; library=nothing, from=nothing, filetype=nothing) -> PowerIO.BalancedNetwork
-    parse_file(io::IO; from="matpower", filetype=nothing) -> PowerIO.BalancedNetwork
+    parse_file(path::String; library=nothing, from=nothing, filetype=nothing) -> PowerIO.PioModule
+    parse_file(io::IO; from="matpower", filetype=nothing) -> PowerIO.PioModule
 
-Parse a network file into a `PowerIO.BalancedNetwork`, in any transmission format
-the linked PowerIO library reads.
+Parse a network into a `PowerIO.PioModule{PowerIO.BalancedNetwork}`, in any
+transmission format the linked PowerIO library reads.
 
 For paths, PowerIO infers the format from the extension unless `from` is given. For
 streams, pass `from` (or `filetype`), because a stream has no extension; MATPOWER is
@@ -214,71 +216,53 @@ assumed when neither is given. A bare `json` names a container rather than a rea
 so name the reader (`from=:powermodels`, `:egret`, `:pandapower`, `:goc3`, `:surge`,
 `:opfdata`).
 
-`from` takes PowerIO's own format tokens — `:matpower`/`:m`, `:psse`/`:raw`,
-`:psse34`, `:psse35`, `:powerworld`/`:aux`, `:powermodels`, `:egret`, `:pandapower`,
-`:pypsa`, `:pslf`/`:epc`, `:pwb`, `:gridfm`, `:goc3`, `:surge`, `:opfdata` — and the
-list is PowerIO's, not a copy of it, so a reader PowerIO gains is usable here at
-once. An unrecognized token is refused by PowerIO with the set its build actually
-reads. Distribution formats (`:dss`, `:pmd`, `:bmopf`) are refused here: they parse
-to a `PowerIO.MulticonductorNetwork`, which PowerDiff does not model.
+`from` takes PowerIO's own format tokens, and the vocabulary is PowerIO's rather
+than a copy of it: an unrecognized token goes to PowerIO, which answers with what
+the linked library actually reads, so a reader PowerIO gains is usable here at once.
+PowerDiff's historical short spellings (`:m`, `:raw`, `:aux`, `:pm`, `:powermodels`,
+`:egret`) resolve to the tokens they always meant.
 
-Pass the result to [`DCNetwork`](@ref) / [`ACNetwork`](@ref).
+A source that parses to anything other than a balanced transmission network -- a
+distribution case, a time series, a scenario set, a calculation instance -- is
+refused by naming what it holds.
+
+The returned module carries more than the network: `m.value` is the case,
+`m.diagnostics` is what the reader retained or had to assume, `m.sources[1].format`
+is the reader that ran, and `PowerIO.emit(m, format, path)` writes the case out
+again. Pass the module to [`DCNetwork`](@ref) or [`ACNetwork`](@ref).
 """
-function parse_file(io::Union{IO,String}; library=nothing, filetype=nothing, from=nothing, kwargs...)
+function parse_file(source::Union{IO,AbstractString}; library=nothing, filetype=nothing,
+                    from=nothing, kwargs...)
     isempty(kwargs) || throw(ArgumentError(
         "unsupported parse_file keyword(s): $(join(string.(keys(kwargs)), ", "))"))
     fmt = _powerio_format_hint(from, filetype)
-    if io isa String
-        resolved = _resolve_case_path(io, library)
-        try
-            return isnothing(fmt) ? PowerIO.parse_file(resolved) : PowerIO.parse_file(resolved; from=fmt)
-        catch e
-            e isa ArgumentError && rethrow()
-            throw(ArgumentError("PowerDiff.parse_file: " * sprint(showerror, e)))
-        end
+    m = if source isa AbstractString
+        PowerIO.parse(_resolve_case_path(source, library); format=fmt)
     else
-        fmt = isnothing(fmt) ? "matpower" : fmt
-        try
-            return PowerIO.parse_file(io, fmt)
-        catch e
-            e isa ArgumentError && rethrow()
-            throw(ArgumentError("PowerDiff.parse_file: " * sprint(showerror, e)))
-        end
+        PowerIO.parse(source; format=something(fmt, "matpower"))
     end
+    return _require_balanced(m)
 end
 
 """
-    parse_matpower(io::IO) -> PowerIO.BalancedNetwork
-    parse_matpower(file::String; library=nothing) -> PowerIO.BalancedNetwork
+    parse_matpower(io::IO) -> PowerIO.PioModule
+    parse_matpower(file::String; library=nothing) -> PowerIO.PioModule
 
-Parse MATPOWER v2 data into a `PowerIO.BalancedNetwork`.
+Parse MATPOWER v2 data into a `PowerIO.PioModule{PowerIO.BalancedNetwork}`.
 """
-function parse_matpower(io::IO)
-    try
-        return PowerIO.parse_file(io, "matpower")
-    catch e
-        e isa ArgumentError && rethrow()
-        throw(ArgumentError("PowerDiff.parse_matpower: " * sprint(showerror, e)))
-    end
-end
+parse_matpower(io::IO) = _require_balanced(PowerIO.parse(io; format="matpower"))
 
-function parse_matpower(file::String; library=nothing)
-    resolved = _resolve_case_path(file, library)
-    isfile(resolved) || throw(ArgumentError("invalid MATPOWER file $resolved"))
-    try
-        return PowerIO.parse_file(String(resolved); from="matpower")
-    catch e
-        e isa ArgumentError && rethrow()
-        throw(ArgumentError("PowerDiff.parse_matpower: " * sprint(showerror, e)))
-    end
-end
+parse_matpower(file::String; library=nothing) =
+    _require_balanced(PowerIO.parse(_resolve_case_path(file, library); format="matpower"))
 
-"""
-    parse_matpower_struct(file::String; library=nothing)
-
-Compatibility alias for [`parse_matpower`](@ref).
-"""
-parse_matpower_struct(file::String; library=nothing) = parse_matpower(file; library=library)
+# PowerIO returns one of twenty value kinds. Only a balanced transmission network
+# has the buses, branches and generators PowerDiff differentiates, so the type check
+# is the refusal: it covers distribution cases, series carriers and calculation
+# instances alike, without a list here that trails what PowerIO parses.
+_require_balanced(m::PowerIO.PioModule{PowerIO.BalancedNetwork}) = m
+_require_balanced(m::PowerIO.PioModule) = throw(ArgumentError(
+    "PowerDiff models balanced transmission networks; this source parsed to a " *
+    "$(nameof(typeof(m.value)))"))
 
 _resolve_case_path(path::AbstractString, ::Nothing) = String(path)
 _resolve_case_path(path::AbstractString, library) = joinpath(get_path(library), path)
@@ -293,22 +277,9 @@ function _powerio_format_hint(from, filetype)
     return f1
 end
 
-# Distribution tokens parse to a `PowerIO.MulticonductorNetwork`, which is not a
-# balanced transmission network and carries nothing PowerDiff differentiates. They
-# are named here so the refusal says what to do rather than surfacing a type error
-# from three frames down.
-const _DISTRIBUTION_FORMAT_TOKENS = (
-    "dss", "opendss",
-    "pmd", "pmd-json", "pmdjson", "engineering",
-    "bmopf", "bmopf-json", "bmopfjson",
-)
-
 # The short spellings PowerDiff has always accepted, mapped to PowerIO's own token.
 # This is a courtesy layer, not a gate: a token absent from it passes through
-# untouched. PowerIO owns the format vocabulary, so a reader it gains is usable
-# from `parse_file` the day it ships, and an unknown token is answered by PowerIO's
-# `REQUEST.FORMAT.UNKNOWN` (which lists what the linked library actually reads)
-# rather than by a list here that silently trails it.
+# untouched, and PowerIO answers for it.
 const _FORMAT_ALIASES = Dict(
     "m" => "matpower",
     "raw" => "psse",
@@ -327,180 +298,92 @@ function _format_token(x)
     s == "json" && throw(ArgumentError(
         "JSON input is ambiguous; name the reader (from=:powermodels, from=:egret, " *
         "from=:pandapower, from=:goc3, from=:surge, from=:opfdata)"))
-    s in _DISTRIBUTION_FORMAT_TOKENS && throw(ArgumentError(
-        "$x is a distribution format; PowerDiff models balanced transmission networks. " *
-        "Parse it with PowerIO, then lower it: PowerIO.to_package, " *
-        "PowerIO.lower_multiconductor_to_balanced, PowerIO.from_package"))
     return get(_FORMAT_ALIASES, s, s)
 end
 
 """
+    _network_data(m::PowerIO.PioModule) -> NamedTuple
     _network_data(net::PowerIO.BalancedNetwork) -> NamedTuple
 
 Build PowerDiff network tables from a parsed PowerIO network.
 
-PowerDiff runs PowerIO's normalize pass itself (`PowerIO.to_normalized`) and reads
-`PowerIO.to_powerdata` off the normalized network. That is one pass, not two:
-`to_powerdata` recognizes an already-normalized input and skips its own. It also
-puts the pass's fidelity findings in PowerDiff's hands as data — see
-[`network_findings`](@ref) — instead of a `@warn` burst PowerDiff could neither
-label nor deduplicate.
+`PowerIO.to_powerdata` supplies every value: per-unit powers and ratings, radian
+branch angles and angle bounds, per-bus aggregated load and shunt, right-aligned
+per-unit polynomial cost coefficients, and the four terminal admittance
+coefficients from which the series conductance and susceptance are read. It is
+unfiltered, so this selects what PowerDiff models: rows whose `status` is set, on
+buses that are not isolated (`type == 4`). Its row field `i` is the source row
+number, which becomes the [`IDMapping`](@ref) index, so out-of-service rows leave
+gaps rather than renumbering the rows that remain.
 
-Normalization does per-unit scaling, status/isolated filtering, per-bus load/shunt
-aggregation, reference-bus inference (`type == 3`), source bus ids on `bus_i`, and
-polynomial cost collapse/rescaling, returning dense file-order rows. This adapter
-keys bus references back to source bus ids (so [`IDMapping`](@ref)'s sorted ordering
-is preserved) and applies the OPF modeling PowerIO leaves to the consumer:
-polynomial cost interpretation (rejecting PWL and higher-than-quadratic), a finite
-flow limit fallback when the source states no thermal limit, default angle
-difference bounds, and rejection of storage / HVDC records that PowerDiff does not
-model.
+On top of that selection sit the four modeling decisions PowerIO leaves to its
+consumer: polynomial cost interpretation (rejecting piecewise linear), a
+synthesized thermal limit when the source states none, default angle-difference
+bounds, and refusal of storage and HVDC records.
 
-The returned `bus`/`gen`/`branch` rows mirror the field names the network
-constructors expect, with loads/shunts already folded into per-bus `pd/qd/gs/bs`.
-`shunt` re-exposes those bus shunts as a table (one `(; index, shunt_bus, gs, bs)`
-record per bus with a nonzero shunt admittance) for callers that want shunt records.
-
-Bus rows carry the source bus id on `bus_i`, so [`IDMapping`](@ref)`.bus_ids`
-(and any bus-indexed sensitivity `row_to_id`) map back to the input network.
-Generator and branch `index` values are source row numbers among the unfiltered
-PowerIO rows, so out-of-service rows leave gaps instead of renumbering active rows.
-
-The tables are memoized per parsed network, so building a [`DCNetwork`](@ref) and an
-[`ACNetwork`](@ref) from one `net` normalizes once, materializes the JSON payload
-once, and reports each finding once. The two therefore cannot disagree about the
-case they describe.
+Bus rows carry the source bus id on `bus_i`, so [`IDMapping`](@ref)`.bus_ids` and
+any bus-indexed sensitivity `row_to_id` map back to the input network.
 """
-_network_data(net::PowerIO.BalancedNetwork) = _powerio_ingest(net).tables
+# A parsed case reaches PowerDiff either as the module `parse_file` returns or as the
+# network inside it. Both name the same case, so both construct the same networks.
+const PowerIOSource = Union{PowerIO.PioModule{PowerIO.BalancedNetwork},PowerIO.BalancedNetwork}
 
-"""
-    network_findings(net::PowerIO.BalancedNetwork) -> NamedTuple
+_network_data(m::PowerIO.PioModule{PowerIO.BalancedNetwork}) = _network_data(m.value)
 
-What PowerIO reported about `net`, as data rather than log output.
-
-- `reader` — the fidelity findings the parser retained: what the source format could
-  not represent, or what the reader had to assume. Also reachable as
-  `PowerIO.warnings(net)`.
-- `normalize` — the findings of the normalize pass PowerDiff builds its tables from,
-  such as `CANONICALIZE.NORMALIZE.GEN_COST_ABSENT` (the case states no generator cost
-  data, so any cost objective built from it is identically zero) or
-  `CANONICALIZE.NORMALIZE.REFERENCE_DESIGNATED` (the case named no reference bus, so
-  one was chosen).
-
-Every line reads `CODE: message`. Split at the first `": "` and branch on the code;
-the prose carries no stability promise. PowerDiff reports the `normalize` findings
-once per network through its own warning channel (silenced by [`silence`](@ref));
-the `reader` findings are returned here and never logged, matching PowerIO, which
-leaves them on the parsed network for the consumer to read.
-
-```julia
-net = parse_file("case14.m")
-findings = network_findings(net)
-any(startswith("CANONICALIZE.NORMALIZE.GEN_COST_ABSENT"), findings.normalize)
-```
-"""
-function network_findings(net::PowerIO.BalancedNetwork)
-    ingest = _powerio_ingest(net)
-    return (; reader = PowerIO.warnings(net), normalize = ingest.findings)
-end
-
-# Ingesting a network materializes its JSON payload, runs the normalize pass and
-# walks every row, and PowerDiff's own constructors call it once per network type.
-# Memoizing on the network object keeps `DCNetwork(net)` and `ACNetwork(net)` to one
-# pass between them, which is also what keeps their tables identical by construction.
-# Weak keys so a parsed network that goes out of scope is still collectable.
-const _INGEST_CACHE = WeakKeyDict{PowerIO.BalancedNetwork,Any}()
-
-# An ingest is only valid for the live Rust handle it was read through, and a
-# precompiled image must not carry one across a process boundary. Cleared on load.
-_reset_ingest_cache!() = (empty!(_INGEST_CACHE); nothing)
-
-function _powerio_ingest(net::PowerIO.BalancedNetwork)
-    cached = get(_INGEST_CACHE, net, nothing)
-    cached === nothing || return cached
-
-    # Reject records PowerDiff does not model. Both guards read the raw network so
-    # they stay consistent: normalized output drops out-of-service records, which
-    # would silently accept a file that declares them.
-    isempty(PowerIO.hvdc(net)) || throw(ArgumentError(
+function _network_data(net::PowerIO.BalancedNetwork)
+    isempty(net.hvdc) || throw(ArgumentError(
         "PowerDiff does not support HVDC/dcline records; remove or convert dcline before parsing"))
-    isempty(PowerIO.storage(net)) || throw(ArgumentError(
+    isempty(net.storage) || throw(ArgumentError(
         "PowerDiff does not support storage records; remove or convert storage before parsing"))
 
-    # One normalize pass, owned here. `to_powerdata` on a network already flagged
-    # `"normalized"` reads it straight through, so this is not an extra pass; it is
-    # the same pass with its findings returned instead of logged.
-    normalized = PowerIO.source_format(net) == "normalized" ? net : PowerIO.to_normalized(net)
-    findings = PowerIO.warnings(normalized)
-    _report_findings(findings)
+    pd = PowerIO.to_powerdata(net)
+    isempty(pd.bus) && throw(ArgumentError("network has no buses"))
 
-    ingest = (; tables = _build_network_tables(net, PowerIO.to_powerdata(normalized)),
-              findings = findings)
-    _INGEST_CACHE[net] = ingest
-    return ingest
-end
+    # `to_powerdata` states the cost coefficients but not which cost model produced
+    # them, so the model comes off the element table. One pass, read once.
+    gens = collect(net.generators)
 
-# PowerIO 0.9 raises the normalize findings as one `@warn` per distinct code from
-# inside `to_powerdata`. PowerDiff takes that pass over, so it owes the user the same
-# information: same one-per-code rule, said once for the network rather than once per
-# constructor, and under PowerDiff's own silence switch.
-function _report_findings(findings)
-    (_SILENCE_WARNINGS[] || isempty(findings)) && return nothing
-    seen = Set{SubString{String}}()
-    for line in findings
-        code = first(split(line, ": "; limit=2))
-        code in seen && continue
-        push!(seen, code)
-        @warn "PowerIO normalize: $line"
-    end
-    return nothing
-end
+    # An isolated bus is out of service, and so is every element on it.
+    live = [Int(b.type) != 4 for b in pd.bus]
+    keep_bus = findall(live)
+    isempty(keep_bus) && throw(ArgumentError("network has no in-service buses"))
 
-function _build_network_tables(net, pd)
-    isempty(pd.bus) && throw(ArgumentError("network has no active buses"))
-    isempty(pd.gen) && throw(ArgumentError("network has no active generators"))
-    isempty(pd.branch) && throw(ArgumentError("network has no active branches"))
+    orig = [Int(b.bus_i) for b in pd.bus]   # table position -> source bus id
+    buses = [_bus_row(orig[i], pd.bus[i]) for i in keep_bus]
+    vmax_by_id = Dict(b.bus_i => b.vmax for b in buses)
 
-    orig = [Int(b.bus_i) for b in pd.bus]   # dense file-order index -> source bus id
-    gen_source_rows, branch_source_rows = _active_source_rows(net, pd)
+    kept_gen = [Int(g.i) for g in pd.gen if Int(g.status) != 0 && live[g.bus]]
+    isempty(kept_gen) && throw(ArgumentError("network has no in-service generators"))
+    gen_rows = [_gen_row(pd.gen[j], orig[pd.gen[j].bus], gens[j]) for j in kept_gen]
 
-    buses = [_bus_row(orig[i], b) for (i, b) in enumerate(pd.bus)]
+    kept_branch = [Int(br.i) for br in pd.branch
+                   if Int(br.status) != 0 && live[br.f_bus] && live[br.t_bus]]
+    isempty(kept_branch) && throw(ArgumentError("network has no in-service branches"))
+    branches = [_branch_row(pd.branch[l], orig, vmax_by_id) for l in kept_branch]
 
-    # Costs come straight from the normalized gen rows (already per-unit and
-    # right-aligned). Map dense `gen.bus` to the source bus id via `orig`.
-    gens = [_gen_row(gen_source_rows[j], orig[g.bus], g) for (j, g) in enumerate(pd.gen)]
-
-    branches = [_branch_row(branch_source_rows[l], br, orig, buses) for (l, br) in enumerate(pd.branch)]
-    all(br.rate_a > 0 for br in branches) || throw(ArgumentError(
-        "branches must have positive thermal limits after normalization"))
-
-    # Normalization folds shunts into per-bus gs/bs (which the constructors consume).
-    # Re-expose them as a table, one record per bus with a nonzero shunt admittance,
-    # for callers that want shunt records back.
-    shunt_buses = [b for b in buses if b.gs != 0.0 || b.bs != 0.0]
-    shunts = [(; index=i, shunt_bus=b.bus_i, gs=b.gs, bs=b.bs) for (i, b) in enumerate(shunt_buses)]
-
-    return (; name=PowerIO.network_name(net),
-            baseMVA=_finite(pd.baseMVA, "network", :baseMVA),
-            bus=buses, gen=gens, branch=branches, shunt=shunts)
+    return (; name = net.name,
+            baseMVA = Float64(pd.baseMVA),
+            bus = buses, gen = gen_rows, branch = branches)
 end
 
 # =============================================================================
 # Absent numeric bounds
 # =============================================================================
 #
-# PowerIO 0.9 passes an absent bound through as `±Inf` instead of refusing the case:
+# PowerIO passes an absent bound through as `±Inf` instead of refusing the case:
 # `Inf` is how MATPOWER, PowerModels, pandapower and PyPSA all spell "no limit", and
 # stock pglib cases carry it (case9241pegase leaves the reactive limits off seven
 # generators). PowerDiff's KKT layout is fixed, with one complementarity row per
 # bound, so `Inf` cannot simply flow in: `ρ * (qg - qmin)` with `qmin == -Inf` is
 # `0 * Inf`, a `NaN` in the residual and an `Inf` in the Jacobian.
 #
-# Reactive generator limits model absence properly — the bound is left off the solver
-# model and its complementarity row reads `ρ = 0`, the multiplier of a constraint that
-# is not there (see `_lb_complementarity` and its derivatives in
-# `prob/kkt_ac_opf.jl`). Everywhere else a non-finite value is a modeling error, and
-# PowerDiff names the element and field rather than letting it reach a factorization.
+# Reactive generator limits model absence properly -- the bound is left off the
+# solver model and its complementarity row reads `ρ = 0`, the multiplier of a
+# constraint that is not there (see `_lb_complementarity` and its derivatives in
+# `prob/kkt_ac_opf.jl`). A branch that states no rating takes a synthesized one.
+# Everywhere else PowerIO rejects a non-finite value itself, naming the element and
+# the field, so nothing here repeats that check; `_require_finite_bounds` covers the
+# caller-built tables PowerIO never sees.
 
 """
     _absent_bound(v) -> Bool
@@ -509,95 +392,56 @@ Whether a variable bound is absent. PowerIO spells an absent bound `±Inf`.
 """
 _absent_bound(v::Real) = !isfinite(v)
 
-function _finite(x, element::AbstractString, field::Symbol)
-    v = Float64(x)
-    isfinite(v) || throw(ArgumentError(
-        "PowerDiff: $element has non-finite `$field` ($v). PowerDiff needs a finite " *
-        "value here; only generator reactive limits may be left unbounded"))
-    return v
-end
-
-# A bound may be absent; a `NaN` never is. `to_powerdata` already rejects `NaN`, so
-# this only has to keep the two spellings apart for a caller-built table.
-function _optional_bound(x, element::AbstractString, field::Symbol)
-    v = Float64(x)
-    isnan(v) && throw(ArgumentError("PowerDiff: $element has NaN `$field`"))
-    return v
-end
-
 _bus_row(bus_id, b) = (;
     bus_i = bus_id, bus_type = Int(b.type),
-    pd = _finite(b.pd, "bus $bus_id", :pd), qd = _finite(b.qd, "bus $bus_id", :qd),
-    gs = _finite(b.gs, "bus $bus_id", :gs), bs = _finite(b.bs, "bus $bus_id", :bs),
-    vm = _finite(b.vm, "bus $bus_id", :vm), va = _finite(b.va, "bus $bus_id", :va),
-    vmin = _finite(b.vmin, "bus $bus_id", :vmin), vmax = _finite(b.vmax, "bus $bus_id", :vmax),
+    pd = Float64(b.pd), qd = Float64(b.qd),
+    gs = Float64(b.gs), bs = Float64(b.bs),
+    vm = Float64(b.vm), va = Float64(b.va),
+    vmin = Float64(b.vmin), vmax = Float64(b.vmax),
 )
 
-_gen_row(row, bus_id, g) = (;
-    index = row, gen_bus = bus_id,
-    pg = _finite(g.pg, "generator $row", :pg), qg = _finite(g.qg, "generator $row", :qg),
-    qmin = _optional_bound(g.qmin, "generator $row", :qmin),
-    qmax = _optional_bound(g.qmax, "generator $row", :qmax),
-    vg = _finite(g.vg, "generator $row", :vg),
-    pmin = _finite(g.pmin, "generator $row", :pmin),
-    pmax = _finite(g.pmax, "generator $row", :pmax),
-    cost = _poly_cost(g),
+_gen_row(g, bus_id, element) = (;
+    index = Int(g.i), gen_bus = bus_id,
+    pg = Float64(g.pg), qg = Float64(g.qg),
+    qmin = Float64(g.qmin), qmax = Float64(g.qmax),
+    vg = Float64(g.vg),
+    pmin = Float64(g.pmin), pmax = Float64(g.pmax),
+    cost = _poly_cost(g, element),
 )
 
-function _active_source_rows(net, pd)
-    raw = PowerIO.to_powerdata(net; filtered=false)
-    kept_bus_ids = Set(Int(b.bus_i) for b in pd.bus)
-    raw_bus_id = Dict(Int(b.i) => Int(b.bus_i) for b in raw.bus)
-
-    gen_rows = Int[]
-    for (row, gen) in enumerate(raw.gen)
-        status = hasproperty(gen, :status) ? Int(gen.status) != 0 : true
-        bus_id = get(raw_bus_id, Int(gen.bus), nothing)
-        status && bus_id in kept_bus_ids && push!(gen_rows, row)
-    end
-
-    branch_rows = Int[]
-    for (row, br) in enumerate(raw.branch)
-        status = hasproperty(br, :status) ? Int(br.status) != 0 : true
-        f_id = get(raw_bus_id, Int(br.f_bus), nothing)
-        t_id = get(raw_bus_id, Int(br.t_bus), nothing)
-        status && f_id in kept_bus_ids && t_id in kept_bus_ids && push!(branch_rows, row)
-    end
-
-    length(gen_rows) == length(pd.gen) || throw(ArgumentError(
-        "PowerDiff could not map active generators back to source rows"))
-    length(branch_rows) == length(pd.branch) || throw(ArgumentError(
-        "PowerDiff could not map active branches back to source rows"))
-
-    return gen_rows, branch_rows
-end
-
-# Build one PowerDiff branch row from a normalized branch: map dense f_bus/t_bus to
-# source ids, default the angle window, and synthesize a finite rate_a when the source
-# states no thermal limit, using the endpoint buses' vmax limits.
+# One PowerDiff branch row from a `to_powerdata` branch row: default the angle
+# window, read the series admittance off PowerIO's terminal coefficients, and
+# synthesize a finite rate_a when the source states no thermal limit.
 #
 # "States no limit" is `rate_a == 0`, MATPOWER's spelling, or a non-finite `rate_a`,
-# which is how PowerIO 0.9 carries an unbounded rating out of the formats that write
-# one. Both mean the same thing and both take the same synthesized limit, which is
-# the largest flow the endpoint voltage limits and the angle window physically admit
-# — a bound by construction, not an invented rating that could bind.
-function _branch_row(l, br, orig, buses)
-    what = "branch $l"
-    angmin, angmax = _normalize_angle_bounds(_finite(br.angmin, what, :angmin),
-                                             _finite(br.angmax, what, :angmax))
-    br_r = _finite(br.br_r, what, :br_r)
-    br_x = _finite(br.br_x, what, :br_x)
+# which is how PowerIO carries an unbounded rating out of the formats that write
+# one. Both mean the same thing and both take the same synthesized limit, the
+# largest flow the endpoint voltage limits and the angle window physically admit --
+# a bound by construction, not an invented rating that could bind.
+function _branch_row(br, orig, vmax_by_id)
+    angmin, angmax = _normalize_angle_bounds(Float64(br.angmin), Float64(br.angmax))
+    f_bus = orig[br.f_bus]
+    t_bus = orig[br.t_bus]
+    g_to = Float64(br.g_to)
+    b_to = Float64(br.b_to)
+    # `to_powerdata`'s eighth and seventh coefficients are the to-side terminal
+    # admittance added to the series admittance, so the series part reads back
+    # exactly. Nothing here inverts an impedance.
+    g = Float64(br.c7) - g_to
+    b = Float64(br.c8) - b_to
     raw_rate_a = Float64(br.rate_a)
     rate_a = (isfinite(raw_rate_a) && raw_rate_a > 0) ? raw_rate_a :
-             _fallback_rate_a(br_r, br_x, angmin, angmax,
-                              buses[br.f_bus].vmax, buses[br.t_bus].vmax)
-    return (; index=l, f_bus=orig[br.f_bus], t_bus=orig[br.t_bus],
-            br_r=br_r, br_x=br_x,
-            br_b=_finite(br.b_fr, what, :b_fr) + _finite(br.b_to, what, :b_to),
-            rate_a=rate_a,
-            rate_b=_unlimited_as_zero(br.rate_b), rate_c=_unlimited_as_zero(br.rate_c),
-            tap=_finite(br.tap, what, :tap), shift=_finite(br.shift, what, :shift),
-            angmin=angmin, angmax=angmax)
+             _fallback_rate_a(Float64(br.br_r), Float64(br.br_x), angmin, angmax,
+                              vmax_by_id[f_bus], vmax_by_id[t_bus])
+    return (; index = Int(br.i), f_bus = f_bus, t_bus = t_bus,
+            br_r = Float64(br.br_r), br_x = Float64(br.br_x),
+            g = g, b = b,
+            g_fr = Float64(br.g_fr), b_fr = Float64(br.b_fr),
+            g_to = g_to, b_to = b_to,
+            rate_a = rate_a,
+            rate_b = _unlimited_as_zero(br.rate_b), rate_c = _unlimited_as_zero(br.rate_c),
+            tap = Float64(br.tap), shift = Float64(br.shift),
+            angmin = angmin, angmax = angmax)
 end
 
 # `rate_b` / `rate_c` are carried through untouched and unused by either formulation.
@@ -605,30 +449,23 @@ end
 # rating reads as `0`, which is the same "no limit" spelling `rate_a` arrives in.
 _unlimited_as_zero(x) = (v = Float64(x); isfinite(v) ? v : 0.0)
 
-# Interpret a PowerIO gen row's polynomial cost as PowerDiff's (quadratic, linear,
-# constant) tuple. to_powerdata returns polynomial (model 2) costs as a right-aligned,
-# per-unit (cq, cl, cc) triple and rejects higher-than-quadratic itself. A generator
-# with no gencost row comes back as `model_poly == false` with `n == 0` (cost-free);
-# piecewise-linear (model 1) is `model_poly == false` with `n > 0` and is unsupported.
-function _poly_cost(g)
-    if !g.model_poly
-        Int(g.n) == 0 && return (0.0, 0.0, 0.0)
-        throw(ArgumentError(
-            "piecewise linear generator costs are not supported; convert model 1 costs to polynomial model 2 before parsing"))
-    end
-    # to_powerdata right-aligns the (quadratic, linear, constant) triple, but guard the
-    # indexing so a model-2 cost shorter than 3 terms (purely linear/constant) zero-pads
-    # the missing leading coefficients instead of throwing a BoundsError.
+# Interpret a generator's polynomial cost as PowerDiff's (quadratic, linear,
+# constant) tuple. `to_powerdata` returns a model 2 cost as a right-aligned per-unit
+# triple and rejects higher-than-quadratic itself; the cost model comes off the
+# element, which states it verbatim. A generator with no cost record is cost-free.
+function _poly_cost(g, element)
+    cost = element.cost
+    cost === nothing && return (0.0, 0.0, 0.0)
+    Int(cost.model) == 2 || throw(ArgumentError(
+        "generator $(Int(g.i)) states cost model $(Int(cost.model)); PowerDiff models " *
+        "polynomial (model 2) costs. Convert piecewise linear costs before parsing"))
     c = g.c
-    cq = length(c) >= 3 ? Float64(c[end-2]) : 0.0
-    cl = length(c) >= 2 ? Float64(c[end-1]) : 0.0
-    cc = length(c) >= 1 ? Float64(c[end]) : 0.0
-    return (cq, cl, cc)
+    return (Float64(c[1]), Float64(c[2]), Float64(c[3]))
 end
 
 # PowerDiff's OPF needs a finite thermal limit on every branch. When the source
-# leaves rate_a == 0 (unlimited), synthesize one from the bus voltage limits and
-# the branch impedance / angle window, matching the previous native parser.
+# states none, synthesize one from the bus voltage limits and the branch impedance
+# and angle window.
 function _fallback_rate_a(r::Float64, x::Float64, angmin::Float64, angmax::Float64,
                           fr_vmax::Float64, to_vmax::Float64)
     theta_max = max(abs(angmin), abs(angmax))
@@ -649,6 +486,26 @@ function _normalize_angle_bounds(angmin::Float64, angmax::Float64)
     return angmin, angmax
 end
 
+# The branch-by-bus incidence matrix over PowerDiff's own index space: one row per
+# branch in `id_map.branch_ids` order, one column per bus in sorted source-id order,
+# `+1` at the from bus and `-1` at the to bus. Both network types read it from here,
+# so the two describe the same graph by construction.
+#
+# PowerIO's `calc_incidence_matrix` covers in-service branches in table order against
+# all buses and returns a bare sparse matrix with no branch or bus index map
+# (eigenergy/PowerIO.jl#2 in the issues this port filed), so relabeling it into this
+# space costs more than stating it.
+function _incidence_matrix(branch_tbl, id_map::IDMapping)
+    m = length(id_map.branch_ids)
+    A = spzeros(Float64, m, length(id_map.bus_ids))
+    for orig_id in id_map.branch_ids
+        br = branch_tbl[orig_id]
+        row = id_map.branch_to_idx[orig_id]
+        A[row, id_map.bus_to_idx[br.f_bus]] = 1.0
+        A[row, id_map.bus_to_idx[br.t_bus]] = -1.0
+    end
+    return A
+end
 # =============================================================================
 # DCNetwork Constructors
 # =============================================================================
@@ -673,7 +530,7 @@ net = parse_file("case14.m")
 dc_net = DCNetwork(net)
 ```
 """
-DCNetwork(net::PowerIO.BalancedNetwork; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing) =
+DCNetwork(net::PowerIOSource; tau::Float64=DEFAULT_TAU, ref_bus::Union{Nothing,Int}=nothing) =
     DCNetwork(_network_data(net); tau=tau, ref_bus=ref_bus)
 
 # Build from PowerDiff network tables (see `_network_data`). The `PowerIO.BalancedNetwork`
@@ -689,16 +546,7 @@ function DCNetwork(data::NamedTuple; tau::Float64=DEFAULT_TAU, ref_bus::Union{No
     branch_tbl = Dict(branch.index => branch for branch in data.branch)
     gen_tbl = Dict(gen.index => gen for gen in data.gen)
 
-    # Incidence matrix A (m × n) from active branches using id_map translation
-    A = spzeros(m, n)
-    for orig_id in id_map.branch_ids
-        br = branch_tbl[orig_id]
-        row = id_map.branch_to_idx[orig_id]
-        f_col = id_map.bus_to_idx[br.f_bus]
-        t_col = id_map.bus_to_idx[br.t_bus]
-        A[row, f_col] = 1.0
-        A[row, t_col] = -1.0
-    end
+    A = _incidence_matrix(branch_tbl, id_map)
 
     # Generator-bus incidence matrix G_inc (n × k)
     G_inc = spzeros(n, k)
@@ -709,20 +557,9 @@ function DCNetwork(data::NamedTuple; tau::Float64=DEFAULT_TAU, ref_bus::Union{No
         G_inc[row, col] = 1.0
     end
 
-    # Branch susceptances: b = imag(1/z)
-    b = zeros(m)
-    for orig_id in id_map.branch_ids
-        br = branch_tbl[orig_id]
-        idx = id_map.branch_to_idx[orig_id]
-        r = br.br_r
-        x = br.br_x
-        z2 = r^2 + x^2
-        if z2 > 1e-10
-            b[idx] = -x / z2
-        else
-            _SILENCE_WARNINGS[] || @warn "Branch $(orig_id) has near-zero impedance (|z|² = $(z2)); treating as open (zero admittance)."
-        end
-    end
+    # Series susceptance per branch, as PowerIO states it: `imag(1/z)`, negative for
+    # an inductive branch, so `W = -b .* sw` weights the Laplacian positively.
+    b = [Float64(branch_tbl[id_map.branch_ids[i]].b) for i in 1:m]
 
     # All branches initially active
     sw = ones(m)
@@ -833,7 +670,7 @@ function calc_demand_vector(network::DCNetwork)
     return copy(network.demand)
 end
 
-calc_demand_vector(net::PowerIO.BalancedNetwork) = calc_demand_vector(_network_data(net))
+calc_demand_vector(net::PowerIOSource) = calc_demand_vector(_network_data(net))
 calc_demand_vector(data::NamedTuple) = calc_demand_vector(data, IDMapping(data))
 
 function calc_demand_vector(data::NamedTuple, id_map::IDMapping)
@@ -1132,7 +969,7 @@ Construct DCPowerFlowState from a parsed PowerIO network.
 If `d` is not provided, extracts demand from the network.
 If `g` is not provided, aggregates generation from gen data to buses.
 """
-function DCPowerFlowState(net::PowerIO.BalancedNetwork; g::Union{Nothing,AbstractVector}=nothing, d::Union{Nothing,AbstractVector}=nothing)
+function DCPowerFlowState(net::PowerIOSource; g::Union{Nothing,AbstractVector}=nothing, d::Union{Nothing,AbstractVector}=nothing)
     net = DCNetwork(net)
 
     if isnothing(d)
