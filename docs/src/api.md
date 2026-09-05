@@ -5,9 +5,7 @@
 ```@docs
 parse_file
 parse_matpower
-parse_matpower_struct
 get_path
-network_findings
 ```
 
 ## Sensitivity Interface

@@ -10,9 +10,8 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'
 julia --project=. examples/sens_examples/post_event_restoration.jl
 ```
 
-PowerDiff currently requires PowerIO 0.8.2 or later within the compatible 0.8
-release series. If an older untracked `Manifest.toml` pins PowerIO 0.1.x, it
-must be regenerated from the current `Project.toml` before running the example.
+The example resolves whatever `Project.toml` pins. If an untracked `Manifest.toml`
+holds an older PowerIO, regenerate it from `Project.toml` before running.
 
 ## Example Problem Setup
 

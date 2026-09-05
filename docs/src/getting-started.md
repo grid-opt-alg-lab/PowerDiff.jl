@@ -7,7 +7,7 @@ This guide walks through the main workflows: DC power flow, DC OPF with LMP anal
 ```julia
 using PowerDiff
 
-# Parse a supported PowerIO case into a PowerIO.BalancedNetwork
+# Parse a case into a PowerIO module
 net = parse_file("case14.m")
 ```
 
@@ -21,9 +21,9 @@ A path's format is inferred from its extension; a stream has no extension, so pa
 reader, so name the one you mean: `from=:powermodels`, `:egret`, `:pandapower`.
 The former PowerModels dictionary constructors were removed.
 
-`network_findings(net)` returns what PowerIO reported about the case — what the reader
-could not represent, and what the normalize pass found — as `CODE: message` lines you
-can branch on.
+`parse_file` returns a `PowerIO.PioModule`, which carries the reader's findings on
+`m.diagnostics` alongside the case. See
+[PowerIO Integration](powerio-integration.md) for the whole seam.
 
 ## Interactive Exploration
 

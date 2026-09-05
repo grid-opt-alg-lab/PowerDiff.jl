@@ -46,6 +46,7 @@ makedocs(
             "AC Power Flow" => "math/ac-power-flow.md",
             "AC Optimal Power Flow" => "math/ac-opf.md",
         ],
+        "PowerIO Integration" => "powerio-integration.md",
         "Advanced Topics" => "advanced.md",
         "API Reference" => "api.md",
     ],

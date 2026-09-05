@@ -25,7 +25,7 @@ Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerDiff.jl.git")
 ```julia
 using PowerDiff
 
-# Parse a supported PowerIO case into a PowerIO.BalancedNetwork
+# Parse a case into a PowerIO module
 net = parse_file("case14.m")
 dc_net = DCNetwork(net)
 d = calc_demand_vector(net)

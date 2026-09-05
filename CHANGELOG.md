@@ -2,46 +2,83 @@
 
 ## Unreleased
 
-Tracks **PowerIO 0.9** (powerio C ABI 5). The `[compat]` bound is now
-`PowerIO = "0.9"`; 0.9 gates its C ABI handshake on equality, so the binding and its
-binaries move together and this bound cannot be relaxed.
+Tracks **PowerIO 0.11** (powerio C ABI 7). The `[compat]` bound is now
+`PowerIO = "0.11"`; the binding gates its ABI handshake on equality, so it and its
+binaries move together and the bound cannot be relaxed.
 
-- The format vocabulary is PowerIO's rather than a copy of it. `parse_file` hands an
-  unrecognized `from` token to PowerIO instead of refusing it against a five-format
-  allowlist, so every transmission reader PowerIO ships — pandapower, PyPSA, PSLF,
-  PowerWorld binary, gridfm, GO Challenge 3, Surge, OPFData, PSS/E 34 and 35 — is
-  reachable without a PowerDiff release, and an unknown token is answered by PowerIO
-  with the set the linked library actually reads. PowerDiff's own short spellings
-  (`:m`, `:raw`, `:aux`, `:pm`, `:powermodels`, `:egret`) resolve as before. A bare
-  `json` is still refused as ambiguous, now naming more of the readers it could mean,
-  and a distribution token (`:dss`, `:pmd`, `:bmopf`) is refused with the lowering
-  step to run first.
-- One normalize pass per network, memoized. PowerDiff runs `PowerIO.to_normalized`
-  itself and reads `to_powerdata` off the normalized network, which skips its own
-  pass. The tables are cached on the parsed network, so `DCNetwork(net)` and
-  `ACNetwork(net)` share one ingest — they can no longer describe different cases, the
-  JSON payload is materialized once, and the second constructor is free.
-- New exported `network_findings(net)`: what PowerIO reported about a case, as data.
-  Returns `(; reader, normalize)` — the parser's fidelity findings and the normalize
-  pass's — as `CODE: message` lines. PowerIO 0.9 raises the normalize findings as one
-  `@warn` per distinct code from inside `to_powerdata`; PowerDiff owns that pass now,
-  so it reports them itself, once per network rather than once per constructor, and
-  under `PowerDiff.silence()`.
-- Generator reactive limits may be absent. PowerIO 0.9 carries a bound the case does
-  not state as `±Inf` rather than refusing the case (stock case9241pegase leaves them
-  off seven generators). PowerDiff leaves the bound off the solver model and its KKT
-  complementarity row reads `ρ = 0`, the multiplier of a constraint that is not there
-  and the value a solver reports for a bound it was never given. Without this the
-  upgrade would have turned a clean refusal into `0 * Inf` — a `NaN` in the residual
-  and an `Inf` in the Jacobian. The KKT sparsity pattern is unchanged.
-- A branch whose rating is non-finite is treated as unrated, taking the same
-  synthesized thermal limit as `rate_a == 0`.
-- Every other value read out of a case must be finite, and a non-finite one is now
-  named with its element and field rather than reaching a factorization. `ACNetwork`
-  applies the same rule to a caller-built table.
-- `PowerIO.source_format` reports the lowercase token every `from` argument accepts
-  (`"powermodels-json"`, not `"PowerModelsJson"`), a powerio 0.9 change; the parser
-  tests assert the new spelling.
+PowerIO 0.11 replaces the accessor-and-JSON-payload layer with typed element
+tables, so this is a rewrite of the seam rather than a version bump. PowerDiff is a
+consumer of PowerIO: every electrical quantity PowerIO states is now read from it,
+and nothing that PowerIO computes is computed again here.
+
+### Changed
+
+- **Breaking:** `parse_file` and `parse_matpower` return a
+  `PowerIO.PioModule{PowerIO.BalancedNetwork}` rather than a bare network. The
+  module carries the reader's diagnostics, the source record and the history
+  alongside the case, and it is what `PowerIO.emit` writes back out. Every network
+  constructor accepts the module or the network inside it, so `DCNetwork(net)`,
+  `ACNetwork(net)`, `DCOPFProblem(net)`, `ACOPFProblem(net)`,
+  `DCPowerFlowState(net)` and `calc_demand_vector(net)` are unchanged at the call
+  site.
+- **Breaking:** a failure inside PowerIO reaches the caller as a
+  `PowerIO.PowerIOError` instead of being flattened into an `ArgumentError`. It
+  carries the diagnostic `code` and the records behind it, both of which wrapping
+  discarded. PowerDiff's own refusals stay `ArgumentError`.
+- **Breaking:** `parse_matpower_struct` is removed. It was a compatibility alias
+  for `parse_matpower` with no callers.
+- **Breaking:** `network_findings` is removed, one release after it was added and
+  before it ever shipped. It existed because PowerIO 0.9 reached its findings only
+  through a normalize pass PowerDiff had to own, deduplicate and label. In 0.11 they
+  are `m.diagnostics`, a property of the module `parse_file` already returns, and
+  a `Diagnostic` is a record with a `code` and a `severity` rather than a line of
+  text. Wrapping a property in an exported function is surface, not integration.
+- The series conductance and susceptance are read back from PowerIO's terminal
+  admittance coefficients rather than derived from `r` and `x`, and each branch
+  terminal's charging admittance is carried on its own side. PowerDiff previously
+  summed the two sides, split the total evenly and discarded the charging
+  conductance, which lost fidelity on every source that states the terminals
+  separately. Nothing in `src/` inverts a branch impedance any more.
+- The branch-by-bus incidence matrix is stated once and shared by both network
+  types, which previously assembled one each.
+- Out-of-service and isolated elements are selected out here rather than by
+  PowerIO. `to_powerdata` is unfiltered in 0.11: every row carries a `status` and
+  its source row number, which is exactly the `IDMapping` index, so the two-pass
+  reconciliation that used to recover those numbers is gone. Isolated (`type == 4`)
+  buses and everything standing on them are dropped, as before.
+- A generator's cost model is read off the element rather than inferred from the
+  shape of a converted row, so a piecewise linear cost is refused for what it is.
+- The format vocabulary is PowerIO's rather than a copy of it: an unrecognized
+  token goes to PowerIO, which answers with what the linked library actually reads,
+  and a reader PowerIO gains is reachable without a PowerDiff release. PowerDiff's
+  historical short spellings still resolve. A bare `json` is still refused as
+  ambiguous. The hand-maintained distribution-format blocklist is replaced by a
+  check on what the source actually parsed to, which also covers time series,
+  scenario sets and calculation instances.
+- `docs/powerio-integration.md` moves to `docs/src/` and is published; it stated the
+  ingest contract but sat outside the docs build, so it was never rendered.
+
+### Fixed
+
+- A branch whose source states no thermal limit takes the synthesized limit whether
+  the source spells that `0` or `Inf`. PowerIO 0.11 carries MATPOWER's `rate_a == 0`
+  out as `Inf`, which the previous `rate_a > 0` test accepted, so every unrated
+  branch would have reached the solver with an unbounded flow. Stock IEEE 300 leaves
+  all 411 branches unrated.
+- Generator reactive limits may be absent. PowerIO carries a bound the case does not
+  state as `±Inf` rather than refusing the case, and stock case9241pegase leaves them
+  off seven generators. PowerDiff leaves the bound off the solver model and its KKT
+  complementarity row reads `ρ = 0`, the multiplier of a constraint that is not
+  there and the value a solver reports for a bound it was never given. Without this
+  the upgrade would have turned a clean refusal into `0 * Inf` — a `NaN` in the
+  residual and an `Inf` in the Jacobian. The KKT sparsity pattern is unchanged.
+
+### Added
+
+- A test that the ingest still reproduces MATPOWER's network, comparing
+  `ptdf_matrix` against `PowerModels.calc_basic_ptdf_matrix` on three PGLib cases.
+  It shares no code with the ingest and pins the topology, the branch susceptances
+  and the reference bus together.
 
 ## 0.1.0
 
