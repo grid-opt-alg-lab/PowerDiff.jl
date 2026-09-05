@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+using Changelog
 using Documenter
 using PowerDiff
 
@@ -31,6 +32,16 @@ else
     )
 end
 
+# Render CHANGELOG.md into a docs page, turning issue, pull request and version
+# references into links. The output is generated on every build and is not
+# tracked; CHANGELOG.md at the repository root remains the single source.
+Changelog.generate(
+    Changelog.Documenter(),
+    joinpath(@__DIR__, "..", "CHANGELOG.md"),
+    joinpath(@__DIR__, "src", "changelog.md");
+    repo = "grid-opt-alg-lab/PowerDiff.jl",
+)
+
 makedocs(
     sitename = "PowerDiff.jl",
     modules = [PowerDiff],
@@ -49,6 +60,7 @@ makedocs(
         "PowerIO Integration" => "powerio-integration.md",
         "Advanced Topics" => "advanced.md",
         "API Reference" => "api.md",
+        "Changelog" => "changelog.md",
     ],
 )
 
