@@ -1,29 +1,68 @@
 name: CI
+
 on:
   push:
     branches: [main]
+  # `labeled` is listed because the `full-matrix` gate below reads the pull
+  # request's labels: without it, applying the label triggers nothing and the
+  # matrix job stays skipped.
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   schedule:
     # Weekly nightly check (Sundays at 04:00 UTC)
     - cron: '0 4 * * 0'
+
+permissions:
+  contents: read
+
+# A pull request run is superseded by the next push to the same branch, so
+# cancelling it costs nothing. A run on main or a scheduled run covers a commit
+# or a point in time that nothing else will re-cover, so it always finishes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
-  # Runs on every PR and push — single fast job
+  # Current stable Julia on Linux, on every pull request and every push. This is
+  # the only job that instruments coverage.
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: julia-actions/setup-julia@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         with:
           version: '1'
-      - uses: julia-actions/cache@v3
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+      # Caches ~/.julia/artifacts, which holds the PowerIO native library (a
+      # lazy artifact fetched on the first `using PowerIO`, so during
+      # julia-runtest rather than julia-buildpkg) and the PGLib_opf archive.
+      - uses: julia-actions/cache@a7bed9df697e5d7309d68afe7542a87621a8b6c8 # v3.3.0
+      - uses: julia-actions/julia-buildpkg@e3eb439fad4f9aba7da2667e7510e4a46ebc46e1 # v1.7.0
+      - uses: julia-actions/julia-runtest@6e050c8013b833b1195105ff2fce9cd802f53271 # v1.12.0
+      - uses: julia-actions/julia-processcoverage@03114f09f119417c3242a9fb6e0b722676aedf38 # v1.2.2
+      # CODECOV_TOKEN is not set on this repository. A public repository uploads
+      # without a token at a lower rate limit; adding the secret later raises
+      # that limit and requires no change here. fail_ci_if_error stays false so
+      # a Codecov outage or a throttled upload cannot fail an otherwise green
+      # build.
+      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
-  # Full matrix — only on main push and scheduled runs
+  # Both supported Julia versions on Linux plus macOS/arm64, which is the slice
+  # where a native library missing a platform build shows up. Runs on every push
+  # to main and on the weekly schedule. On a pull request it runs only when the
+  # `full-matrix` label is present: a pull request that changes a Project.toml
+  # [compat] bound carries that label so the widened bound gets matrix coverage
+  # before it lands.
   test-full:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-matrix')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -34,25 +73,36 @@ jobs:
           - julia-version: '1'
             os: macos-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: julia-actions/setup-julia@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         with:
           version: ${{ matrix.julia-version }}
-      - uses: julia-actions/cache@v3
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+      - uses: julia-actions/cache@a7bed9df697e5d7309d68afe7542a87621a8b6c8 # v3.3.0
+      - uses: julia-actions/julia-buildpkg@e3eb439fad4f9aba7da2667e7510e4a46ebc46e1 # v1.7.0
+      # Coverage is instrumented once, in the `test` job. Instrumenting it again
+      # across the matrix slows every slice down and uploads nothing new.
+      - uses: julia-actions/julia-runtest@6e050c8013b833b1195105ff2fce9cd802f53271 # v1.12.0
+        with:
+          coverage: false
 
-  # Nightly is informational and only runs on the scheduled workflow.
+  # Nightly is informational: both steps continue on error, so a break in an
+  # unreleased Julia reports without failing the workflow.
   test-nightly:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: julia-actions/setup-julia@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         with:
           version: 'nightly'
-      - uses: julia-actions/cache@v3
-      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/cache@a7bed9df697e5d7309d68afe7542a87621a8b6c8 # v3.3.0
+      - uses: julia-actions/julia-buildpkg@e3eb439fad4f9aba7da2667e7510e4a46ebc46e1 # v1.7.0
         continue-on-error: true
-      - uses: julia-actions/julia-runtest@v1
+      - uses: julia-actions/julia-runtest@6e050c8013b833b1195105ff2fce9cd802f53271 # v1.12.0
         continue-on-error: true
+        with:
+          coverage: false

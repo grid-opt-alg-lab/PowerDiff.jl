@@ -58,9 +58,20 @@ pd_bus(bus_i, bus_type; pd=0.0, qd=0.0, gs=0.0, bs=0.0, vm=1.0, va=0.0, vmin=0.9
     (; bus_i, bus_type, pd, qd, gs, bs, vm, va, vmin, vmax)
 pd_gen(index, gen_bus; pg=0.0, qg=0.0, qmin=0.0, qmax=0.0, vg=1.0, pmin=0.0, pmax=0.0, cost=(0.0, 0.0, 0.0)) =
     (; index, gen_bus, pg, qg, qmin, qmax, vg, pmin, pmax, cost)
-pd_branch(index, f_bus, t_bus; br_r, br_x, br_b=0.0, rate_a=Inf, rate_b=0.0, rate_c=0.0,
-          tap=1.0, shift=0.0, angmin=-pi / 3, angmax=pi / 3) =
-    (; index, f_bus, t_bus, br_r, br_x, br_b, rate_a, rate_b, rate_c, tap, shift, angmin, angmax)
+# `_network_data` reads the series admittance and each terminal's charging
+# admittance off PowerIO rather than deriving them, so a hand-built branch row has
+# to state them. This is fixture arithmetic: PowerDiff itself never inverts an
+# impedance. `br_b` keeps MATPOWER's whole-line charging spelling and splits evenly,
+# which is what a MATPOWER source states; pass `b_fr`/`b_to` to state each terminal.
+function pd_branch(index, f_bus, t_bus; br_r, br_x, br_b=0.0,
+                   g_fr=0.0, b_fr=br_b / 2, g_to=0.0, b_to=br_b / 2,
+                   rate_a=Inf, rate_b=0.0, rate_c=0.0,
+                   tap=1.0, shift=0.0, angmin=-pi / 3, angmax=pi / 3)
+    y = (iszero(br_r) && iszero(br_x)) ? zero(ComplexF64) : inv(complex(br_r, br_x))
+    return (; index, f_bus, t_bus, br_r, br_x, g=real(y), b=imag(y),
+            g_fr, b_fr, g_to, b_to,
+            rate_a, rate_b, rate_c, tap, shift, angmin, angmax)
+end
 pd_case(bus, gen, branch; name="case", baseMVA=100.0) = (; name, baseMVA, bus, gen, branch)
 
 """

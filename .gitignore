@@ -7,6 +7,8 @@ Manifest.toml
 # Documentation build artifacts
 docs/build/
 docs/Manifest.toml
+# Rendered from CHANGELOG.md by docs/make.jl on every build.
+docs/src/changelog.md
 
 # Claude Code
 .claude/

@@ -8,6 +8,8 @@ function _assert_network_tables_compatible(actual, baseline; label, demand_rtol=
         @test sum(calc_demand_vector(actual)) ≈ sum(calc_demand_vector(baseline)) rtol=demand_rtol atol=1e-8
         @test all(isfinite, [br.rate_a for br in actual.branch])
         @test all(>(0), [br.rate_a for br in actual.branch])
+        @test sum(br.b_fr + br.b_to for br in actual.branch) ≈
+              sum(br.b_fr + br.b_to for br in baseline.branch) rtol=1e-6 atol=1e-8
     end
 end
 
@@ -37,31 +39,39 @@ end
     baseline = PowerDiff._network_data(matpower_net)
 
     @testset "PowerModels JSON" begin
-        text, warnings = PowerIO.to_format(matpower_net, "powermodels-json")
-        @test isempty(warnings)
+        # `emit` returns an `EmitResult`: the artifacts it wrote, the fidelity of the
+        # conversion, and the writer's findings as `Diagnostic` records.
+        result = PowerIO.emit(matpower_net, "powermodels-json")
+        @test result.layout == "file"
+        @test isempty(result.diagnostics)
+        text = result.text
+        @test text isa String
 
         parsed = PowerDiff.parse_file(IOBuffer(text); from=:powermodels)
-        @test PowerIO.source_format(parsed) == "PowerModelsJson"
+        @test parsed.sources[1].format == "powermodels-json"
         data = PowerDiff._network_data(parsed)
         _assert_network_tables_compatible(data, baseline; label="PowerModels JSON")
         _assert_constructs_and_solves(data; label="PowerModels JSON")
 
         mktempdir() do dir
             path = joinpath(dir, "case14.json")
-            write(path, text)
+            written = PowerIO.emit(matpower_net, "powermodels-json", path)
+            @test written.layout == "file"
+            @test isfile(written.artifacts[1].path)
             parsed_path = PowerDiff.parse_file(path; from="powermodels-json")
-            @test PowerIO.source_format(parsed_path) == "PowerModelsJson"
+            @test parsed_path.sources[1].format == "powermodels-json"
             _assert_network_tables_compatible(
                 PowerDiff._network_data(parsed_path), baseline; label="PowerModels JSON path")
         end
     end
 
     @testset "Egret JSON" begin
-        text, warnings = PowerIO.to_format(matpower_net, "egret-json")
-        @test isempty(warnings)
+        result = PowerIO.emit(matpower_net, "egret-json")
+        @test isempty(result.diagnostics)
+        text = result.text
 
         parsed = PowerDiff.parse_file(IOBuffer(text); from=:egret)
-        @test PowerIO.source_format(parsed) == "EgretJson"
+        @test parsed.sources[1].format == "egret-json"
         data = PowerDiff._network_data(parsed)
         _assert_network_tables_compatible(data, baseline; label="Egret JSON")
         _assert_constructs_and_solves(data; label="Egret JSON")
@@ -70,20 +80,26 @@ end
     end
 
     @testset "PSS/E RAW" begin
-        text, warnings = PowerIO.to_format(matpower_net, "psse")
-        @test warnings isa AbstractVector
+        result = PowerIO.emit(matpower_net, "psse")
+        # A `Diagnostic` is a record, not a line of text: branch on `code` and
+        # `severity`, never on the message, which carries no stability promise.
+        @test result.diagnostics isa Vector{PowerIO.Diagnostic}
+        @test all(d -> d.severity in (:error, :warning, :remark, :note), result.diagnostics)
+        @test !any(d -> d.severity === :error, result.diagnostics)
+        text = result.text
 
         parsed = PowerDiff.parse_file(IOBuffer(text); from=:psse)
-        @test PowerIO.source_format(parsed) == "Psse"
+        @test parsed.sources[1].format == "psse"
         data = PowerDiff._network_data(parsed)
         _assert_network_tables_compatible(data, baseline; label="PSS/E RAW", demand_rtol=1e-5)
         _assert_constructs_and_solves(data; label="PSS/E RAW")
 
         mktempdir() do dir
             path = joinpath(dir, "case14.raw")
-            write(path, text)
+            written = PowerIO.emit(matpower_net, "psse", path)
+            @test isfile(written.artifacts[1].path)
             parsed_path = PowerDiff.parse_file(path)
-            @test PowerIO.source_format(parsed_path) == "Psse"
+            @test parsed_path.sources[1].format == "psse"
             _assert_network_tables_compatible(
                 PowerDiff._network_data(parsed_path), baseline; label="PSS/E RAW path", demand_rtol=1e-5)
         end

@@ -330,7 +330,7 @@ function DCOPFProblem(pm_data::Dict{String,<:Any}; kwargs...)
     throw(ArgumentError("dictionary constructors were removed; parse a network file with PowerDiff.parse_file"))
 end
 
-DCOPFProblem(net::PowerIO.BalancedNetwork; kwargs...) = DCOPFProblem(_network_data(net); kwargs...)
+DCOPFProblem(net::PowerIOSource; kwargs...) = DCOPFProblem(_network_data(net); kwargs...)
 
 function DCOPFProblem(data::NamedTuple; d::Union{Nothing,AbstractVector}=nothing, tau::Float64=DEFAULT_TAU, kwargs...)
     network = DCNetwork(data; tau=tau)

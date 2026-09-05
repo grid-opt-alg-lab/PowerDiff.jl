@@ -24,9 +24,8 @@ const BASE_MVA = 100.0
 
 """Solve the IEEE300 DC OPF at supplied continuous branch switching states."""
 function solve_at_switching(network_data, demand, switching)
-    network = DCNetwork(network_data)
-    network.sw .= switching
-    problem = DCOPFProblem(network, demand)
+    problem = DCOPFProblem(DCNetwork(network_data), demand)
+    update_switching!(problem, switching)
     solution = solve!(problem)
     return problem, solution
 end
