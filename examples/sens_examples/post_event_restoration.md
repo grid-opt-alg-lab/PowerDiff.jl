@@ -36,22 +36,24 @@ Let:
 - $d_i$ be demand at bus $i$; and
 - $s_\ell\in[0,1]$ be the continuous switching state of branch $\ell$.
 
-While physical transmission line status is binary, with $s_\ell=1$ indicating a closed or energized branch and $s_\ell = 0$ indicating an open or outaged branch, we relax this branch status to a continuous $[0,1]$ to allow for calculation of derivatives with respect to branch switching. An intermediate value is a continuous relaxation of the binary switching state. To represent a severely damaged or "nearly open" branch while retaining a differentiable operating point, each damaged branch is assigned a small positive switching state $\epsilon$: 
+While physical transmission line status is binary, with $s_\ell=1$ indicating a closed or energized branch and $s_\ell = 0$ indicating an open or outaged branch, we relax this branch status to a continuous $[0,1]$ to allow for calculation of derivatives with respect to branch switching. An intermediate value is a continuous relaxation of the binary switching state. To represent a severely damaged or "nearly open" branch while retaining a differentiable operating point, each damaged branch is assigned a small positive switching state $\epsilon$. The $s_\ell$ values within continuous switching vector $s$ can be defined as:
+
+
 $$
-    s_\ell =     
-    \begin{cases}
-        \epsilon, & \ell\in\mathcal{D},\\
-        1, & \ell\notin\mathcal{D},
-    \end{cases}
-    \qquad \epsilon=0.01.
-    \tag{1}
-    
+s_\ell =
+\begin{cases}
+\epsilon, & \ell \in \mathcal{D},\\
+1, & \ell \notin \mathcal{D}.
+\end{cases}
+\qquad \epsilon = 0.01
+\tag{1}
 $$
+
 Undamaged branches have $s_\ell=1$, and a complete repair changes the switching state of branch $\ell$ from $\epsilon$ to one. 
 
 ## Operating problem
 
-For a fixed continuous switching vector $s$ defined by (1), PowerDiff solves a DC optimal
+For a fixed continuous switching vector $s$, PowerDiff solves a DC optimal
 power flow (DC OPF) to find the post-disturbance operating point. This consists of generator outputs, bus voltage angles,
 branch flows, and any load shedding.
 
@@ -94,10 +96,9 @@ Suppose only one damaged branch can be fully restored. A direct, exhaustive appr
 
 PowerDiff can instead supplies a local screening score for all branches from the
 damaged operating point by differentiating the optimal load-shedding solution with respect to the continuous branch switching states. The bus-by-branch load shedding sensitivity matrix is 
-$$
-    J_{i\ell} = \frac{\partial p_i^{\mathrm{sh}*}}{\partial s_\ell}
-    \tag{3}
-$$ 
+
+$$J_{i\ell} = \frac{\partial p_i^{\mathrm{sh}*}}{\partial s_\ell} \tag{3}$$
+
 Each entry at row $i$ and column $l$ represents the local change in optimal load shed at bus $i$ caused by a small change in the continuous switching state $s_l$ of branch $l$. The Jacobian matrix can be calculated using: 
 ```julia
 J = PowerDiff.calc_sensitivity(
@@ -166,7 +167,7 @@ A branch $\ell$ receives positive weight $\pi_\ell$ when increasing its continuo
 The implemented solution has seven steps:
 
 1. Load IEEE300 and solve the healthy-network DC OPF.
-2. Arbitrarily choose $\mathcal{D}={3,6,16,17,37}$. Set the continuous switching states of damaged branches in $D$ to 0.01 and solve the damaged-grid DC OPF.
+2. Arbitrarily choose $\mathcal{D}=\lbrace 3,6,16,17,37 \rbrace$. Set the continuous switching states of damaged branches in $D$ to 0.01 and solve the damaged-grid DC OPF.
 3. Measure total unserved demand in the damaged solution.
 4. Use `PowerDiff.vjp` to compute $\partial U/\partial s_\ell$ 
 5. Convert the derivatives into nonnegative scores
@@ -185,8 +186,7 @@ These priority weights can be used to screen candidate repairs, where the candid
 The example tests PowerDiff's approximation by increasing a damaged branch's switching
 state from 0.01 to 0.02 on the IEEE-300 test system. It also tests a full repair by setting the branch's switching state to one and solving a fresh OPF.
 
-The damaged branch set is arbitrarily set as:
-$$\mathcal{D}=\{3,6,16,17,37\}, \qquad s_\ell = \begin{cases} 0.01, & \ell\in\mathcal{D},\\ 1, & \ell\notin\mathcal{D}. \end{cases}$$
+The damaged branch set is arbitrarily set as $\mathcal{D}=\lbrace 3,6,16,17,37 \rbrace$.
 The given branches are labeled using their provided branch IDs. The original IEEE-300 network has no load shed while the damaged configuration has 54.05 MW of load shed. The local sensitivity results and explicit repair evaluations are shown below:
 
 | Branch | $\kappa_\ell$ (MW) | Priority weight | Predicted \(+0.01\) | Actual \(+0.01\) | Full-repair recovery (MW) |
