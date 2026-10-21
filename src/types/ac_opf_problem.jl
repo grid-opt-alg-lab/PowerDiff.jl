@@ -500,9 +500,15 @@ function _build_jump_model(network::ACNetwork, data::ACOPFData, optimizer, silen
     @variable(model, va[1:n])
     @variable(model, constants.vmin[i] <= vm[i in 1:n] <= constants.vmax[i], start=1.0)
 
-    # Generation variables
+    # Generation variables. Reactive limits may be absent (`±Inf`, PowerIO's spelling
+    # for a case that states none); JuMP takes only finite bounds, so an absent one is
+    # left off the variable rather than passed through as an infinite bound.
     @variable(model, constants.pmin[i] <= pg[i in 1:n_gen] <= constants.pmax[i])
-    @variable(model, constants.qmin[i] <= qg[i in 1:n_gen] <= constants.qmax[i])
+    @variable(model, qg[1:n_gen])
+    for i in 1:n_gen
+        _absent_bound(constants.qmin[i]) || set_lower_bound(qg[i], constants.qmin[i])
+        _absent_bound(constants.qmax[i]) || set_upper_bound(qg[i], constants.qmax[i])
+    end
 
     # Branch flow variables
     @variable(model, -arc_fmax[i] <= p[i in 1:length(data.arcs)] <= arc_fmax[i])
@@ -741,5 +747,5 @@ function ACOPFProblem(pm_data::Dict; kwargs...)
     throw(ArgumentError("dictionary constructors were removed; parse a network file with PowerDiff.parse_file"))
 end
 
-ACOPFProblem(net::PowerIO.BalancedNetwork; kwargs...) = ACOPFProblem(ACNetwork(net); kwargs...)
+ACOPFProblem(net::PowerIOSource; kwargs...) = ACOPFProblem(ACNetwork(net); kwargs...)
 ACOPFProblem(data::NamedTuple; kwargs...) = ACOPFProblem(ACNetwork(data); kwargs...)

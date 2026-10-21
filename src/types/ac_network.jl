@@ -207,7 +207,19 @@ function ACNetwork(net::Dict{String,<:Any}; idx_slack::Union{Nothing,Int}=nothin
     throw(ArgumentError("dictionary constructors were removed; parse a network file with PowerDiff.parse_file"))
 end
 
-ACNetwork(net::PowerIO.BalancedNetwork; idx_slack::Union{Nothing,Int}=nothing) =
+# Only the reactive generator limits model an absent bound end to end. A non-finite
+# value on any other bound would reach JuMP as an infinite variable bound and the KKT
+# system as `0 * Inf`; name the row and the field instead.
+function _require_finite_bounds(values, field::Symbol)
+    for (i, v) in enumerate(values)
+        isfinite(v) || throw(ArgumentError(
+            "ACNetwork: row $i has non-finite `$field` ($v); only generator reactive " *
+            "limits (`qmin`/`qmax`) may be left unbounded"))
+    end
+    return nothing
+end
+
+ACNetwork(net::PowerIOSource; idx_slack::Union{Nothing,Int}=nothing) =
     ACNetwork(_network_data(net); idx_slack=idx_slack)
 
 # Build from PowerDiff network tables (see `_network_data`). The `PowerIO.BalancedNetwork`
@@ -222,7 +234,6 @@ function ACNetwork(data::NamedTuple; idx_slack::Union{Nothing,Int}=nothing)
     branch_tbl = Dict(branch.index => branch for branch in data.branch)
     gen_tbl = Dict(gen.index => gen for gen in data.gen)
 
-    A = spzeros(n_branch, n_bus)
     incidences = Vector{Tuple{Int,Int}}(undef, n_branch)
     f_bus = Vector{Int}(undef, n_branch)
     t_bus = Vector{Int}(undef, n_branch)
@@ -242,40 +253,34 @@ function ACNetwork(data::NamedTuple; idx_slack::Union{Nothing,Int}=nothing)
     g = zeros(n_branch)
     b = zeros(n_branch)
 
+    A = _incidence_matrix(branch_tbl, id_map)
+
     for orig_id in id_map.branch_ids
         branch = branch_tbl[orig_id]
         l = id_map.branch_to_idx[orig_id]
         fb = id_map.bus_to_idx[branch.f_bus]
         tb = id_map.bus_to_idx[branch.t_bus]
-        A[l, fb] = 1.0
-        A[l, tb] = -1.0
         incidences[l] = (fb, tb)
         f_bus[l] = fb
         t_bus[l] = tb
         br_r[l] = branch.br_r
         br_x[l] = branch.br_x
-        br_b[l] = branch.br_b
-        # MATPOWER models line charging as a single symmetric susceptance with no
-        # charging conductance, and `_network_data` already folded the two PowerIO
-        # sides into `br_b`. Split it evenly and leave g_fr/g_to at zero (initialized
-        # above). Asymmetric b_fr != b_to or nonzero g_fr/g_to from a non MATPOWER
-        # source would be averaged/dropped here; thread the per-side values through
-        # if that fidelity is ever needed.
-        b_fr[l] = branch.br_b / 2
-        b_to[l] = branch.br_b / 2
-        tap[l] = iszero(branch.tap) ? 1.0 : branch.tap
+        # Each terminal states its own charging admittance. A MATPOWER source splits
+        # one symmetric susceptance evenly and states no charging conductance; a
+        # source that states the terminals separately keeps that split.
+        g_fr[l] = branch.g_fr
+        b_fr[l] = branch.b_fr
+        g_to[l] = branch.g_to
+        b_to[l] = branch.b_to
+        br_b[l] = branch.b_fr + branch.b_to
+        tap[l] = branch.tap
         shift[l] = branch.shift
         tm[l] = tap[l]^2
         angmin[l] = branch.angmin
         angmax[l] = branch.angmax
         rate_a[l] = branch.rate_a
-        z2 = branch.br_r^2 + branch.br_x^2
-        if z2 > 1e-10
-            g[l] = branch.br_r / z2
-            b[l] = -branch.br_x / z2
-        else
-            _SILENCE_WARNINGS[] || @warn "Branch $orig_id has near-zero impedance; treating as open."
-        end
+        g[l] = branch.g
+        b[l] = branch.b
     end
 
     g_shunt = zeros(n_bus)
@@ -333,6 +338,15 @@ function ACNetwork(data::NamedTuple; idx_slack::Union{Nothing,Int}=nothing)
     end
     vm_min = [bus_tbl[id].vmin for id in id_map.bus_ids]
     vm_max = [bus_tbl[id].vmax for id in id_map.bus_ids]
+
+    # Reactive generator limits may be absent (`±Inf`): the solver model leaves the
+    # bound off and the KKT system pins its multiplier to zero. Every other bound here
+    # becomes a JuMP variable bound and a complementarity row that needs a number, so
+    # say which one is missing rather than letting it reach the solver.
+    _require_finite_bounds(pmin, :pmin)
+    _require_finite_bounds(pmax, :pmax)
+    _require_finite_bounds(vm_min, :vmin)
+    _require_finite_bounds(vm_max, :vmax)
 
     return ACNetwork(
         n_bus, n_branch, sparse(A), incidences, g, b, g_shunt, b_shunt,

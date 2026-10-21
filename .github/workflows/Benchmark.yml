@@ -13,10 +13,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Restricted to pull requests from a branch of this repository. A pull request
+  # from a fork receives a read-only GITHUB_TOKEN no matter what the
+  # `permissions` block above requests, so the step that posts the comparison
+  # comment gets a 403 and the check goes red on a contributor's pull request
+  # for a reason unrelated to the change. Skipping the job leaves the check
+  # neutral instead.
+  #
+  # `pull_request_target` would supply a write-scoped token, but it checks out
+  # and runs the fork's benchmark script with that token, which hands an
+  # arbitrary contributor write access to this repository. It is not the fix.
   benchmark:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: MilesCranmer/AirspeedVelocity.jl@315c11b51ceee8ebd6063d70cff6ae499a040d28
+      - uses: MilesCranmer/AirspeedVelocity.jl@af4f71e9a45b8f77a10b9773b07ae8d7c26edfe2 # v0.6.5
         with:
           julia-version: '1'
           mode: 'time,memory'

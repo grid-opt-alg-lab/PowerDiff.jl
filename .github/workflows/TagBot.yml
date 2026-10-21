@@ -1,15 +1,15 @@
 name: TagBot
 
-# Tags vX.Y.Z and creates the GitHub release here after each PowerDiff version
-# merges into the General registry. Triggered by the JuliaTagBot service
-# commenting on the TagBot trigger issue; a manual dispatch is the recovery
-# path (TagBot re-scans all registered versions on every run and backfills any
-# release it has not created yet).
+# Tags vX.Y.Z and creates the GitHub release here once a PowerDiff version
+# merges into the General registry. The JuliaTagBot service comments on the
+# TagBot trigger issue to start a run; a manual dispatch is the recovery path,
+# since TagBot re-scans every registered version on each run and backfills any
+# release it has not created yet.
 #
-# The `permissions` block is required: TagBot pushes the tag over SSH but
-# creates the GitHub *release* through the API with GITHUB_TOKEN, which needs
-# `contents: write`. Without it the tag lands while the release is silently
-# skipped — a bare tag with no release object.
+# `contents: write` is required. TagBot pushes the tag over SSH, but it creates
+# the GitHub *release* through the API with GITHUB_TOKEN. Without the
+# permission the tag lands and the release is skipped, leaving a bare tag with
+# no release object.
 on:
   issue_comment:
     types: [created]
@@ -20,16 +20,32 @@ permissions:
   issues: write
   pull-requests: read
 
+# TagBot is idempotent per version, but two runs scanning the registry at once
+# race to create the same release. One at a time, and never cancel a run that
+# may be part-way through tagging.
+concurrency:
+  group: tagbot
+  cancel-in-progress: false
+
 jobs:
   TagBot:
     if: github.event_name == 'workflow_dispatch' || github.actor == 'JuliaTagBot'
     runs-on: ubuntu-latest
     steps:
-      - uses: JuliaRegistries/TagBot@v1
+      - uses: JuliaRegistries/TagBot@cded32665b34ca0496d3ac10a67d08ddfc726963 # v1.25.11
         with:
-          # TAGBOT_TOKEN is optional, but fixes backfills for old registered
-          # versions whose tagged commits changed workflow files.
+          # TAGBOT_TOKEN is optional. It fixes backfills for already-registered
+          # versions whose tagged commits touch workflow files, which
+          # GITHUB_TOKEN is not permitted to push.
           token: ${{ secrets.TAGBOT_TOKEN || secrets.GITHUB_TOKEN }}
-          # Prefer a dedicated write deploy key; reuse a Documenter key if the
-          # repository already has one.
+          # The SSH key is what makes the tag push count as a user action, and
+          # therefore what makes Documentation.yml's `tags: ['v*']` trigger fire
+          # at all: a tag pushed with GITHUB_TOKEN starts no workflow. A
+          # dedicated write deploy key is preferred; DOCUMENTER_KEY is a write
+          # key this repository already has.
           ssh: ${{ secrets.TAGBOT_SSH || secrets.DOCUMENTER_KEY }}
+          # Housekeeping and bot labels contribute nothing to release notes. The
+          # `changelog` template itself stays at TagBot's default, which renders
+          # the heading, the diff link, the release notes carried by the
+          # Registrator trigger, then merged pull requests and closed issues.
+          changelog_ignore: changelog skip, duplicate, invalid, question, wontfix, dependencies, github_actions

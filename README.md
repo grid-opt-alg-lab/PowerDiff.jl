@@ -25,7 +25,7 @@ A Julia package for differentiable power system analysis. Compute sensitivities 
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerDiff.jl.git")
+Pkg.add("PowerDiff")
 ```
 
 ## Quick Start
@@ -33,7 +33,7 @@ Pkg.add(url="https://github.com/grid-opt-alg-lab/PowerDiff.jl.git")
 ```julia
 using PowerDiff
 
-# Parse a supported PowerIO case into a PowerIO.BalancedNetwork
+# Parse a case into a PowerIO module
 net = parse_file("case14.m")
 dc_net = DCNetwork(net)
 d = calc_demand_vector(net)
@@ -61,13 +61,29 @@ See the [Getting Started guide](https://samueltalkington.com/research/powerdiff/
 
 ## Input Format
 
-PowerDiff reads files through PowerIO. `parse_file` supports MATPOWER `.m`,
-PSS/E `.raw`, PowerWorld `.aux`, PowerModels JSON, and Egret JSON. For streams,
-pass `from`; JSON streams need `from=:egret` or `from=:powermodels`.
+PowerDiff reads files through PowerIO, and `parse_file` reads every transmission
+format the linked PowerIO library does — MATPOWER `.m`, PSS/E `.raw`, PowerWorld,
+PowerModels JSON, Egret JSON, pandapower, PyPSA, PSLF, gridfm, GO Challenge 3 and
+the rest. The format tokens are PowerIO's, so a reader PowerIO gains works here at
+once.
+
+A path's format is inferred from its extension; a stream has no extension, so pass
+`from` (MATPOWER is assumed otherwise). A bare `json` names a container rather than
+a reader, so name the one you mean: `from=:powermodels`, `:egret`, `:pandapower`.
+
+`parse_file` returns a `PowerIO.PioModule`. Beyond the case itself it carries
+`m.diagnostics`, the reader's findings as records you can branch on by `code` and
+`severity`; `m.sources[1].format`, the reader that ran; and enough for
+`PowerIO.emit(m, "psse", path)` to write the case out again.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to run the tests and build the docs.
+Maintainers cutting a release follow [RELEASING.md](RELEASING.md).
 
 ## Dependencies
 
-- [PowerIO.jl](https://github.com/eigenergy/PowerIO.jl) — Parser and data layer (see `docs/powerio-integration.md`)
+- [PowerIO.jl](https://github.com/eigenergy/PowerIO.jl) — Parser and data layer (see [PowerIO Integration](https://samueltalkington.com/research/powerdiff/powerio-integration/))
 - [JuMP.jl](https://github.com/jump-dev/JuMP.jl) — Optimization modeling
 - [ExaModels.jl](https://github.com/exanauts/ExaModels.jl) — Alternative optimization modeling for GPU parallelization
 - [Ipopt.jl](https://github.com/jump-dev/Ipopt.jl) — Default solver for DC and AC OPF

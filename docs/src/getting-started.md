@@ -7,14 +7,23 @@ This guide walks through the main workflows: DC power flow, DC OPF with LMP anal
 ```julia
 using PowerDiff
 
-# Parse a supported PowerIO case into a PowerIO.BalancedNetwork
+# Parse a case into a PowerIO module
 net = parse_file("case14.m")
 ```
 
-PowerDiff reads files through PowerIO. `parse_file` supports MATPOWER `.m`,
-PSS/E `.raw`, PowerWorld `.aux`, PowerModels JSON, and Egret JSON. For streams,
-pass `from`; JSON streams need `from=:egret` or `from=:powermodels`. The former
-PowerModels dictionary constructors were removed.
+PowerDiff reads files through PowerIO, and `parse_file` reads every transmission
+format the linked PowerIO library does — MATPOWER `.m`, PSS/E `.raw`, PowerWorld,
+PowerModels JSON, Egret JSON, pandapower, PyPSA, PSLF, gridfm, GO Challenge 3 and the
+rest. The format tokens are PowerIO's, so a reader PowerIO gains works here at once.
+
+A path's format is inferred from its extension; a stream has no extension, so pass
+`from` (MATPOWER is assumed otherwise). A bare `json` names a container rather than a
+reader, so name the one you mean: `from=:powermodels`, `:egret`, `:pandapower`.
+The former PowerModels dictionary constructors were removed.
+
+`parse_file` returns a `PowerIO.PioModule`, which carries the reader's findings on
+`m.diagnostics` alongside the case. See
+[PowerIO Integration](powerio-integration.md) for the whole seam.
 
 ## Interactive Exploration
 

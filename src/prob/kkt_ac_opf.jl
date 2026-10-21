@@ -28,6 +28,34 @@
 # Helpers
 # =============================================================================
 
+# --- Bound complementarity, with or without a stated bound ---------------------
+#
+# A case need not state every bound: PowerIO 0.9 carries an absent one as `±Inf`,
+# which is how MATPOWER, PowerModels, pandapower and PyPSA all spell "no limit".
+# PowerDiff's KKT layout is fixed, with one complementarity row per bound in a
+# structure that must not move with the data, so an absent bound cannot be dropped
+# from the system — and it cannot be carried either: `ρ * (x - (-Inf))` is `0 * Inf`,
+# a `NaN` in the residual and an `Inf` in the Jacobian.
+#
+# So the row stays and states the right thing. A constraint that is not there has no
+# multiplier, so its row reads `ρ = 0` — exactly the value a solver reports for a
+# bound it was never given, which is what keeps the solved duals and this residual in
+# agreement. Its derivative is `∂/∂ρ = 1` and `∂/∂x = 0`, both constants, so the
+# fixed-regime derivative of an absent bound is zero, as it should be.
+#
+# Only the generator reactive limits reach here unbounded; `_network_data` refuses a
+# non-finite value anywhere else, and `ACNetwork` refuses one on the bounds a JuMP
+# variable must carry.
+
+_lb_complementarity(ρ, x, lb) = _absent_bound(lb) ? ρ : ρ * (x - lb)
+_ub_complementarity(ρ, x, ub) = _absent_bound(ub) ? ρ : ρ * (ub - x)
+
+_lb_dcomp_dx(ρ, lb) = _absent_bound(lb) ? zero(ρ) : ρ
+_ub_dcomp_dx(ρ, ub) = _absent_bound(ub) ? zero(ρ) : -ρ
+
+_lb_dcomp_ddual(x, lb) = _absent_bound(lb) ? one(x) : x - lb
+_ub_dcomp_ddual(x, ub) = _absent_bound(ub) ? one(x) : ub - x
+
 """Return sorted reference bus indices for the problem."""
 _ref_bus_indices(prob::ACOPFProblem) = prob.data.ref_bus_keys
 
@@ -827,14 +855,17 @@ function calc_kkt_jacobian(prob::ACOPFProblem; sol::Union{ACOPFSolution,Nothing}
                            -vars.rho_pg_ub[i])
         _add_sparse_entry!(row_idxs, col_idxs, vals, idx.rho_pg_ub[i], idx.rho_pg_ub[i],
                            constants.pmax[i] - vars.pg[i])
+        # An absent bound contributes `∂/∂qg = 0` and `∂/∂ρ = 1`. The zero is dropped
+        # by `_add_sparse_entry!`, the same treatment a stated bound already gets when
+        # its multiplier is zero because it is not binding.
         _add_sparse_entry!(row_idxs, col_idxs, vals, idx.rho_qg_lb[i], idx.qg[i],
-                           vars.rho_qg_lb[i])
+                           _lb_dcomp_dx(vars.rho_qg_lb[i], constants.qmin[i]))
         _add_sparse_entry!(row_idxs, col_idxs, vals, idx.rho_qg_lb[i], idx.rho_qg_lb[i],
-                           vars.qg[i] - constants.qmin[i])
+                           _lb_dcomp_ddual(vars.qg[i], constants.qmin[i]))
         _add_sparse_entry!(row_idxs, col_idxs, vals, idx.rho_qg_ub[i], idx.qg[i],
-                           -vars.rho_qg_ub[i])
+                           _ub_dcomp_dx(vars.rho_qg_ub[i], constants.qmax[i]))
         _add_sparse_entry!(row_idxs, col_idxs, vals, idx.rho_qg_ub[i], idx.rho_qg_ub[i],
-                           constants.qmax[i] - vars.qg[i])
+                           _ub_dcomp_ddual(vars.qg[i], constants.qmax[i]))
     end
 
     @inbounds for l in 1:m
@@ -962,8 +993,8 @@ function kkt(z::AbstractVector, prob::ACOPFProblem, sw::AbstractVector;
     # Generation bounds
     K[idx.rho_pg_lb] .= vars.rho_pg_lb .* (pg .- pmin)
     K[idx.rho_pg_ub] .= vars.rho_pg_ub .* (pmax .- pg)
-    K[idx.rho_qg_lb] .= vars.rho_qg_lb .* (qg .- qmin)
-    K[idx.rho_qg_ub] .= vars.rho_qg_ub .* (qmax .- qg)
+    K[idx.rho_qg_lb] .= _lb_complementarity.(vars.rho_qg_lb, qg, qmin)
+    K[idx.rho_qg_ub] .= _ub_complementarity.(vars.rho_qg_ub, qg, qmax)
 
     # Flow variable bounds (reduced-space)
     K[idx.sig_p_fr_lb] .= vars.sig_p_fr_lb .* (p_fr .+ rate_a)

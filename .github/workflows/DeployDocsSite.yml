@@ -8,6 +8,21 @@ on:
     paths:
       - 'docs/**'
       - 'src/**'
+      # docs/make.jl renders CHANGELOG.md into docs/src/changelog.md, so a
+      # changelog edit alone changes the published site.
+      - 'CHANGELOG.md'
+
+# Every run of this workflow pushes the same two directories in the website
+# repository, so only the newest one matters, and serializing avoids two runs
+# racing to push to the same branch.
+concurrency:
+  group: deploy-docs-site
+  cancel-in-progress: true
+
+# The site is published to a different repository through
+# WEBSITE_DEPLOY_TOKEN. Nothing in this workflow writes to this repository.
+permissions:
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -16,26 +31,46 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      # This checkout targets the workspace root and cleans it, so it and the
+      # docs build both precede the website checkout into `_website`. The
+      # website checkout cleans only `_website`, leaving docs/build intact.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: julia-actions/setup-julia@v3
+      - uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3.0.2
         with:
           version: '1'
 
-      - name: Install dependencies
-        run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+      # Caches ~/.julia/artifacts, including PowerIO's lazy native-library
+      # artifact, which the docs build fetches when it loads PowerDiff.
+      - uses: julia-actions/cache@a7bed9df697e5d7309d68afe7542a87621a8b6c8 # v3.3.0
+
+      # `[sources] PowerDiff = {path = ".."}` in docs/Project.toml resolves
+      # PowerDiff to this checkout, so instantiate is the whole install.
+      - name: Instantiate the docs environment
+        run: julia --color=yes --project=docs -e 'using Pkg; Pkg.instantiate()'
 
       - name: Build docs for site
         env:
           SITE_BUILD: "true"
-        run: julia --project=docs/ docs/make.jl
+        run: julia --color=yes --project=docs docs/make.jl
 
-      - name: Clone website repo
-        run: |
-          git clone --depth 1 https://x-access-token:${{ secrets.WEBSITE_DEPLOY_TOKEN }}@github.com/samtalki/samueltalkington.com.git _website
+      # actions/checkout supplies the token as an `http.extraheader` in
+      # _website/.git/config and strips it again in post-job cleanup, so the
+      # token never reaches a command line and does not outlive the job. The
+      # persisted credential is what lets the push step below authenticate.
+      - name: Check out the website repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: samtalki/samueltalkington.com
+          token: ${{ secrets.WEBSITE_DEPLOY_TOKEN }}
+          path: _website
+          fetch-depth: 1
 
       - name: Copy docs to website
         run: |
+          set -euo pipefail
           rm -rf _website/_documenter/powerdiff
           mkdir -p _website/_documenter
           cp -r docs/build _website/_documenter/powerdiff
@@ -44,13 +79,14 @@ jobs:
           cp -r docs/build _website/__site/research/powerdiff
 
       - name: Commit and push
+        working-directory: _website
         run: |
-          cd _website
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add _documenter/powerdiff __site/research/powerdiff
           if git diff --cached --quiet; then
-            echo "No changes to commit"
+            echo "Docs are unchanged; nothing to push"
           else
             git commit -m "Update powerdiff docs (auto-deploy)"
             git push

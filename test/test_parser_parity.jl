@@ -12,9 +12,11 @@ mpc.areas = [1 1];
 mpc.bus_name = ['one'; 'two'];
 """
 
-# `parse_file`/`parse_matpower` return a PowerIO.BalancedNetwork; `_network_data` applies
-# PowerDiff's normalization (per-unit via PowerIO, cost right-align, rate_a fallback,
-# angle defaults, storage/HVDC rejection) into the tables the constructors consume.
+# `parse_file`/`parse_matpower` return a `PowerIO.PioModule{PowerIO.BalancedNetwork}`.
+# `_network_data` reads `PowerIO.to_powerdata` off it -- per unit, radian angles,
+# rescaled costs, a source row number and a status on every row -- selects the
+# elements PowerDiff models, and applies the modeling PowerIO leaves to its consumer
+# (cost interpretation, the rate_a fallback, angle defaults, storage/HVDC refusal).
 _inline_data() = PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(_INLINE_CASE)))
 
 @testset "MATPOWER Parser Semantics" begin
@@ -33,10 +35,14 @@ _inline_data() = PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(_INLI
         # Loads and shunts are aggregated into per-bus values.
         @test data.bus[1].pd == 0.5
         @test data.bus[1].gs == 0.01
-        # Shunts are also re-exposed as a per-bus table (bus 1: Gs=1, Bs=-2 -> 0.01, -0.02 pu).
-        @test length(data.shunt) == 1
-        @test data.shunt[1].shunt_bus == 1
-        @test data.shunt[1].gs ≈ 0.01 && data.shunt[1].bs ≈ -0.02
+        @test data.bus[1].bs ≈ -0.02
+        @test data.bus[2].gs == 0.0 && data.bus[2].bs == 0.0
+        # The series admittance and each terminal's charging admittance come from
+        # PowerIO; `br_r`/`br_x` are carried alongside for the rate_a fallback.
+        @test data.branch[1].g ≈ 0.02 / (0.02^2 + 0.2^2)
+        @test data.branch[1].b ≈ -0.2 / (0.02^2 + 0.2^2)
+        @test data.branch[1].b_fr ≈ 0.005 && data.branch[1].b_to ≈ 0.005
+        @test data.branch[1].g_fr == 0.0 && data.branch[1].g_to == 0.0
         @test data.branch[1].tap == 1.0
         @test data.branch[1].rate_a > 0
         @test data.branch[1].angmin ≈ -π / 3
@@ -46,7 +52,11 @@ _inline_data() = PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(_INLI
 
     @testset "Multiline arrays and artifact path" begin
         parsed = PowerDiff.parse_file("pglib_opf_case14_ieee.m"; library=:pglib)
-        @test parsed isa PowerIO.BalancedNetwork
+        @test parsed isa PowerIO.PioModule{PowerIO.BalancedNetwork}
+        @test parsed.sources[1].format == "matpower"
+        # Reader findings travel with the module as records, not log output.
+        @test parsed.diagnostics isa Vector{PowerIO.Diagnostic}
+        @test !any(d -> d.severity === :error, parsed.diagnostics)
         nd = PowerDiff._network_data(parsed)
         @test length(nd.bus) == 14
         @test length(nd.branch) == 20
@@ -54,28 +64,62 @@ _inline_data() = PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(_INLI
     end
 
     @testset "Rejected inputs" begin
-        @test_throws ArgumentError PowerDiff.parse_file("case.json")
+        # PowerDiff's own refusals: a container token that names no reader, an
+        # unknown keyword, an unknown artifact.
         @test_throws ArgumentError PowerDiff.parse_file(IOBuffer(_INLINE_CASE); filetype="json")
         @test_throws ArgumentError PowerDiff.parse_file(IOBuffer(_INLINE_CASE); unsupported=true)
         @test_throws ArgumentError PowerDiff.get_path(:unknown)
 
-        # Modeling-level rejections happen when the network tables are built.
-        unsupported = replace(_INLINE_CASE, "mpc.areas = [1 1];" => "mpc.storage = [1 1];")
+        # PowerIO's refusals reach the caller as PowerIOError, carrying the code and
+        # the diagnostics that say why. Wrapping them would discard both.
+        missing_file = joinpath(@__DIR__, "no_such_case.m")
+        @test_throws PowerIO.PowerIOError PowerDiff.parse_file(missing_file)
+        err = try
+            PowerDiff.parse_file(missing_file)
+        catch e
+            e
+        end
+        @test err.code == "READ.IO.OPEN"
+
+        # Modeling-level rejections happen when the network tables are built, on a
+        # case PowerIO parses without complaint.
+        storage_row = "mpc.storage = [1 0 0 0 100 50 50 0.9 0.9 100 -50 50 0 0 0 0 1];"
+        unsupported = replace(_INLINE_CASE, "mpc.areas = [1 1];" => storage_row)
         @test_throws ArgumentError PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(unsupported)))
 
         invalid = replace(_INLINE_CASE, "0.01 0.1" => "NaN 0.1")
         @test_throws ArgumentError PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(invalid)))
 
-        pwl = replace(_INLINE_CASE, "2 0 0 3 0.01 2 3" => "1 0 0 3 0.01 2 3")
+        # A well-formed piecewise linear cost: PowerDiff models polynomial costs, and
+        # reads the model off the generator rather than inferring it from the row.
+        pwl = replace(_INLINE_CASE,
+                      "mpc.gencost = [2 0 0 3 0.01 2 3; 2 0 0 3 0.02 3 4];" =>
+                      "mpc.gencost = [1 0 0 3 0 0 50 500 100 1200; 1 0 0 3 0 0 25 300 50 700];")
         @test_throws ArgumentError PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(pwl)))
 
-        quartic = replace(_INLINE_CASE, "2 0 0 3 0.01 2 3" => "2 0 0 4 1 0.01 2 3")
+        quartic = replace(_INLINE_CASE,
+                          "mpc.gencost = [2 0 0 3 0.01 2 3; 2 0 0 3 0.02 3 4];" =>
+                          "mpc.gencost = [2 0 0 4 1 0.01 2 3; 2 0 0 4 1 0.02 3 4];")
         @test_throws ArgumentError PowerDiff._network_data(PowerDiff.parse_matpower(IOBuffer(quartic)))
     end
 
     @testset "Parser contract" begin
-        @test PowerDiff.parse_file(IOBuffer(_INLINE_CASE)) isa PowerIO.BalancedNetwork
+        @test PowerDiff.parse_file(IOBuffer(_INLINE_CASE)) isa PowerIO.PioModule{PowerIO.BalancedNetwork}
         @test_throws ArgumentError PowerDiff.parse_file(IOBuffer(_INLINE_CASE); backend=:native)
+
+        # PowerIO owns the format vocabulary: a token PowerDiff has never named
+        # passes through for PowerIO to resolve or refuse, so a reader PowerIO gains
+        # is reachable without a PowerDiff release. The historical short spellings
+        # still resolve to the tokens they always meant.
+        @test PowerDiff._format_token(:m) == "matpower"
+        @test PowerDiff._format_token(:raw) == "psse"
+        @test PowerDiff._format_token(:pm) == "powermodels-json"
+        @test PowerDiff._format_token(:egret) == "egret-json"
+        for token in (:xiidm, :cgmes, :pandapower, :gridfm, Symbol("pypsa-csv"))
+            @test PowerDiff._format_token(token) == lowercase(String(token))
+        end
+        @test_throws ArgumentError PowerDiff._format_token(:json)
+        @test_throws ArgumentError PowerDiff._format_token("")
     end
 end
 
@@ -100,7 +144,10 @@ function _assert_netdata_equal(a, b, label)
         end
         for (x, y) in zip(a.branch, b.branch)
             @test x.f_bus == y.f_bus && x.t_bus == y.t_bus
-            @test x.br_r ≈ y.br_r && x.br_x ≈ y.br_x && x.br_b ≈ y.br_b
+            @test x.br_r ≈ y.br_r && x.br_x ≈ y.br_x
+            @test x.g ≈ y.g && x.b ≈ y.b
+            @test x.g_fr ≈ y.g_fr && x.b_fr ≈ y.b_fr
+            @test x.g_to ≈ y.g_to && x.b_to ≈ y.b_to
             @test x.rate_a ≈ y.rate_a
             @test x.tap ≈ y.tap && x.shift ≈ y.shift && x.angmin ≈ y.angmin && x.angmax ≈ y.angmax
         end
@@ -110,19 +157,16 @@ end
 @testset "PowerIO parser path and IO parity" begin
     # PowerIO is the only parser/data layer. Path parsing and IO parsing must land on
     # the same PowerDiff network tables after normalization.
-    if !PowerIO.library_available()
-        @info "libpowerio_capi not found (set POWERIO_CAPI to a local build); skipping parser parity"
-        @test_skip false
-    else
-        cases = filter(c -> isfile(joinpath(PD_PGLIB_DIR, c)),
-                       ["pglib_opf_case5_pjm.m", "pglib_opf_case14_ieee.m", "pglib_opf_case30_ieee.m"])
-        @test !isempty(cases)
-        for c in cases
-            path_data = PowerDiff._network_data(PowerDiff.parse_file(c; library=:pglib))
-            io_data = PowerDiff._network_data(
-                PowerDiff.parse_file(IOBuffer(read(joinpath(PD_PGLIB_DIR, c), String))))
-            _assert_netdata_equal(path_data, io_data, c)
-        end
+    # PowerIO resolves libpowerio_capi from a bundled artifact, so this path is
+    # reachable wherever the rest of the suite is.
+    cases = filter(c -> isfile(joinpath(PD_PGLIB_DIR, c)),
+                   ["pglib_opf_case5_pjm.m", "pglib_opf_case14_ieee.m", "pglib_opf_case30_ieee.m"])
+    @test !isempty(cases)
+    for c in cases
+        path_data = PowerDiff._network_data(PowerDiff.parse_file(c; library=:pglib))
+        io_data = PowerDiff._network_data(
+            PowerDiff.parse_file(IOBuffer(read(joinpath(PD_PGLIB_DIR, c), String))))
+        _assert_netdata_equal(path_data, io_data, c)
     end
 end
 
