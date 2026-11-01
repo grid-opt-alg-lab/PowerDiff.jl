@@ -27,7 +27,7 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
-      - uses: MilesCranmer/AirspeedVelocity.jl@af4f71e9a45b8f77a10b9773b07ae8d7c26edfe2 # v0.6.5
+      - uses: MilesCranmer/AirspeedVelocity.jl@7c54cc15734d071fffafb5fb702bd786ec818ad2 # v0.6.6
         with:
           julia-version: '1'
           mode: 'time,memory'
